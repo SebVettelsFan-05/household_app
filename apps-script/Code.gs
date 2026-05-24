@@ -15,7 +15,7 @@ const SHEET_NAME = 'Inventory';
 const HEADERS = ['ID', 'Name', 'Quantity (g)', 'Expiry Date', 'Added', 'Category'];
 
 const CATEGORIES_SHEET = 'Categories';
-const CAT_HEADERS = ['Name'];
+const CAT_HEADERS = ['Name', 'Color'];
 const DEFAULT_CATEGORIES = ['Meat', 'Veggies', 'Other'];
 const FALLBACK_CATEGORY = 'Other';
 
@@ -70,14 +70,18 @@ function mirrorAll_(items, categories) {
     sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
   }
 
-  // Categories sheet: same replace-all approach.
+  // Categories sheet: same replace-all approach. Each entry can be either
+  // a plain name string (legacy) or {name, color}.
   const catSheet = getCategoriesSheet_();
   const catLast = catSheet.getLastRow();
   if (catLast > 1) {
     catSheet.getRange(2, 1, catLast - 1, CAT_HEADERS.length).clearContent();
   }
   if (categories.length > 0) {
-    const rows = categories.map(function (name) { return [name]; });
+    const rows = categories.map(function (c) {
+      if (typeof c === 'string') return [c, ''];
+      return [c.name || '', c.color || ''];
+    });
     catSheet.getRange(2, 1, rows.length, CAT_HEADERS.length).setValues(rows);
   }
   invalidateCategoriesCache_();
@@ -135,8 +139,14 @@ function getCategoriesSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(CATEGORIES_SHEET);
   if (sheet) {
-    const headerVal = sheet.getRange(1, 1).getValue();
-    if (headerVal !== CAT_HEADERS[0]) {
+    // Ensure both headers are present (auto-migrate single-column sheets).
+    const cols = Math.max(sheet.getLastColumn(), CAT_HEADERS.length);
+    const headerRow = sheet.getRange(1, 1, 1, cols).getValues()[0];
+    let needsUpdate = false;
+    for (let i = 0; i < CAT_HEADERS.length; i++) {
+      if (headerRow[i] !== CAT_HEADERS[i]) { needsUpdate = true; break; }
+    }
+    if (needsUpdate) {
       sheet.getRange(1, 1, 1, CAT_HEADERS.length).setValues([CAT_HEADERS]);
       sheet.getRange(1, 1, 1, CAT_HEADERS.length).setFontWeight('bold');
     }
@@ -146,7 +156,7 @@ function getCategoriesSheet_() {
   sheet.getRange(1, 1, 1, CAT_HEADERS.length).setValues([CAT_HEADERS]);
   sheet.setFrozenRows(1);
   sheet.getRange(1, 1, 1, CAT_HEADERS.length).setFontWeight('bold');
-  DEFAULT_CATEGORIES.forEach(function (name) { sheet.appendRow([name]); });
+  DEFAULT_CATEGORIES.forEach(function (name) { sheet.appendRow([name, '']); });
   invalidateCategoriesCache_();
   return sheet;
 }
@@ -157,11 +167,15 @@ function listCategories_() {
   const lastRow = sheet.getLastRow();
   let list = [];
   if (lastRow >= 2) {
-    const vals = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-    list = vals.map(function (r) { return String(r[0] || '').trim(); }).filter(Boolean);
+    const vals = sheet.getRange(2, 1, lastRow - 1, CAT_HEADERS.length).getValues();
+    list = vals
+      .map(function (r) {
+        return { name: String(r[0] || '').trim(), color: String(r[1] || '').trim() };
+      })
+      .filter(function (c) { return c.name; });
   }
-  if (!list.some(function (c) { return c.toLowerCase() === FALLBACK_CATEGORY.toLowerCase(); })) {
-    list.unshift(FALLBACK_CATEGORY);
+  if (!list.some(function (c) { return c.name.toLowerCase() === FALLBACK_CATEGORY.toLowerCase(); })) {
+    list.unshift({ name: FALLBACK_CATEGORY, color: '' });
   }
   _categoriesCache = list;
   return list;

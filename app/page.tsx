@@ -8,7 +8,8 @@ import ItemRow from "@/components/ItemRow";
 import ManageCategoriesModal from "@/components/ManageCategoriesModal";
 import Toast, { type ToastMessage } from "@/components/Toast";
 import { listCategories, listItems } from "@/lib/client";
-import type { Category, FilterCat, Item, SortMode } from "@/lib/types";
+import { buildColorLookup } from "@/lib/categoryColors";
+import type { CategoryDef, FilterCat, Item, SortMode } from "@/lib/types";
 
 const SORT_MODES: SortMode[] = ["newest", "name", "quantity", "expiry"];
 const SORT_LABELS: Record<SortMode, string> = {
@@ -34,7 +35,7 @@ function sortItems(arr: Item[], mode: SortMode): Item[] {
 
 export default function Page() {
   const [items, setItems] = useState<Item[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [categories, setCategories] = useState<CategoryDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("newest");
@@ -67,7 +68,11 @@ export default function Page() {
       })
       .catch(() => {
         if (cancelled) return;
-        setCategories(["Meat", "Veggies", "Other"]);
+        setCategories([
+          { name: "Meat", color: null },
+          { name: "Veggies", color: null },
+          { name: "Other", color: null },
+        ]);
       });
     return () => {
       cancelled = true;
@@ -95,11 +100,13 @@ export default function Page() {
     if (
       filterCat !== "all" &&
       categories.length > 0 &&
-      !categories.includes(filterCat)
+      !categories.some((c) => c.name === filterCat)
     ) {
       setFilterCat("all");
     }
   }, [categories, filterCat]);
+
+  const colorFor = useMemo(() => buildColorLookup(categories), [categories]);
 
   const total = filtered.reduce((s, i) => s + (i.quantity || 0), 0);
   const totalDisplay =
@@ -191,7 +198,12 @@ export default function Page() {
       ) : (
         <div className="items">
           {sorted.map((it) => (
-            <ItemRow key={it.id} item={it} onClick={setEditingId} />
+            <ItemRow
+              key={it.id}
+              item={it}
+              color={colorFor(it.category)}
+              onClick={setEditingId}
+            />
           ))}
         </div>
       )}

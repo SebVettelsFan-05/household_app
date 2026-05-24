@@ -1,10 +1,10 @@
 "use client";
 
 import { getCategoryColor } from "@/lib/categoryColors";
-import type { Category, FilterCat } from "@/lib/types";
+import type { CategoryDef, FilterCat } from "@/lib/types";
 
 type Props = {
-  categories: Category[];
+  categories: CategoryDef[];
   value: FilterCat;
   onChange: (f: FilterCat) => void;
 };
@@ -20,18 +20,18 @@ export default function FilterRow({ categories, value, onChange }: Props) {
         All
       </button>
       {categories.map((c) => {
-        const { color } = getCategoryColor(c);
-        const active = value === c;
+        const { color } = getCategoryColor(c.name, c.color);
+        const active = value === c.name;
         return (
           <button
-            key={c}
+            key={c.name}
             type="button"
             className={`filter-pill${active ? " active" : ""}`}
-            onClick={() => onChange(c)}
+            onClick={() => onChange(c.name)}
             style={!active ? { color } : undefined}
           >
             <span className="dot-cat" />
-            {c}
+            {c.name}
           </button>
         );
       })}

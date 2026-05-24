@@ -20,6 +20,8 @@ export const items = pgTable("items", {
 
 export const categories = pgTable("categories", {
   name: text("name").primaryKey(),
+  // Nullable: null means "use the auto-assigned palette color".
+  color: text("color"),
 });
 
 export type ItemRow = typeof items.$inferSelect;

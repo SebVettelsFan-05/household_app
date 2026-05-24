@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { categories as categoriesTable, items as itemsTable } from "@/db/schema";
-import type { Item } from "./types";
+import type { CategoryDef, Item } from "./types";
 import {
   DEFAULT_CATEGORIES,
   FALLBACK_CATEGORY,
@@ -21,6 +21,10 @@ function rowToItem(r: typeof itemsTable.$inferSelect): Item {
   };
 }
 
+function rowToCategory(r: typeof categoriesTable.$inferSelect): CategoryDef {
+  return { name: r.name, color: r.color ?? null };
+}
+
 /* ---------- Categories ---------- */
 
 export async function ensureDefaultCategories(): Promise<void> {
@@ -30,46 +34,73 @@ export async function ensureDefaultCategories(): Promise<void> {
     .onConflictDoNothing();
 }
 
-export async function listCategoriesRepo(): Promise<string[]> {
+export async function listCategoriesRepo(): Promise<CategoryDef[]> {
   const rows = await db.select().from(categoriesTable);
   if (rows.length === 0) {
     await ensureDefaultCategories();
-    return DEFAULT_CATEGORIES.slice();
+    return DEFAULT_CATEGORIES.map((name) => ({ name, color: null }));
   }
-  const names = rows.map((r) => r.name);
-  // Defensive: ensure fallback is always offered
-  if (!names.some((n) => n.toLowerCase() === FALLBACK_CATEGORY.toLowerCase())) {
-    names.unshift(FALLBACK_CATEGORY);
+  const list = rows.map(rowToCategory);
+  // Defensive: ensure fallback is always offered, even if someone deleted it
+  // directly in the DB.
+  if (!list.some((c) => c.name.toLowerCase() === FALLBACK_CATEGORY.toLowerCase())) {
+    list.unshift({ name: FALLBACK_CATEGORY, color: null });
   }
-  return names;
+  return list;
+}
+
+function validateColor(color: string | undefined | null): string | null {
+  if (color === undefined || color === null || color === "") return null;
+  if (!/^#[0-9a-f]{6}$/i.test(color)) {
+    throw new Error("Color must be a 6-digit hex like #RRGGBB");
+  }
+  return color.toLowerCase();
 }
 
 export async function addCategoryRepo(
-  name: string
-): Promise<{ categories: string[]; existed: boolean }> {
+  name: string,
+  color?: string | null
+): Promise<{ categories: CategoryDef[]; existed: boolean }> {
   const trimmed = String(name ?? "").trim();
   if (!trimmed) throw new Error("Name required");
   if (trimmed.length > 32) throw new Error("Name is too long");
+  const validatedColor = validateColor(color);
 
   const existing = await listCategoriesRepo();
-  if (existing.some((e) => e.toLowerCase() === trimmed.toLowerCase())) {
+  if (existing.some((e) => e.name.toLowerCase() === trimmed.toLowerCase())) {
     return { categories: existing, existed: true };
   }
-  await db.insert(categoriesTable).values({ name: trimmed }).onConflictDoNothing();
+  await db
+    .insert(categoriesTable)
+    .values({ name: trimmed, color: validatedColor })
+    .onConflictDoNothing();
   const categories = await listCategoriesRepo();
   return { categories, existed: false };
 }
 
+export async function updateCategoryColorRepo(
+  name: string,
+  color: string | null
+): Promise<CategoryDef[]> {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) throw new Error("Name required");
+  const validatedColor = validateColor(color);
+  await db
+    .update(categoriesTable)
+    .set({ color: validatedColor })
+    .where(eq(categoriesTable.name, trimmed));
+  return listCategoriesRepo();
+}
+
 export async function deleteCategoryRepo(
   name: string
-): Promise<{ categories: string[]; items: Item[]; reassigned: number }> {
+): Promise<{ categories: CategoryDef[]; items: Item[]; reassigned: number }> {
   const trimmed = String(name ?? "").trim();
   if (!trimmed) throw new Error("Name required");
   if (trimmed.toLowerCase() === FALLBACK_CATEGORY.toLowerCase()) {
     throw new Error(`Cannot delete the fallback category "${FALLBACK_CATEGORY}"`);
   }
 
-  // Reassign any items using this category to the fallback.
   const allItems = await db.select().from(itemsTable);
   const affected = allItems.filter(
     (i) => i.category.toLowerCase() === trimmed.toLowerCase()
@@ -119,17 +150,15 @@ export async function addItemRepo(
   const qty = Number(input.quantity);
   if (!qty || qty <= 0) throw new Error("Quantity must be greater than zero");
 
-  const validCats = await listCategoriesRepo();
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const category = pickCategory(input.category, validCats);
   const expiry = input.expiry ? input.expiry : null;
 
-  // Smart merge — find by normalized name.
   const all = await db.select().from(itemsTable);
   const normNew = normalizeName(trimmedName);
   const existing = all.find((it) => normalizeName(it.name) === normNew);
 
   if (existing) {
-    // Pick the earlier expiry (so reminders fire on the oldest stock).
     let mergedExpiry: string | null = existing.expiry;
     if (expiry) {
       if (!existing.expiry || expiry < existing.expiry) {
@@ -169,7 +198,7 @@ export async function updateItemRepo(input: UpdateItemInput): Promise<Item[]> {
   if (!trimmedName) throw new Error("Name required");
   const qty = Number(input.quantity);
 
-  const validCats = await listCategoriesRepo();
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const category = pickCategory(input.category, validCats);
 
   await db

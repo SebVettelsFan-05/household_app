@@ -1,15 +1,23 @@
 "use client";
 
 import { KeyboardEvent, useState } from "react";
-import { addCategory, deleteCategory } from "@/lib/client";
+import {
+  addCategory,
+  deleteCategory,
+  updateCategoryColor,
+} from "@/lib/client";
 import { getCategoryColor } from "@/lib/categoryColors";
-import { FALLBACK_CATEGORY, type Category, type Item } from "@/lib/types";
+import {
+  FALLBACK_CATEGORY,
+  type CategoryDef,
+  type Item,
+} from "@/lib/types";
 
 type Props = {
-  categories: Category[];
+  categories: CategoryDef[];
   items: Item[];
   onClose: () => void;
-  onCategoriesChange: (categories: Category[]) => void;
+  onCategoriesChange: (categories: CategoryDef[]) => void;
   onItemsChange: (items: Item[]) => void;
   onToast: (msg: string) => void;
   onError: (msg: string) => void;
@@ -25,6 +33,7 @@ export default function ManageCategoriesModal({
   onError,
 }: Props) {
   const [newName, setNewName] = useState("");
+  const [newColor, setNewColor] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
   async function add() {
@@ -39,9 +48,10 @@ export default function ManageCategoriesModal({
     }
     setBusy(true);
     try {
-      const res = await addCategory(trimmed);
+      const res = await addCategory(trimmed, newColor || null);
       onCategoriesChange(res.categories);
       setNewName("");
+      setNewColor("");
       onToast(res.existed ? `"${trimmed}" already exists` : `Added "${trimmed}"`);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -73,9 +83,40 @@ export default function ManageCategoriesModal({
     }
   }
 
+  async function changeColor(name: string, hex: string) {
+    setBusy(true);
+    try {
+      const res = await updateCategoryColor(name, hex);
+      onCategoriesChange(res.categories);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetColor(name: string) {
+    setBusy(true);
+    try {
+      const res = await updateCategoryColor(name, null);
+      onCategoriesChange(res.categories);
+      onToast(`Reset "${name}" to default color`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function onEnter(e: KeyboardEvent) {
     if (e.key === "Enter") add();
   }
+
+  // Resolve a color for the "new category" preview swatch — falls back to a
+  // neutral grey when no name/color is chosen yet.
+  const newSwatch =
+    newColor ||
+    (newName.trim() ? getCategoryColor(newName.trim()).color : "#8B8278");
 
   return (
     <div
@@ -88,24 +129,51 @@ export default function ManageCategoriesModal({
         <h2>Categories</h2>
         <div className="cat-mgr-list">
           {categories.map((c) => {
-            const { color } = getCategoryColor(c);
-            const inUse = items.filter((i) => i.category === c).length;
-            const protectedCat = c === FALLBACK_CATEGORY;
+            const resolved = getCategoryColor(c.name, c.color);
+            const inUse = items.filter((i) => i.category === c.name).length;
+            const protectedCat = c.name === FALLBACK_CATEGORY;
+            const swatchValue = c.color || resolved.color;
+            const inputId = `color-${c.name}`;
             return (
-              <div className="cat-mgr-row" key={c}>
-                <span className="cat-mgr-name" style={{ color }}>
-                  {c}
+              <div className="cat-mgr-row" key={c.name}>
+                <label
+                  htmlFor={inputId}
+                  className="cat-swatch"
+                  style={{ background: swatchValue }}
+                  title="Click to change color"
+                />
+                <input
+                  id={inputId}
+                  type="color"
+                  className="cat-color-input"
+                  value={swatchValue}
+                  disabled={busy}
+                  onChange={(e) => changeColor(c.name, e.target.value)}
+                />
+                <span className="cat-mgr-name" style={{ color: resolved.color }}>
+                  {c.name}
                 </span>
                 <span className="cat-mgr-meta">
                   {inUse} item{inUse === 1 ? "" : "s"}
                 </span>
+                {c.color ? (
+                  <button
+                    type="button"
+                    className="cat-mgr-link"
+                    onClick={() => resetColor(c.name)}
+                    disabled={busy}
+                    title="Reset to default palette color"
+                  >
+                    Reset
+                  </button>
+                ) : null}
                 {protectedCat ? (
                   <span className="cat-mgr-protected">default</span>
                 ) : (
                   <button
                     type="button"
                     className="btn-danger"
-                    onClick={() => remove(c)}
+                    onClick={() => remove(c.name)}
                     disabled={busy}
                   >
                     Remove
@@ -118,7 +186,21 @@ export default function ManageCategoriesModal({
 
         <div className="field">
           <label htmlFor="new-cat">New category</label>
-          <div className="use-row">
+          <div className="new-cat-row">
+            <label
+              htmlFor="new-cat-color"
+              className="cat-swatch"
+              style={{ background: newSwatch }}
+              title="Pick a color"
+            />
+            <input
+              id="new-cat-color"
+              type="color"
+              className="cat-color-input"
+              value={newColor || newSwatch}
+              onChange={(e) => setNewColor(e.target.value)}
+              disabled={busy}
+            />
             <input
               id="new-cat"
               type="text"
@@ -127,6 +209,7 @@ export default function ManageCategoriesModal({
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={onEnter}
               maxLength={32}
+              disabled={busy}
             />
             <button
               type="button"

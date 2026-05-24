@@ -1,18 +1,18 @@
 "use client";
 
-import { getCategoryColor } from "@/lib/categoryColors";
+import type { CategoryColor } from "@/lib/categoryColors";
 import type { Item } from "@/lib/types";
 import { expiryStatus, fmtQty } from "@/lib/format";
 
 type Props = {
   item: Item;
+  color: CategoryColor;
   onClick: (id: string) => void;
 };
 
-export default function ItemRow({ item, onClick }: Props) {
+export default function ItemRow({ item, color, onClick }: Props) {
   const exp = expiryStatus(item.expiry);
   const qty = fmtQty(item.quantity);
-  const { color } = getCategoryColor(item.category);
 
   return (
     <button
@@ -23,7 +23,7 @@ export default function ItemRow({ item, onClick }: Props) {
       <div className="item-main">
         <div className="item-name">{item.name}</div>
         <div className="item-meta">
-          <span className="cat-tag" style={{ color }}>
+          <span className="cat-tag" style={{ color: color.color }}>
             {item.category}
           </span>
           {item.added ? (

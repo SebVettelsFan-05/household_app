@@ -2,11 +2,16 @@
 
 import { KeyboardEvent, useEffect, useState } from "react";
 import { addItem } from "@/lib/client";
-import { FALLBACK_CATEGORY, type Category, type Item } from "@/lib/types";
+import {
+  FALLBACK_CATEGORY,
+  type Category,
+  type CategoryDef,
+  type Item,
+} from "@/lib/types";
 import CategoryPills from "./CategoryPills";
 
 type Props = {
-  categories: Category[];
+  categories: CategoryDef[];
   onResult: (items: Item[], toast: string) => void;
   onError: (message: string) => void;
   onManageCategories: () => void;
@@ -27,12 +32,9 @@ export default function AddItemForm({
   // If the currently selected category disappears (deleted in manage modal),
   // fall back to Other so we never submit a phantom category.
   useEffect(() => {
-    if (categories.length > 0 && !categories.includes(cat)) {
-      setCat(
-        categories.includes(FALLBACK_CATEGORY)
-          ? FALLBACK_CATEGORY
-          : categories[0]
-      );
+    if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
+      const hasFallback = categories.some((c) => c.name === FALLBACK_CATEGORY);
+      setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
     }
   }, [categories, cat]);
 

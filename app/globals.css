@@ -271,6 +271,40 @@ button:active { transform: scale(0.98); }
   font-size: 11px; color: var(--ink-soft);
   font-style: italic;
 }
+.cat-mgr-link {
+  background: none; border: none; color: var(--ink-soft);
+  font-size: 12px; font-weight: 500; padding: 4px 8px;
+  border-radius: 6px; font-family: inherit; cursor: pointer;
+}
+.cat-mgr-link:hover { background: var(--surface-soft); color: var(--ink); }
+
+/* Color swatch button — the visible "click to pick" target. */
+.cat-swatch {
+  width: 22px; height: 22px;
+  border-radius: 6px; border: 1px solid var(--line);
+  cursor: pointer; flex-shrink: 0;
+  box-shadow: inset 0 0 0 2px var(--surface);
+  transition: transform 0.05s, box-shadow 0.15s;
+}
+.cat-swatch:hover { box-shadow: inset 0 0 0 1px var(--surface), 0 0 0 2px var(--accent-soft); }
+.cat-swatch:active { transform: scale(0.95); }
+
+/* The native <input type="color"> is hidden but still functional — we use the
+   sibling <label> swatch as the visible target. */
+.cat-color-input {
+  position: absolute; opacity: 0; pointer-events: none;
+  width: 0; height: 0; padding: 0; margin: 0; border: 0;
+}
+
+.new-cat-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.new-cat-row input[type="text"] {
+  flex: 1; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px;
+  font-family: inherit; font-size: 15px; color: var(--ink);
+}
+.new-cat-row .btn-accent { padding: 10px 16px; }
 
 .use-row {
   display: grid; grid-template-columns: 1fr auto;

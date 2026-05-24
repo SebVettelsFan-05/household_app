@@ -2,12 +2,13 @@ import type {
   AddCategoryResponse,
   AddResponse,
   ApiResponse,
-  Category,
+  CategoryDef,
   DeleteCategoryResponse,
   Item,
   ListCategoriesResponse,
   ListResponse,
   MutateResponse,
+  UpdateCategoryResponse,
 } from "./types";
 
 async function parse<T>(res: Response): Promise<ApiResponse<T>> {
@@ -76,18 +77,27 @@ export async function deleteItem(id: string) {
 
 /* ----- categories ----- */
 
-export async function listCategories(): Promise<Category[]> {
+export async function listCategories(): Promise<CategoryDef[]> {
   const res = await fetch("/api/categories", { cache: "no-store" });
   return unwrap(await parse<ListCategoriesResponse>(res)).categories;
 }
 
-export async function addCategory(name: string) {
+export async function addCategory(name: string, color?: string | null) {
   const res = await fetch("/api/categories", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, color: color ?? null }),
   });
   return unwrap(await parse<AddCategoryResponse>(res));
+}
+
+export async function updateCategoryColor(name: string, color: string | null) {
+  const res = await fetch("/api/categories", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, color }),
+  });
+  return unwrap(await parse<UpdateCategoryResponse>(res));
 }
 
 export async function deleteCategory(name: string) {

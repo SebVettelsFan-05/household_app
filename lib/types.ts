@@ -2,6 +2,11 @@ export type Category = string;
 
 export const FALLBACK_CATEGORY: Category = "Other";
 
+export type CategoryDef = {
+  name: Category;
+  color: string | null;
+};
+
 export type Item = {
   id: string;
   name: string;
@@ -27,13 +32,14 @@ export type AddResponse = ApiOk<{
 }>;
 export type MutateResponse = ApiOk<{ items: Item[] }>;
 
-export type ListCategoriesResponse = ApiOk<{ categories: Category[] }>;
+export type ListCategoriesResponse = ApiOk<{ categories: CategoryDef[] }>;
 export type AddCategoryResponse = ApiOk<{
-  categories: Category[];
+  categories: CategoryDef[];
   existed?: boolean;
 }>;
+export type UpdateCategoryResponse = ApiOk<{ categories: CategoryDef[] }>;
 export type DeleteCategoryResponse = ApiOk<{
-  categories: Category[];
+  categories: CategoryDef[];
   items: Item[];
   reassigned: number;
 }>;

@@ -23,6 +23,9 @@ async function ensureTables() {
       name TEXT PRIMARY KEY
     )
   `);
+  await db.execute(sql`
+    ALTER TABLE categories ADD COLUMN IF NOT EXISTS color TEXT
+  `);
 }
 
 /**

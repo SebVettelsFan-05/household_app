@@ -2,12 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { deleteItem, updateItem } from "@/lib/client";
-import { FALLBACK_CATEGORY, type Category, type Item } from "@/lib/types";
+import {
+  FALLBACK_CATEGORY,
+  type Category,
+  type CategoryDef,
+  type Item,
+} from "@/lib/types";
 import CategoryPills from "./CategoryPills";
 
 type Props = {
   item: Item;
-  categories: Category[];
+  categories: CategoryDef[];
   onClose: () => void;
   onResult: (items: Item[], toast: string) => void;
   onError: (message: string) => void;
@@ -38,12 +43,9 @@ export default function EditModal({
   }, [onClose]);
 
   useEffect(() => {
-    if (categories.length > 0 && !categories.includes(cat)) {
-      setCat(
-        categories.includes(FALLBACK_CATEGORY)
-          ? FALLBACK_CATEGORY
-          : categories[0]
-      );
+    if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
+      const hasFallback = categories.some((c) => c.name === FALLBACK_CATEGORY);
+      setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
     }
   }, [categories, cat]);
 
