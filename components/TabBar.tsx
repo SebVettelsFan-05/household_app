@@ -1,6 +1,6 @@
 "use client";
 
-export type Tab = "fridge" | "grocery";
+export type Tab = "fridge" | "grocery" | "recipes";
 
 type Props = {
   value: Tab;
@@ -31,6 +31,15 @@ export default function TabBar({ value, onChange, groceryCount = 0 }: Props) {
         {groceryCount > 0 ? (
           <span className="tab-badge">{groceryCount}</span>
         ) : null}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === "recipes"}
+        className={`tab${value === "recipes" ? " active" : ""}`}
+        onClick={() => onChange("recipes")}
+      >
+        Recipes
       </button>
     </nav>
   );

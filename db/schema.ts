@@ -2,11 +2,18 @@ import {
   boolean,
   date,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+
+export type IngredientJson = {
+  name: string;
+  quantity: number;
+  category: string;
+};
 
 export const items = pgTable("items", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -38,8 +45,38 @@ export const groceryItems = pgTable("grocery_items", {
   added: timestamp("added", { withTimezone: false }).notNull().defaultNow(),
 });
 
+export const recipes = pgTable("recipes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // Sunday of the week this recipe belongs to (yyyy-mm-dd).
+  weekStart: date("week_start").notNull(),
+  // 0 = Sunday, 1 = Monday, … 4 = Thursday. (No Fri/Sat — household doesn't cook.)
+  day: integer("day").notNull(),
+  assignedTo: text("assigned_to").notNull(),
+  name: text("name").notNull(),
+  link: text("link"),
+  description: text("description"),
+  ingredients: jsonb("ingredients").$type<IngredientJson[]>().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: false })
+    .notNull()
+    .defaultNow(),
+});
+
+export const favoriteRecipes = pgTable("favorite_recipes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  link: text("link"),
+  description: text("description"),
+  ingredients: jsonb("ingredients").$type<IngredientJson[]>().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: false })
+    .notNull()
+    .defaultNow(),
+});
+
 export type ItemRow = typeof items.$inferSelect;
 export type NewItemRow = typeof items.$inferInsert;
 export type CategoryRow = typeof categories.$inferSelect;
 export type GroceryRow = typeof groceryItems.$inferSelect;
 export type NewGroceryRow = typeof groceryItems.$inferInsert;
+export type RecipeRow = typeof recipes.$inferSelect;
+export type NewRecipeRow = typeof recipes.$inferInsert;
+export type FavoriteRow = typeof favoriteRecipes.$inferSelect;

@@ -4,13 +4,20 @@ import type {
   ApiResponse,
   CategoryDef,
   DeleteCategoryResponse,
+  FavoriteRecipe,
+  FavoritesMutateResponse,
   GroceryItem,
   GroceryMutateResponse,
   Item,
   ListCategoriesResponse,
+  ListFavoritesResponse,
   ListGroceryResponse,
+  ListRecipesResponse,
   ListResponse,
   MutateResponse,
+  Recipe,
+  RecipeIngredient,
+  RecipeMutateResponse,
   UpdateCategoryResponse,
 } from "./types";
 
@@ -164,4 +171,93 @@ export async function deleteGrocery(id: string) {
 export async function clearGrocery() {
   const res = await fetch("/api/grocery/clear", { method: "POST" });
   return unwrap(await parse<GroceryMutateResponse>(res));
+}
+
+export type BulkGroceryInput = {
+  items: Array<{
+    name: string;
+    quantity: number;
+    category?: string;
+    store?: string;
+    addedBy: string;
+  }>;
+};
+
+export async function bulkAddGrocery(input: BulkGroceryInput) {
+  const res = await fetch("/api/grocery/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<GroceryMutateResponse>(res));
+}
+
+/* ----- recipes ----- */
+
+export async function listRecipes(): Promise<Recipe[]> {
+  const res = await fetch("/api/recipes", { cache: "no-store" });
+  return unwrap(await parse<ListRecipesResponse>(res)).recipes;
+}
+
+export type AddRecipeInput = {
+  weekStart: string;
+  day: number;
+  assignedTo: string;
+  name: string;
+  link?: string;
+  description?: string;
+  ingredients: RecipeIngredient[];
+};
+
+export async function addRecipe(input: AddRecipeInput) {
+  const res = await fetch("/api/recipes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<RecipeMutateResponse>(res));
+}
+
+export async function updateRecipe(id: string, input: Partial<AddRecipeInput>) {
+  const res = await fetch(`/api/recipes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<RecipeMutateResponse>(res));
+}
+
+export async function deleteRecipe(id: string) {
+  const res = await fetch(`/api/recipes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  return unwrap(await parse<RecipeMutateResponse>(res));
+}
+
+/* ----- favorites ----- */
+
+export async function listFavorites(): Promise<FavoriteRecipe[]> {
+  const res = await fetch("/api/favorites", { cache: "no-store" });
+  return unwrap(await parse<ListFavoritesResponse>(res)).favorites;
+}
+
+export async function addFavorite(input: {
+  name: string;
+  link?: string;
+  description?: string;
+  ingredients: RecipeIngredient[];
+}) {
+  const res = await fetch("/api/favorites", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<FavoritesMutateResponse>(res));
+}
+
+export async function deleteFavorite(id: string) {
+  const res = await fetch(`/api/favorites/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  return unwrap(await parse<FavoritesMutateResponse>(res));
 }

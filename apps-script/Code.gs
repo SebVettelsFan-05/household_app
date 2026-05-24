@@ -22,6 +22,13 @@ const FALLBACK_CATEGORY = 'Other';
 const GROCERY_SHEET = 'Grocery List';
 const GROCERY_HEADERS = ['ID', 'Name', 'Quantity (g)', 'Category', 'Store', 'Added by', 'Done', 'Added'];
 
+const RECIPES_SHEET = 'Recipes';
+const RECIPES_HEADERS = ['ID', 'Week start', 'Day', 'Day name', 'Assigned to', 'Name', 'Link', 'Description', 'Ingredients'];
+const DAY_NAMES_GS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const FAVORITES_SHEET = 'Favorite Recipes';
+const FAVORITES_HEADERS = ['ID', 'Name', 'Link', 'Description', 'Ingredients'];
+
 let _categoriesCache = null;
 function invalidateCategoriesCache_() { _categoriesCache = null; }
 
@@ -43,7 +50,13 @@ function doPost(e) {
   const action = body.action || '';
   try {
     if (action === 'mirror') {
-      mirrorAll_(body.items || [], body.categories || [], body.grocery || []);
+      mirrorAll_(
+        body.items || [],
+        body.categories || [],
+        body.grocery || [],
+        body.recipes || [],
+        body.favorites || []
+      );
       return jsonOut_({ ok: true });
     }
     return jsonOut_({ ok: false, error: 'Unknown POST action: ' + action });
@@ -52,7 +65,7 @@ function doPost(e) {
   }
 }
 
-function mirrorAll_(items, categories, grocery) {
+function mirrorAll_(items, categories, grocery, recipes, favorites) {
   // Inventory sheet: drop all data rows, write the snapshot rows.
   const sheet = getSheet_();
   const lastRow = sheet.getLastRow();
@@ -112,6 +125,111 @@ function mirrorAll_(items, categories, grocery) {
       groSheet.getRange(2, 1, rows.length, GROCERY_HEADERS.length).setValues(rows);
     }
   }
+
+  // Recipes sheet.
+  if (Array.isArray(recipes)) {
+    const recSheet = getRecipesSheet_();
+    const recLast = recSheet.getLastRow();
+    if (recLast > 1) {
+      recSheet.getRange(2, 1, recLast - 1, RECIPES_HEADERS.length).clearContent();
+    }
+    if (recipes.length > 0) {
+      const rows = recipes.map(function (r) {
+        return [
+          r.id || '',
+          r.weekStart || '',
+          typeof r.day === 'number' ? r.day : '',
+          typeof r.day === 'number' && DAY_NAMES_GS[r.day] ? DAY_NAMES_GS[r.day] : '',
+          r.assignedTo || '',
+          r.name || '',
+          r.link || '',
+          r.description || '',
+          formatIngredients_(r.ingredients),
+        ];
+      });
+      recSheet.getRange(2, 1, rows.length, RECIPES_HEADERS.length).setValues(rows);
+    }
+  }
+
+  // Favorites sheet.
+  if (Array.isArray(favorites)) {
+    const favSheet = getFavoritesSheet_();
+    const favLast = favSheet.getLastRow();
+    if (favLast > 1) {
+      favSheet.getRange(2, 1, favLast - 1, FAVORITES_HEADERS.length).clearContent();
+    }
+    if (favorites.length > 0) {
+      const rows = favorites.map(function (f) {
+        return [
+          f.id || '',
+          f.name || '',
+          f.link || '',
+          f.description || '',
+          formatIngredients_(f.ingredients),
+        ];
+      });
+      favSheet.getRange(2, 1, rows.length, FAVORITES_HEADERS.length).setValues(rows);
+    }
+  }
+}
+
+function formatIngredients_(list) {
+  if (!Array.isArray(list)) return '';
+  return list
+    .map(function (i) {
+      if (!i || !i.name) return '';
+      var qty = Number(i.quantity) || 0;
+      var unit = qty >= 1000 ? (qty / 1000) + 'kg' : qty + 'g';
+      return i.name + ' (' + unit + ')';
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
+function getRecipesSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(RECIPES_SHEET);
+  if (sheet) {
+    const cols = Math.max(sheet.getLastColumn(), RECIPES_HEADERS.length);
+    const headerRow = sheet.getRange(1, 1, 1, cols).getValues()[0];
+    let needsUpdate = false;
+    for (let i = 0; i < RECIPES_HEADERS.length; i++) {
+      if (headerRow[i] !== RECIPES_HEADERS[i]) { needsUpdate = true; break; }
+    }
+    if (needsUpdate) {
+      sheet.getRange(1, 1, 1, RECIPES_HEADERS.length).setValues([RECIPES_HEADERS]);
+      sheet.getRange(1, 1, 1, RECIPES_HEADERS.length).setFontWeight('bold');
+    }
+    return sheet;
+  }
+  sheet = ss.insertSheet(RECIPES_SHEET);
+  sheet.getRange(1, 1, 1, RECIPES_HEADERS.length).setValues([RECIPES_HEADERS]);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, RECIPES_HEADERS.length).setFontWeight('bold');
+  return sheet;
+}
+
+function getFavoritesSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(FAVORITES_SHEET);
+  if (sheet) {
+    const cols = Math.max(sheet.getLastColumn(), FAVORITES_HEADERS.length);
+    const headerRow = sheet.getRange(1, 1, 1, cols).getValues()[0];
+    let needsUpdate = false;
+    for (let i = 0; i < FAVORITES_HEADERS.length; i++) {
+      if (headerRow[i] !== FAVORITES_HEADERS[i]) { needsUpdate = true; break; }
+    }
+    if (needsUpdate) {
+      sheet.getRange(1, 1, 1, FAVORITES_HEADERS.length).setValues([FAVORITES_HEADERS]);
+      sheet.getRange(1, 1, 1, FAVORITES_HEADERS.length).setFontWeight('bold');
+    }
+    return sheet;
+  }
+  sheet = ss.insertSheet(FAVORITES_SHEET);
+  sheet.getRange(1, 1, 1, FAVORITES_HEADERS.length).setValues([FAVORITES_HEADERS]);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, FAVORITES_HEADERS.length).setFontWeight('bold');
+  return sheet;
 }
 
 /* ---------- doGet: legacy read API (used by /api/seed) ---------- */

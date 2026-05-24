@@ -1,11 +1,21 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   categories as categoriesTable,
+  favoriteRecipes as favoritesTable,
   groceryItems as groceryTable,
   items as itemsTable,
+  recipes as recipesTable,
 } from "@/db/schema";
-import type { CategoryDef, GroceryItem, Item } from "./types";
+import { thisWeekStart, nextWeekStart } from "./dates";
+import type {
+  CategoryDef,
+  FavoriteRecipe,
+  GroceryItem,
+  Item,
+  Recipe,
+  RecipeIngredient,
+} from "./types";
 import {
   DEFAULT_CATEGORIES,
   FALLBACK_CATEGORY,
@@ -333,4 +343,221 @@ export async function deleteGroceryRepo(id: string): Promise<GroceryItem[]> {
 export async function clearGroceryRepo(): Promise<GroceryItem[]> {
   await db.delete(groceryTable);
   return [];
+}
+
+export async function bulkAddGroceryRepo(
+  inputs: Array<{
+    name: string;
+    quantity: number;
+    category?: string;
+    store?: string;
+    addedBy: string;
+  }>
+): Promise<GroceryItem[]> {
+  if (inputs.length === 0) return listGroceryRepo();
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
+  const rows = inputs.map((input) => {
+    const name = String(input.name ?? "").trim();
+    const qty = Number(input.quantity);
+    const addedBy = String(input.addedBy ?? "").trim();
+    if (!name) throw new Error("Each ingredient needs a name");
+    if (!qty || qty <= 0)
+      throw new Error(`Quantity for "${name}" must be > 0`);
+    if (!addedBy) throw new Error("Added by required");
+    return {
+      name,
+      quantity: qty,
+      category: pickCategory(input.category, validCats),
+      store: input.store ? String(input.store).trim() || null : null,
+      addedBy,
+    };
+  });
+  await db.insert(groceryTable).values(rows);
+  return listGroceryRepo();
+}
+
+/* ---------- Recipes ---------- */
+
+function sanitizeIngredients(
+  raw: unknown,
+  validCats: string[]
+): RecipeIngredient[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RecipeIngredient[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const name = String(o.name ?? "").trim();
+    const qty = Number(o.quantity);
+    if (!name) continue;
+    if (!qty || qty <= 0) continue;
+    out.push({
+      name,
+      quantity: qty,
+      category: pickCategory(
+        typeof o.category === "string" ? o.category : undefined,
+        validCats
+      ),
+    });
+  }
+  return out;
+}
+
+function rowToRecipe(r: typeof recipesTable.$inferSelect): Recipe {
+  return {
+    id: r.id,
+    weekStart: r.weekStart,
+    day: r.day,
+    assignedTo: r.assignedTo,
+    name: r.name,
+    link: r.link || "",
+    description: r.description || "",
+    ingredients: Array.isArray(r.ingredients) ? r.ingredients : [],
+  };
+}
+
+function rowToFavorite(r: typeof favoritesTable.$inferSelect): FavoriteRecipe {
+  return {
+    id: r.id,
+    name: r.name,
+    link: r.link || "",
+    description: r.description || "",
+    ingredients: Array.isArray(r.ingredients) ? r.ingredients : [],
+  };
+}
+
+export async function listRecipesRepo(): Promise<Recipe[]> {
+  const weeks = [thisWeekStart(), nextWeekStart()];
+  const rows = await db
+    .select()
+    .from(recipesTable)
+    .where(inArray(recipesTable.weekStart, weeks));
+  return rows.map(rowToRecipe);
+}
+
+export type AddRecipeInput = {
+  weekStart: string;
+  day: number;
+  assignedTo: string;
+  name: string;
+  link?: string;
+  description?: string;
+  ingredients?: unknown;
+};
+
+function validateRecipeBase(input: AddRecipeInput) {
+  const name = String(input.name ?? "").trim();
+  if (!name) throw new Error("Recipe name required");
+  const assignedTo = String(input.assignedTo ?? "").trim();
+  if (!assignedTo) throw new Error("Assigned cook required");
+  if (typeof input.day !== "number" || input.day < 0 || input.day > 4) {
+    throw new Error("Day must be Sunday through Thursday (0–4)");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.weekStart))) {
+    throw new Error("weekStart must be YYYY-MM-DD");
+  }
+  return { name, assignedTo };
+}
+
+export async function addRecipeRepo(
+  input: AddRecipeInput
+): Promise<Recipe[]> {
+  const { name, assignedTo } = validateRecipeBase(input);
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
+  await db.insert(recipesTable).values({
+    weekStart: input.weekStart,
+    day: input.day,
+    assignedTo,
+    name,
+    link: input.link ? String(input.link).trim() || null : null,
+    description: input.description
+      ? String(input.description).trim() || null
+      : null,
+    ingredients: sanitizeIngredients(input.ingredients, validCats),
+  });
+  return listRecipesRepo();
+}
+
+export type UpdateRecipeInput = Partial<AddRecipeInput> & { id: string };
+
+export async function updateRecipeRepo(
+  input: UpdateRecipeInput
+): Promise<Recipe[]> {
+  if (!input.id) throw new Error("id required");
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
+
+  const patch: Partial<typeof recipesTable.$inferInsert> = {};
+  if (input.name !== undefined) {
+    const t = String(input.name).trim();
+    if (!t) throw new Error("Recipe name required");
+    patch.name = t;
+  }
+  if (input.assignedTo !== undefined) {
+    const t = String(input.assignedTo).trim();
+    if (!t) throw new Error("Assigned cook required");
+    patch.assignedTo = t;
+  }
+  if (input.day !== undefined) {
+    if (input.day < 0 || input.day > 4)
+      throw new Error("Day must be 0–4 (Sun–Thu)");
+    patch.day = input.day;
+  }
+  if (input.weekStart !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.weekStart))
+      throw new Error("weekStart must be YYYY-MM-DD");
+    patch.weekStart = input.weekStart;
+  }
+  if (input.link !== undefined) {
+    const s = String(input.link).trim();
+    patch.link = s || null;
+  }
+  if (input.description !== undefined) {
+    const s = String(input.description).trim();
+    patch.description = s || null;
+  }
+  if (input.ingredients !== undefined) {
+    patch.ingredients = sanitizeIngredients(input.ingredients, validCats);
+  }
+
+  await db.update(recipesTable).set(patch).where(eq(recipesTable.id, input.id));
+  return listRecipesRepo();
+}
+
+export async function deleteRecipeRepo(id: string): Promise<Recipe[]> {
+  if (!id) throw new Error("id required");
+  await db.delete(recipesTable).where(eq(recipesTable.id, id));
+  return listRecipesRepo();
+}
+
+/* ---------- Favorites ---------- */
+
+export async function listFavoritesRepo(): Promise<FavoriteRecipe[]> {
+  const rows = await db.select().from(favoritesTable);
+  return rows.map(rowToFavorite);
+}
+
+export async function addFavoriteRepo(input: {
+  name: string;
+  link?: string;
+  description?: string;
+  ingredients?: unknown;
+}): Promise<FavoriteRecipe[]> {
+  const name = String(input.name ?? "").trim();
+  if (!name) throw new Error("Name required");
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
+  await db.insert(favoritesTable).values({
+    name,
+    link: input.link ? String(input.link).trim() || null : null,
+    description: input.description
+      ? String(input.description).trim() || null
+      : null,
+    ingredients: sanitizeIngredients(input.ingredients, validCats),
+  });
+  return listFavoritesRepo();
+}
+
+export async function deleteFavoriteRepo(id: string): Promise<FavoriteRecipe[]> {
+  if (!id) throw new Error("id required");
+  await db.delete(favoritesTable).where(eq(favoritesTable.id, id));
+  return listFavoritesRepo();
 }

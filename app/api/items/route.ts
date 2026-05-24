@@ -48,6 +48,29 @@ async function ensureTables() {
       added TIMESTAMP NOT NULL DEFAULT NOW()
     )
   `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS recipes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      week_start DATE NOT NULL,
+      day INTEGER NOT NULL,
+      assigned_to TEXT NOT NULL,
+      name TEXT NOT NULL,
+      link TEXT,
+      description TEXT,
+      ingredients JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS favorite_recipes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      link TEXT,
+      description TEXT,
+      ingredients JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
 }
 
 export async function GET() {
