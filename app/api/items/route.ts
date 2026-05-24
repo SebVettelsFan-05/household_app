@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import { after, NextRequest, NextResponse } from "next/server";
+import { db } from "@/db/client";
 import {
   addItemRepo,
   deleteItemRepo,
@@ -13,8 +15,29 @@ function err(message: string, status = 500) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
+// Catches the "you deployed but haven't hit /api/seed yet" case so the page
+// renders empty instead of 500-ing.
+async function ensureTables() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      expiry DATE,
+      added TIMESTAMP NOT NULL DEFAULT NOW(),
+      category TEXT NOT NULL DEFAULT 'Other'
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS categories (
+      name TEXT PRIMARY KEY
+    )
+  `);
+}
+
 export async function GET() {
   try {
+    await ensureTables();
     const items = await listItemsRepo();
     return NextResponse.json({ ok: true, items });
   } catch (e) {

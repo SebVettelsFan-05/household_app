@@ -1,9 +1,29 @@
+import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db/client";
 import { categories as categoriesTable, items as itemsTable } from "@/db/schema";
 import { DEFAULT_CATEGORIES } from "@/lib/normalize";
 
 export const dynamic = "force-dynamic";
+
+// Idempotent table creation — avoids needing to run drizzle-kit push separately.
+async function ensureTables() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      expiry DATE,
+      added TIMESTAMP NOT NULL DEFAULT NOW(),
+      category TEXT NOT NULL DEFAULT 'Other'
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS categories (
+      name TEXT PRIMARY KEY
+    )
+  `);
+}
 
 /**
  * One-shot import from the existing Google Sheet into Postgres. Safe to hit
@@ -22,6 +42,8 @@ async function runSeed() {
       error: "GAS_API_URL is not set; nothing to import from.",
     };
   }
+
+  await ensureTables();
 
   const existing = await db.select({ id: itemsTable.id }).from(itemsTable).limit(1);
   if (existing.length > 0) {

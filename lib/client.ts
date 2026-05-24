@@ -11,12 +11,21 @@ import type {
 } from "./types";
 
 async function parse<T>(res: Response): Promise<ApiResponse<T>> {
-  if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+  let body: unknown = null;
   try {
-    return (await res.json()) as ApiResponse<T>;
+    body = await res.json();
   } catch {
-    return { ok: false, error: "Bad JSON from server" };
+    // fall through
   }
+  if (!res.ok) {
+    const msg =
+      body && typeof body === "object" && "error" in body && body.error
+        ? String(body.error)
+        : `HTTP ${res.status}`;
+    return { ok: false, error: msg };
+  }
+  if (body && typeof body === "object") return body as ApiResponse<T>;
+  return { ok: false, error: "Bad JSON from server" };
 }
 
 function unwrap<T>(r: ApiResponse<T>): T {
