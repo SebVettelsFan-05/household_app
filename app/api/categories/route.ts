@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from "next/server";
+import { ensureTables } from "@/lib/migrate";
 import {
   addCategoryRepo,
   deleteCategoryRepo,
@@ -15,6 +16,7 @@ function err(message: string, status = 500) {
 
 export async function GET() {
   try {
+    await ensureTables();
     const categories = await listCategoriesRepo();
     return NextResponse.json({ ok: true, categories });
   } catch (e) {
@@ -24,6 +26,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTables();
     const body = (await req.json().catch(() => ({}))) as {
       name?: string;
       color?: string | null;
@@ -38,6 +41,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    await ensureTables();
     const body = (await req.json().catch(() => ({}))) as {
       name?: string;
       color?: string | null;
@@ -55,6 +59,7 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    await ensureTables();
     const name = req.nextUrl.searchParams.get("name") ?? "";
     const res = await deleteCategoryRepo(name);
     after(() => mirrorToSheet());

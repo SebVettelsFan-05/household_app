@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from "next/server";
+import { ensureTables } from "@/lib/migrate";
 import { deleteRecipeRepo, updateRecipeRepo } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
 
@@ -22,6 +23,7 @@ type PatchBody = {
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
+    await ensureTables();
     const { id } = await ctx.params;
     const body = (await req.json().catch(() => ({}))) as PatchBody;
     const recipes = await updateRecipeRepo({ id, ...body });
@@ -34,6 +36,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
 export async function DELETE(_req: NextRequest, ctx: Ctx) {
   try {
+    await ensureTables();
     const { id } = await ctx.params;
     const recipes = await deleteRecipeRepo(id);
     after(() => mirrorToSheet());

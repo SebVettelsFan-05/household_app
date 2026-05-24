@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from "next/server";
+import { ensureTables } from "@/lib/migrate";
 import { addFavoriteRepo, listFavoritesRepo } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
 
@@ -10,6 +11,7 @@ function err(message: string, status = 500) {
 
 export async function GET() {
   try {
+    await ensureTables();
     const favorites = await listFavoritesRepo();
     return NextResponse.json({ ok: true, favorites });
   } catch (e) {
@@ -26,6 +28,7 @@ type AddBody = {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTables();
     const body = (await req.json().catch(() => ({}))) as AddBody;
     const favorites = await addFavoriteRepo({
       name: body.name ?? "",

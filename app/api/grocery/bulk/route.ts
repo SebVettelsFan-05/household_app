@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from "next/server";
+import { ensureTables } from "@/lib/migrate";
 import { bulkAddGroceryRepo } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
 
@@ -16,6 +17,7 @@ type BulkBody = {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTables();
     const body = (await req.json().catch(() => ({}))) as BulkBody;
     const items = (body.items || []).map((i) => ({
       name: i.name ?? "",

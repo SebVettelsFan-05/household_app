@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from "next/server";
+import { ensureTables } from "@/lib/migrate";
 import { addRecipeRepo, listRecipesRepo } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
 
@@ -10,6 +11,7 @@ function err(message: string, status = 500) {
 
 export async function GET() {
   try {
+    await ensureTables();
     const recipes = await listRecipesRepo();
     return NextResponse.json({ ok: true, recipes });
   } catch (e) {
@@ -29,6 +31,7 @@ type AddBody = {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTables();
     const body = (await req.json().catch(() => ({}))) as AddBody;
     const recipes = await addRecipeRepo({
       weekStart: body.weekStart ?? "",
