@@ -46,17 +46,28 @@ export default function Page() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listItems(), listCategories()])
-      .then(([itemData, catData]) => {
+    // Items are the source of truth — if they fail, the page errors out.
+    // Categories are best-effort: if the Apps Script hasn't been redeployed
+    // with the new actions yet, fall back to the defaults so the app still works.
+    listItems()
+      .then((itemData) => {
         if (cancelled) return;
         setItems(itemData);
-        setCategories(catData);
         setLoading(false);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         setLoadError(err instanceof Error ? err.message : String(err));
         setLoading(false);
+      });
+    listCategories()
+      .then((catData) => {
+        if (cancelled) return;
+        setCategories(catData);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCategories(["Meat", "Veggies", "Other"]);
       });
     return () => {
       cancelled = true;
