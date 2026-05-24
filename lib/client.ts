@@ -4,8 +4,11 @@ import type {
   ApiResponse,
   CategoryDef,
   DeleteCategoryResponse,
+  GroceryItem,
+  GroceryMutateResponse,
   Item,
   ListCategoriesResponse,
+  ListGroceryResponse,
   ListResponse,
   MutateResponse,
   UpdateCategoryResponse,
@@ -106,4 +109,59 @@ export async function deleteCategory(name: string) {
     { method: "DELETE" }
   );
   return unwrap(await parse<DeleteCategoryResponse>(res));
+}
+
+/* ----- grocery ----- */
+
+export async function listGrocery(): Promise<GroceryItem[]> {
+  const res = await fetch("/api/grocery", { cache: "no-store" });
+  return unwrap(await parse<ListGroceryResponse>(res)).grocery;
+}
+
+export type AddGroceryInput = {
+  name: string;
+  quantity: number;
+  category?: string;
+  store?: string;
+  addedBy: string;
+};
+
+export async function addGrocery(input: AddGroceryInput) {
+  const res = await fetch("/api/grocery", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<GroceryMutateResponse>(res));
+}
+
+export type UpdateGroceryInput = {
+  id: string;
+  name?: string;
+  quantity?: number;
+  category?: string;
+  store?: string;
+  addedBy?: string;
+  done?: boolean;
+};
+
+export async function updateGrocery(input: UpdateGroceryInput) {
+  const res = await fetch("/api/grocery", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<GroceryMutateResponse>(res));
+}
+
+export async function deleteGrocery(id: string) {
+  const res = await fetch(`/api/grocery?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  return unwrap(await parse<GroceryMutateResponse>(res));
+}
+
+export async function clearGrocery() {
+  const res = await fetch("/api/grocery/clear", { method: "POST" });
+  return unwrap(await parse<GroceryMutateResponse>(res));
 }

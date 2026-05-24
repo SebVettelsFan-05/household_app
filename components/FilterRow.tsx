@@ -20,7 +20,7 @@ export default function FilterRow({ categories, value, onChange }: Props) {
         All
       </button>
       {categories.map((c) => {
-        const { color } = getCategoryColor(c.name, c.color);
+        const color = getCategoryColor(c.name, c.color);
         const active = value === c.name;
         return (
           <button

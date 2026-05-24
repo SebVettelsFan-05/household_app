@@ -1,5 +1,6 @@
 "use client";
 
+import { CSSProperties } from "react";
 import { getCategoryColor } from "@/lib/categoryColors";
 import type { Category, CategoryDef } from "@/lib/types";
 
@@ -13,7 +14,7 @@ export default function CategoryPills({ categories, value, onChange }: Props) {
   return (
     <div className="cat-pills">
       {categories.map((c) => {
-        const { color, soft } = getCategoryColor(c.name, c.color);
+        const color = getCategoryColor(c.name, c.color);
         const active = value === c.name;
         return (
           <button
@@ -21,10 +22,7 @@ export default function CategoryPills({ categories, value, onChange }: Props) {
             type="button"
             className={`cat-pill${active ? " active" : ""}`}
             onClick={() => onChange(c.name)}
-            style={{
-              color,
-              background: active ? soft : undefined,
-            }}
+            style={{ color, ["--cat-color" as string]: color } as CSSProperties}
           >
             {c.name}
           </button>

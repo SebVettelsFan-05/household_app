@@ -1,4 +1,4 @@
-import { listCategoriesRepo, listItemsRepo } from "./repo";
+import { listCategoriesRepo, listGroceryRepo, listItemsRepo } from "./repo";
 
 /**
  * Push the current Postgres state to the Google Sheet mirror. Best-effort:
@@ -15,9 +15,10 @@ export async function mirrorToSheet(): Promise<void> {
     return;
   }
   try {
-    const [items, categories] = await Promise.all([
+    const [items, categories, grocery] = await Promise.all([
       listItemsRepo(),
       listCategoriesRepo(),
+      listGroceryRepo(),
     ]);
     const res = await fetch(url, {
       method: "POST",
@@ -27,6 +28,7 @@ export async function mirrorToSheet(): Promise<void> {
         action: "mirror",
         items,
         categories,
+        grocery,
       }),
     });
     if (!res.ok) {

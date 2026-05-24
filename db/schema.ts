@@ -1,4 +1,5 @@
 import {
+  boolean,
   date,
   integer,
   pgTable,
@@ -24,6 +25,21 @@ export const categories = pgTable("categories", {
   color: text("color"),
 });
 
+export const groceryItems = pgTable("grocery_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  quantity: integer("quantity").notNull(),
+  category: text("category").notNull().default("Other"),
+  // Nullable — store is optional.
+  store: text("store"),
+  // Required — one of the household members.
+  addedBy: text("added_by").notNull(),
+  done: boolean("done").notNull().default(false),
+  added: timestamp("added", { withTimezone: false }).notNull().defaultNow(),
+});
+
 export type ItemRow = typeof items.$inferSelect;
 export type NewItemRow = typeof items.$inferInsert;
 export type CategoryRow = typeof categories.$inferSelect;
+export type GroceryRow = typeof groceryItems.$inferSelect;
+export type NewGroceryRow = typeof groceryItems.$inferInsert;

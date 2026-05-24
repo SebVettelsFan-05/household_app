@@ -19,6 +19,9 @@ const CAT_HEADERS = ['Name', 'Color'];
 const DEFAULT_CATEGORIES = ['Meat', 'Veggies', 'Other'];
 const FALLBACK_CATEGORY = 'Other';
 
+const GROCERY_SHEET = 'Grocery List';
+const GROCERY_HEADERS = ['ID', 'Name', 'Quantity (g)', 'Category', 'Store', 'Added by', 'Done', 'Added'];
+
 let _categoriesCache = null;
 function invalidateCategoriesCache_() { _categoriesCache = null; }
 
@@ -40,7 +43,7 @@ function doPost(e) {
   const action = body.action || '';
   try {
     if (action === 'mirror') {
-      mirrorAll_(body.items || [], body.categories || []);
+      mirrorAll_(body.items || [], body.categories || [], body.grocery || []);
       return jsonOut_({ ok: true });
     }
     return jsonOut_({ ok: false, error: 'Unknown POST action: ' + action });
@@ -49,7 +52,7 @@ function doPost(e) {
   }
 }
 
-function mirrorAll_(items, categories) {
+function mirrorAll_(items, categories, grocery) {
   // Inventory sheet: drop all data rows, write the snapshot rows.
   const sheet = getSheet_();
   const lastRow = sheet.getLastRow();
@@ -85,6 +88,30 @@ function mirrorAll_(items, categories) {
     catSheet.getRange(2, 1, rows.length, CAT_HEADERS.length).setValues(rows);
   }
   invalidateCategoriesCache_();
+
+  // Grocery List sheet: same replace-all approach.
+  if (Array.isArray(grocery)) {
+    const groSheet = getGrocerySheet_();
+    const groLast = groSheet.getLastRow();
+    if (groLast > 1) {
+      groSheet.getRange(2, 1, groLast - 1, GROCERY_HEADERS.length).clearContent();
+    }
+    if (grocery.length > 0) {
+      const rows = grocery.map(function (g) {
+        return [
+          g.id || '',
+          g.name || '',
+          Number(g.quantity) || 0,
+          g.category || FALLBACK_CATEGORY,
+          g.store || '',
+          g.addedBy || '',
+          g.done ? 'Yes' : '',
+          g.added ? new Date(g.added + 'T00:00:00') : '',
+        ];
+      });
+      groSheet.getRange(2, 1, rows.length, GROCERY_HEADERS.length).setValues(rows);
+    }
+  }
 }
 
 /* ---------- doGet: legacy read API (used by /api/seed) ---------- */
@@ -158,6 +185,29 @@ function getCategoriesSheet_() {
   sheet.getRange(1, 1, 1, CAT_HEADERS.length).setFontWeight('bold');
   DEFAULT_CATEGORIES.forEach(function (name) { sheet.appendRow([name, '']); });
   invalidateCategoriesCache_();
+  return sheet;
+}
+
+function getGrocerySheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(GROCERY_SHEET);
+  if (sheet) {
+    const cols = Math.max(sheet.getLastColumn(), GROCERY_HEADERS.length);
+    const headerRow = sheet.getRange(1, 1, 1, cols).getValues()[0];
+    let needsUpdate = false;
+    for (let i = 0; i < GROCERY_HEADERS.length; i++) {
+      if (headerRow[i] !== GROCERY_HEADERS[i]) { needsUpdate = true; break; }
+    }
+    if (needsUpdate) {
+      sheet.getRange(1, 1, 1, GROCERY_HEADERS.length).setValues([GROCERY_HEADERS]);
+      sheet.getRange(1, 1, 1, GROCERY_HEADERS.length).setFontWeight('bold');
+    }
+    return sheet;
+  }
+  sheet = ss.insertSheet(GROCERY_SHEET);
+  sheet.getRange(1, 1, 1, GROCERY_HEADERS.length).setValues([GROCERY_HEADERS]);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, GROCERY_HEADERS.length).setFontWeight('bold');
   return sheet;
 }
 

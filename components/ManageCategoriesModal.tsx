@@ -116,7 +116,7 @@ export default function ManageCategoriesModal({
   // neutral grey when no name/color is chosen yet.
   const newSwatch =
     newColor ||
-    (newName.trim() ? getCategoryColor(newName.trim()).color : "#8B8278");
+    (newName.trim() ? getCategoryColor(newName.trim()) : "#8B8278");
 
   return (
     <div
@@ -132,7 +132,7 @@ export default function ManageCategoriesModal({
             const resolved = getCategoryColor(c.name, c.color);
             const inUse = items.filter((i) => i.category === c.name).length;
             const protectedCat = c.name === FALLBACK_CATEGORY;
-            const swatchValue = c.color || resolved.color;
+            const swatchValue = c.color || resolved;
             const inputId = `color-${c.name}`;
             return (
               <div className="cat-mgr-row" key={c.name}>
@@ -150,7 +150,7 @@ export default function ManageCategoriesModal({
                   disabled={busy}
                   onChange={(e) => changeColor(c.name, e.target.value)}
                 />
-                <span className="cat-mgr-name" style={{ color: resolved.color }}>
+                <span className="cat-mgr-name" style={{ color: resolved }}>
                   {c.name}
                 </span>
                 <span className="cat-mgr-meta">

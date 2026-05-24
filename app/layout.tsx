@@ -17,8 +17,25 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#FAF6EE",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#FAF6EE" },
+    { media: "(prefers-color-scheme: dark)", color: "#161A17" },
+  ],
 };
+
+// Runs before paint to set [data-theme] from localStorage — prevents a
+// light→dark flash for users with dark mode selected.
+const themeBootScript = `
+(function(){
+  try {
+    var stored = localStorage.getItem('theme');
+    var theme = stored === 'light' || stored === 'dark'
+      ? stored
+      : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+  } catch (e) {}
+})();
+`;
 
 export default function RootLayout({
   children,
@@ -26,6 +43,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"

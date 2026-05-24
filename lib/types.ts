@@ -16,6 +16,20 @@ export type Item = {
   category: Category;
 };
 
+export const BUYERS = ["Minh", "Arthur", "Ibrahim", "Daniel", "Eli"] as const;
+export type Buyer = (typeof BUYERS)[number];
+
+export type GroceryItem = {
+  id: string;
+  name: string;
+  quantity: number;
+  category: Category;
+  store: string;
+  addedBy: string;
+  done: boolean;
+  added: string;
+};
+
 export type SortMode = "newest" | "name" | "quantity" | "expiry";
 export type FilterCat = "all" | Category;
 
@@ -43,3 +57,6 @@ export type DeleteCategoryResponse = ApiOk<{
   items: Item[];
   reassigned: number;
 }>;
+
+export type ListGroceryResponse = ApiOk<{ grocery: GroceryItem[] }>;
+export type GroceryMutateResponse = ApiOk<{ grocery: GroceryItem[] }>;

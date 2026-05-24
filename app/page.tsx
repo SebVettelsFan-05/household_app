@@ -1,70 +1,55 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import AddItemForm from "@/components/AddItemForm";
-import EditModal from "@/components/EditModal";
-import FilterRow from "@/components/FilterRow";
-import ItemRow from "@/components/ItemRow";
+import { useEffect, useState } from "react";
+import FridgeView from "@/components/FridgeView";
+import GroceryView from "@/components/GroceryView";
 import ManageCategoriesModal from "@/components/ManageCategoriesModal";
+import TabBar, { type Tab } from "@/components/TabBar";
+import ThemeToggle from "@/components/ThemeToggle";
 import Toast, { type ToastMessage } from "@/components/Toast";
-import { listCategories, listItems } from "@/lib/client";
-import { buildColorLookup } from "@/lib/categoryColors";
-import type { CategoryDef, FilterCat, Item, SortMode } from "@/lib/types";
-
-const SORT_MODES: SortMode[] = ["newest", "name", "quantity", "expiry"];
-const SORT_LABELS: Record<SortMode, string> = {
-  newest: "newest",
-  name: "A–Z",
-  quantity: "quantity",
-  expiry: "expiry",
-};
-
-function sortItems(arr: Item[], mode: SortMode): Item[] {
-  const copy = arr.slice();
-  if (mode === "name") return copy.sort((a, b) => a.name.localeCompare(b.name));
-  if (mode === "quantity") return copy.sort((a, b) => b.quantity - a.quantity);
-  if (mode === "expiry")
-    return copy.sort((a, b) => {
-      if (!a.expiry && !b.expiry) return 0;
-      if (!a.expiry) return 1;
-      if (!b.expiry) return -1;
-      return a.expiry.localeCompare(b.expiry);
-    });
-  return copy.sort((a, b) => (b.added || "").localeCompare(a.added || ""));
-}
+import { listCategories, listGrocery, listItems } from "@/lib/client";
+import type { CategoryDef, GroceryItem, Item } from "@/lib/types";
 
 export default function Page() {
   const [items, setItems] = useState<Item[]>([]);
+  const [grocery, setGrocery] = useState<GroceryItem[]>([]);
   const [categories, setCategories] = useState<CategoryDef[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
-  const [filterCat, setFilterCat] = useState<FilterCat>("all");
-  const [search, setSearch] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [itemsLoading, setItemsLoading] = useState(true);
+  const [itemsError, setItemsError] = useState<string | null>(null);
+  const [groceryLoading, setGroceryLoading] = useState(true);
+  const [groceryError, setGroceryError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("fridge");
   const [managingCats, setManagingCats] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    // Items are the source of truth — if they fail, the page errors out.
-    // Categories are best-effort: if the Apps Script hasn't been redeployed
-    // with the new actions yet, fall back to the defaults so the app still works.
     listItems()
-      .then((itemData) => {
+      .then((d) => {
         if (cancelled) return;
-        setItems(itemData);
-        setLoading(false);
+        setItems(d);
+        setItemsLoading(false);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setLoadError(err instanceof Error ? err.message : String(err));
-        setLoading(false);
+        setItemsError(err instanceof Error ? err.message : String(err));
+        setItemsLoading(false);
+      });
+    listGrocery()
+      .then((d) => {
+        if (cancelled) return;
+        setGrocery(d);
+        setGroceryLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setGroceryError(err instanceof Error ? err.message : String(err));
+        setGroceryLoading(false);
       });
     listCategories()
-      .then((catData) => {
+      .then((d) => {
         if (cancelled) return;
-        setCategories(catData);
+        setCategories(d);
       })
       .catch(() => {
         if (cancelled) return;
@@ -83,144 +68,39 @@ export default function Page() {
     setToast({ id: Date.now(), text });
   }
 
-  const editing = editingId ? items.find((i) => i.id === editingId) : null;
-
-  const filtered = useMemo(() => {
-    const byCat =
-      filterCat === "all" ? items : items.filter((i) => i.category === filterCat);
-    const term = search.trim().toLowerCase();
-    if (!term) return byCat;
-    return byCat.filter((i) => i.name.toLowerCase().includes(term));
-  }, [items, filterCat, search]);
-
-  const sorted = useMemo(() => sortItems(filtered, sortMode), [filtered, sortMode]);
-
-  // If filter targets a category that no longer exists, reset to "all".
-  useEffect(() => {
-    if (
-      filterCat !== "all" &&
-      categories.length > 0 &&
-      !categories.some((c) => c.name === filterCat)
-    ) {
-      setFilterCat("all");
-    }
-  }, [categories, filterCat]);
-
-  const colorFor = useMemo(() => buildColorLookup(categories), [categories]);
-
-  const total = filtered.reduce((s, i) => s + (i.quantity || 0), 0);
-  const totalDisplay =
-    total >= 1000
-      ? `${(total / 1000).toFixed(total % 1000 === 0 ? 0 : 1)} kg`
-      : `${total} g`;
-  const [totalNum, totalUnit] = totalDisplay.split(" ");
-
-  function cycleSort() {
-    const next = SORT_MODES[(SORT_MODES.indexOf(sortMode) + 1) % SORT_MODES.length];
-    setSortMode(next);
-  }
+  const openGroceryCount = grocery.filter((g) => !g.done).length;
 
   return (
     <div className="wrap">
       <header className="app-header">
-        <h1>Fridge</h1>
-        <div className="stats">
-          <div>
-            <strong>{filtered.length}</strong> items
-          </div>
-          <div>
-            <strong>{totalNum}</strong> {totalUnit} total
-          </div>
-        </div>
+        <h1>{tab === "fridge" ? "Fridge" : "Grocery"}</h1>
+        <ThemeToggle />
       </header>
 
-      <AddItemForm
-        categories={categories}
-        onResult={(next, msg) => {
-          setItems(next);
-          showToast(msg);
-        }}
-        onError={(msg) => showToast("Error: " + msg)}
-        onManageCategories={() => setManagingCats(true)}
-      />
+      <TabBar value={tab} onChange={setTab} groceryCount={openGroceryCount} />
 
-      <div className="list-head">
-        <h2>In the fridge</h2>
-        <button type="button" className="sort-toggle" onClick={cycleSort}>
-          Sort: {SORT_LABELS[sortMode]}
-        </button>
-      </div>
-
-      <div className="search-row">
-        <input
-          type="search"
-          placeholder="Search items…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
-
-      <FilterRow
-        categories={categories}
-        value={filterCat}
-        onChange={setFilterCat}
-      />
-      <div className="list-hint">Tap any item to edit, use, or delete</div>
-
-      {loading ? (
-        <div className="loading">
-          <span className="spinner" />
-          Loading…
-        </div>
-      ) : loadError ? (
-        <div className="empty">
-          <p>Couldn&apos;t load items.</p>
-          <p style={{ fontSize: 13 }}>{loadError}</p>
-        </div>
-      ) : items.length === 0 ? (
-        <div className="empty">
-          <div className="icon">∅</div>
-          <p>Your fridge is empty.</p>
-          <p style={{ fontSize: 13 }}>Add something above to get started.</p>
-        </div>
-      ) : sorted.length === 0 ? (
-        <div className="empty">
-          <p>
-            No{" "}
-            {search.trim()
-              ? "matching"
-              : filterCat === "all"
-                ? "items"
-                : filterCat.toLowerCase()}{" "}
-            items.
-          </p>
-        </div>
-      ) : (
-        <div className="items">
-          {sorted.map((it) => (
-            <ItemRow
-              key={it.id}
-              item={it}
-              color={colorFor(it.category)}
-              onClick={setEditingId}
-            />
-          ))}
-        </div>
-      )}
-
-      {editing ? (
-        <EditModal
-          item={editing}
+      {tab === "fridge" ? (
+        <FridgeView
+          items={items}
           categories={categories}
-          onClose={() => setEditingId(null)}
-          onResult={(next, msg) => {
-            setItems(next);
-            showToast(msg);
-          }}
-          onError={(msg) => showToast("Error: " + msg)}
+          loading={itemsLoading}
+          loadError={itemsError}
+          onItemsChange={setItems}
+          onToast={showToast}
           onManageCategories={() => setManagingCats(true)}
         />
-      ) : null}
+      ) : (
+        <GroceryView
+          grocery={grocery}
+          categories={categories}
+          fridgeItems={items}
+          loading={groceryLoading}
+          loadError={groceryError}
+          onGroceryChange={setGrocery}
+          onToast={showToast}
+          onManageCategories={() => setManagingCats(true)}
+        />
+      )}
 
       {managingCats ? (
         <ManageCategoriesModal

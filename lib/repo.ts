@@ -1,7 +1,11 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { categories as categoriesTable, items as itemsTable } from "@/db/schema";
-import type { CategoryDef, Item } from "./types";
+import {
+  categories as categoriesTable,
+  groceryItems as groceryTable,
+  items as itemsTable,
+} from "@/db/schema";
+import type { CategoryDef, GroceryItem, Item } from "./types";
 import {
   DEFAULT_CATEGORIES,
   FALLBACK_CATEGORY,
@@ -218,4 +222,115 @@ export async function deleteItemRepo(id: string): Promise<Item[]> {
   if (!id) throw new Error("id required");
   await db.delete(itemsTable).where(eq(itemsTable.id, id));
   return listItemsRepo();
+}
+
+/* ---------- Grocery list ---------- */
+
+function rowToGrocery(r: typeof groceryTable.$inferSelect): GroceryItem {
+  return {
+    id: r.id,
+    name: r.name,
+    quantity: r.quantity,
+    category: r.category,
+    store: r.store || "",
+    addedBy: r.addedBy,
+    done: r.done,
+    added: formatDate(r.added),
+  };
+}
+
+export async function listGroceryRepo(): Promise<GroceryItem[]> {
+  const rows = await db.select().from(groceryTable);
+  return rows.map(rowToGrocery);
+}
+
+export type AddGroceryInput = {
+  name: string;
+  quantity: number;
+  category?: string;
+  store?: string;
+  addedBy: string;
+};
+
+export async function addGroceryRepo(
+  input: AddGroceryInput
+): Promise<GroceryItem[]> {
+  const trimmedName = String(input.name ?? "").trim();
+  if (!trimmedName) throw new Error("Name required");
+  const qty = Number(input.quantity);
+  if (!qty || qty <= 0) throw new Error("Quantity must be greater than zero");
+  const addedBy = String(input.addedBy ?? "").trim();
+  if (!addedBy) throw new Error("Added by required");
+
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
+  const category = pickCategory(input.category, validCats);
+  const store = input.store ? String(input.store).trim() : null;
+
+  await db.insert(groceryTable).values({
+    name: trimmedName,
+    quantity: qty,
+    category,
+    store,
+    addedBy,
+  });
+  return listGroceryRepo();
+}
+
+export type UpdateGroceryInput = {
+  id: string;
+  name?: string;
+  quantity?: number;
+  category?: string;
+  store?: string;
+  addedBy?: string;
+  done?: boolean;
+};
+
+export async function updateGroceryRepo(
+  input: UpdateGroceryInput
+): Promise<GroceryItem[]> {
+  if (!input.id) throw new Error("id required");
+
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
+  const patch: Partial<typeof groceryTable.$inferInsert> = {};
+
+  if (input.name !== undefined) {
+    const trimmed = String(input.name).trim();
+    if (!trimmed) throw new Error("Name required");
+    patch.name = trimmed;
+  }
+  if (input.quantity !== undefined) {
+    const qty = Number(input.quantity);
+    if (!qty || qty <= 0) throw new Error("Quantity must be greater than zero");
+    patch.quantity = qty;
+  }
+  if (input.category !== undefined) {
+    patch.category = pickCategory(input.category, validCats);
+  }
+  if (input.store !== undefined) {
+    const s = String(input.store).trim();
+    patch.store = s || null;
+  }
+  if (input.addedBy !== undefined) {
+    const a = String(input.addedBy).trim();
+    if (!a) throw new Error("Added by required");
+    patch.addedBy = a;
+  }
+  if (input.done !== undefined) {
+    patch.done = !!input.done;
+  }
+
+  await db.update(groceryTable).set(patch).where(eq(groceryTable.id, input.id));
+  return listGroceryRepo();
+}
+
+export async function deleteGroceryRepo(id: string): Promise<GroceryItem[]> {
+  if (!id) throw new Error("id required");
+  await db.delete(groceryTable).where(eq(groceryTable.id, id));
+  return listGroceryRepo();
+}
+
+export async function clearGroceryRepo(): Promise<GroceryItem[]> {
+  await db.delete(groceryTable);
+  return [];
 }

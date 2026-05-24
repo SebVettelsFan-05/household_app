@@ -26,6 +26,18 @@ async function ensureTables() {
   await db.execute(sql`
     ALTER TABLE categories ADD COLUMN IF NOT EXISTS color TEXT
   `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS grocery_items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      category TEXT NOT NULL DEFAULT 'Other',
+      store TEXT,
+      added_by TEXT NOT NULL,
+      done BOOLEAN NOT NULL DEFAULT FALSE,
+      added TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
 }
 
 /**
