@@ -232,6 +232,7 @@ button:active { transform: scale(0.98); }
   border-radius: 6px; font-family: inherit;
 }
 .sort-toggle:hover { background: var(--surface-soft); }
+.head-actions { display: inline-flex; gap: 4px; }
 
 .search-row { margin: 0 0 10px; }
 .search-row input {

@@ -8,6 +8,14 @@ import { clearGrocery, updateGrocery } from "@/lib/client";
 import { buildColorLookup } from "@/lib/categoryColors";
 import type { CategoryDef, GroceryItem, Item } from "@/lib/types";
 
+type SortMode = "newest" | "store" | "name";
+const SORT_MODES: SortMode[] = ["newest", "store", "name"];
+const SORT_LABELS: Record<SortMode, string> = {
+  newest: "newest",
+  store: "store",
+  name: "A–Z",
+};
+
 type Props = {
   grocery: GroceryItem[];
   categories: CategoryDef[];
@@ -31,6 +39,7 @@ export default function GroceryView({
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sortMode, setSortMode] = useState<SortMode>("newest");
 
   const colorFor = useMemo(() => buildColorLookup(categories), [categories]);
 
@@ -44,15 +53,41 @@ export default function GroceryView({
       : `${totalGrams} g`;
   const [totalNum, totalUnit] = totalDisplay.split(" ");
 
-  // Sort: open items first (newest first), then done items (newest first).
+  // Done items always sink to the bottom (newest first) so the active
+  // shopping list stays readable. The chosen sortMode only reorders the
+  // open items above.
   const sorted = useMemo(() => {
-    const copy = grocery.slice();
-    copy.sort((a, b) => {
-      if (a.done !== b.done) return a.done ? 1 : -1;
-      return (b.added || "").localeCompare(a.added || "");
-    });
-    return copy;
-  }, [grocery]);
+    const byNewest = (a: GroceryItem, b: GroceryItem) =>
+      (b.added || "").localeCompare(a.added || "");
+
+    const byStore = (a: GroceryItem, b: GroceryItem) => {
+      const sa = (a.store || "").trim();
+      const sb = (b.store || "").trim();
+      // Items without a store sink within the open group so each store
+      // cluster stays clean.
+      if (!sa && !sb) return byNewest(a, b);
+      if (!sa) return 1;
+      if (!sb) return -1;
+      const cmp = sa.localeCompare(sb);
+      return cmp !== 0 ? cmp : byNewest(a, b);
+    };
+
+    const byName = (a: GroceryItem, b: GroceryItem) =>
+      a.name.localeCompare(b.name);
+
+    const comparator =
+      sortMode === "store" ? byStore : sortMode === "name" ? byName : byNewest;
+
+    const open = grocery.filter((g) => !g.done).sort(comparator);
+    const done = grocery.filter((g) => g.done).sort(byNewest);
+    return [...open, ...done];
+  }, [grocery, sortMode]);
+
+  function cycleSort() {
+    setSortMode(
+      SORT_MODES[(SORT_MODES.indexOf(sortMode) + 1) % SORT_MODES.length]
+    );
+  }
 
   async function toggle(id: string, done: boolean) {
     setBusy(true);
@@ -110,15 +145,24 @@ export default function GroceryView({
 
       <div className="list-head">
         <h2>Shopping list</h2>
-        <button
-          type="button"
-          className="sort-toggle"
-          onClick={clearAll}
-          disabled={busy || grocery.length === 0}
-          style={{ color: "var(--danger)" }}
-        >
-          Clear list
-        </button>
+        <div className="head-actions">
+          <button
+            type="button"
+            className="sort-toggle"
+            onClick={cycleSort}
+          >
+            Sort: {SORT_LABELS[sortMode]}
+          </button>
+          <button
+            type="button"
+            className="sort-toggle"
+            onClick={clearAll}
+            disabled={busy || grocery.length === 0}
+            style={{ color: "var(--danger)" }}
+          >
+            Clear list
+          </button>
+        </div>
       </div>
 
       <div className="list-hint">Tap the circle to check off, or the row to edit</div>
