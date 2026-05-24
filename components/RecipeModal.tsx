@@ -31,12 +31,17 @@ type Props = {
   recipeId?: string;
   initial: RecipeFields;
   categories: CategoryDef[];
+  fridgeItems: import("@/lib/types").Item[];
   onClose: () => void;
   onResult: (recipes: Recipe[], toast: string) => void;
   onError: (msg: string) => void;
-  // Add-to-grocery only works on a saved recipe — modal asks the caller to
-  // open the picker with the *current* (in-memory) state.
-  onOpenAddToGrocery: (current: Recipe) => void;
+  // Hands the in-memory ingredient state to the picker so it works for both
+  // saved and draft recipes.
+  onOpenAddToGrocery: (data: {
+    recipeName: string;
+    ingredients: RecipeIngredient[];
+    defaultAddedBy: string;
+  }) => void;
 };
 
 export default function RecipeModal({
@@ -44,6 +49,7 @@ export default function RecipeModal({
   recipeId,
   initial,
   categories,
+  fridgeItems,
   onClose,
   onResult,
   onError,
@@ -150,23 +156,14 @@ export default function RecipeModal({
   }
 
   function addToGrocery() {
-    if (!recipeId) {
-      onError("Save the recipe first, then add ingredients to the list");
-      return;
-    }
     if (ingredients.length === 0) {
       onError("Add some ingredients first");
       return;
     }
     onOpenAddToGrocery({
-      id: recipeId,
-      weekStart: initial.weekStart,
-      day,
-      assignedTo,
-      name: name.trim() || initial.name,
-      link,
-      description,
+      recipeName: name.trim() || initial.name || "Recipe",
       ingredients,
+      defaultAddedBy: assignedTo,
     });
   }
 
@@ -263,6 +260,7 @@ export default function RecipeModal({
             value={ingredients}
             onChange={setIngredients}
             categories={categories}
+            fridgeItems={fridgeItems}
           />
         </div>
 
@@ -280,12 +278,8 @@ export default function RecipeModal({
             type="button"
             className="btn-secondary"
             onClick={addToGrocery}
-            disabled={busy || ingredients.length === 0 || !editing}
-            title={
-              editing
-                ? "Add ingredients to the grocery list"
-                : "Save the recipe first"
-            }
+            disabled={busy || ingredients.length === 0}
+            title="Add ingredients to the grocery list"
           >
             Add to grocery
           </button>

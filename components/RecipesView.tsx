@@ -13,6 +13,7 @@ import type {
   GroceryItem,
   Item,
   Recipe,
+  RecipeIngredient,
 } from "@/lib/types";
 
 type Props = {
@@ -66,7 +67,11 @@ export default function RecipesView({
   onToast,
 }: Props) {
   const [editing, setEditing] = useState<EditingState>(null);
-  const [addingToGrocery, setAddingToGrocery] = useState<Recipe | null>(null);
+  const [addingToGrocery, setAddingToGrocery] = useState<{
+    recipeName: string;
+    ingredients: RecipeIngredient[];
+    defaultAddedBy: string;
+  } | null>(null);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteRecipe[]>([]);
   const [favsLoaded, setFavsLoaded] = useState(false);
@@ -187,19 +192,22 @@ export default function RecipesView({
           recipeId={editing.mode === "edit" ? editing.recipeId : undefined}
           initial={editing.initial}
           categories={categories}
+          fridgeItems={fridgeItems}
           onClose={() => setEditing(null)}
           onResult={(next, msg) => {
             if (next.length > 0) onRecipesChange(next);
             onToast(msg);
           }}
           onError={(msg) => onToast("Error: " + msg)}
-          onOpenAddToGrocery={(r) => setAddingToGrocery(r)}
+          onOpenAddToGrocery={setAddingToGrocery}
         />
       ) : null}
 
       {addingToGrocery ? (
         <AddRecipeToGroceryModal
-          recipe={addingToGrocery}
+          recipeName={addingToGrocery.recipeName}
+          ingredients={addingToGrocery.ingredients}
+          defaultAddedBy={addingToGrocery.defaultAddedBy}
           fridgeItems={fridgeItems}
           onClose={() => setAddingToGrocery(null)}
           onAdded={(grocery, msg) => {

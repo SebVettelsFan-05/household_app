@@ -8,11 +8,13 @@ import {
   BUYERS,
   type GroceryItem,
   type Item,
-  type Recipe,
+  type RecipeIngredient,
 } from "@/lib/types";
 
 type Props = {
-  recipe: Recipe;
+  recipeName: string;
+  ingredients: RecipeIngredient[];
+  defaultAddedBy: string;
   fridgeItems: Item[];
   onClose: () => void;
   onAdded: (grocery: GroceryItem[], toast: string) => void;
@@ -20,17 +22,16 @@ type Props = {
 };
 
 export default function AddRecipeToGroceryModal({
-  recipe,
+  recipeName,
+  ingredients,
+  defaultAddedBy,
   fridgeItems,
   onClose,
   onAdded,
   onError,
 }: Props) {
-  // Default: every ingredient checked.
-  const [checked, setChecked] = useState<boolean[]>(
-    recipe.ingredients.map(() => true)
-  );
-  const [addedBy, setAddedBy] = useState<string>(recipe.assignedTo);
+  const [checked, setChecked] = useState<boolean[]>(ingredients.map(() => true));
+  const [addedBy, setAddedBy] = useState<string>(defaultAddedBy);
   const [store, setStore] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
@@ -44,10 +45,10 @@ export default function AddRecipeToGroceryModal({
 
   const matches = useMemo(
     () =>
-      recipe.ingredients.map((ing) =>
-        fridgeIndex.get(normalizeName(ing.name)) ?? null
+      ingredients.map(
+        (ing) => fridgeIndex.get(normalizeName(ing.name)) ?? null
       ),
-    [recipe.ingredients, fridgeIndex]
+    [ingredients, fridgeIndex]
   );
 
   function toggle(i: number) {
@@ -55,10 +56,10 @@ export default function AddRecipeToGroceryModal({
   }
 
   function selectAll() {
-    setChecked(recipe.ingredients.map(() => true));
+    setChecked(ingredients.map(() => true));
   }
   function selectNone() {
-    setChecked(recipe.ingredients.map(() => false));
+    setChecked(ingredients.map(() => false));
   }
 
   async function submit() {
@@ -66,9 +67,7 @@ export default function AddRecipeToGroceryModal({
       onError("Pick who's adding this");
       return;
     }
-    const toAdd = recipe.ingredients
-      .map((ing, i) => (checked[i] ? ing : null))
-      .filter((x): x is (typeof recipe.ingredients)[number] => x !== null);
+    const toAdd = ingredients.filter((_, i) => checked[i]);
     if (toAdd.length === 0) {
       onError("Nothing checked");
       return;
@@ -108,7 +107,7 @@ export default function AddRecipeToGroceryModal({
       <div className="modal modal-wide">
         <div className="modal-header">
           <h2>Add to grocery list</h2>
-          <span className="modal-sub">{recipe.name}</span>
+          <span className="modal-sub">{recipeName || "Recipe"}</span>
         </div>
 
         <div className="ingredient-actions">
@@ -131,7 +130,7 @@ export default function AddRecipeToGroceryModal({
         </div>
 
         <div className="ing-add-list">
-          {recipe.ingredients.map((ing, i) => {
+          {ingredients.map((ing, i) => {
             const match = matches[i];
             const qty = fmtQty(ing.quantity);
             return (
