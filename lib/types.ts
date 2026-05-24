@@ -1,6 +1,6 @@
-export type Category = "Meat" | "Veggies" | "Other";
+export type Category = string;
 
-export const CATEGORIES: Category[] = ["Meat", "Veggies", "Other"];
+export const FALLBACK_CATEGORY: Category = "Other";
 
 export type Item = {
   id: string;
@@ -26,3 +26,14 @@ export type AddResponse = ApiOk<{
   addedQty?: number;
 }>;
 export type MutateResponse = ApiOk<{ items: Item[] }>;
+
+export type ListCategoriesResponse = ApiOk<{ categories: Category[] }>;
+export type AddCategoryResponse = ApiOk<{
+  categories: Category[];
+  existed?: boolean;
+}>;
+export type DeleteCategoryResponse = ApiOk<{
+  categories: Category[];
+  items: Item[];
+  reassigned: number;
+}>;

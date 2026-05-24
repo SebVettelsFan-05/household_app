@@ -1,35 +1,40 @@
 "use client";
 
-import { CATEGORIES, type FilterCat } from "@/lib/types";
+import { getCategoryColor } from "@/lib/categoryColors";
+import type { Category, FilterCat } from "@/lib/types";
 
 type Props = {
+  categories: Category[];
   value: FilterCat;
   onChange: (f: FilterCat) => void;
 };
 
-export default function FilterRow({ value, onChange }: Props) {
+export default function FilterRow({ categories, value, onChange }: Props) {
   return (
     <div className="filter-row">
       <button
         type="button"
         className={`filter-pill${value === "all" ? " active" : ""}`}
-        data-filter="all"
         onClick={() => onChange("all")}
       >
         All
       </button>
-      {CATEGORIES.map((c) => (
-        <button
-          key={c}
-          type="button"
-          className={`filter-pill${value === c ? " active" : ""}`}
-          data-filter={c}
-          onClick={() => onChange(c)}
-        >
-          <span className="dot-cat" />
-          {c}
-        </button>
-      ))}
+      {categories.map((c) => {
+        const { color } = getCategoryColor(c);
+        const active = value === c;
+        return (
+          <button
+            key={c}
+            type="button"
+            className={`filter-pill${active ? " active" : ""}`}
+            onClick={() => onChange(c)}
+            style={!active ? { color } : undefined}
+          >
+            <span className="dot-cat" />
+            {c}
+          </button>
+        );
+      })}
     </div>
   );
 }

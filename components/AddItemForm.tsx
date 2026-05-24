@@ -1,21 +1,40 @@
 "use client";
 
-import { KeyboardEvent, useState } from "react";
+import { KeyboardEvent, useEffect, useState } from "react";
 import { addItem } from "@/lib/client";
-import type { Category, Item } from "@/lib/types";
+import { FALLBACK_CATEGORY, type Category, type Item } from "@/lib/types";
 import CategoryPills from "./CategoryPills";
 
 type Props = {
+  categories: Category[];
   onResult: (items: Item[], toast: string) => void;
   onError: (message: string) => void;
+  onManageCategories: () => void;
 };
 
-export default function AddItemForm({ onResult, onError }: Props) {
+export default function AddItemForm({
+  categories,
+  onResult,
+  onError,
+  onManageCategories,
+}: Props) {
   const [name, setName] = useState("");
   const [qty, setQty] = useState("");
   const [exp, setExp] = useState("");
-  const [cat, setCat] = useState<Category>("Other");
+  const [cat, setCat] = useState<Category>(FALLBACK_CATEGORY);
   const [busy, setBusy] = useState(false);
+
+  // If the currently selected category disappears (deleted in manage modal),
+  // fall back to Other so we never submit a phantom category.
+  useEffect(() => {
+    if (categories.length > 0 && !categories.includes(cat)) {
+      setCat(
+        categories.includes(FALLBACK_CATEGORY)
+          ? FALLBACK_CATEGORY
+          : categories[0]
+      );
+    }
+  }, [categories, cat]);
 
   async function submit() {
     const trimmed = name.trim();
@@ -43,7 +62,7 @@ export default function AddItemForm({ onResult, onError }: Props) {
       setName("");
       setQty("");
       setExp("");
-      setCat("Other");
+      setCat(FALLBACK_CATEGORY);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -71,8 +90,17 @@ export default function AddItemForm({ onResult, onError }: Props) {
         />
       </div>
       <div className="field">
-        <label>Category</label>
-        <CategoryPills value={cat} onChange={setCat} />
+        <div className="cat-pills-row">
+          <label>Category</label>
+          <button
+            type="button"
+            className="manage-link"
+            onClick={onManageCategories}
+          >
+            Manage
+          </button>
+        </div>
+        <CategoryPills categories={categories} value={cat} onChange={setCat} />
       </div>
       <div className="field-row">
         <div className="field">

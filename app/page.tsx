@@ -5,9 +5,10 @@ import AddItemForm from "@/components/AddItemForm";
 import EditModal from "@/components/EditModal";
 import FilterRow from "@/components/FilterRow";
 import ItemRow from "@/components/ItemRow";
+import ManageCategoriesModal from "@/components/ManageCategoriesModal";
 import Toast, { type ToastMessage } from "@/components/Toast";
-import { listItems } from "@/lib/client";
-import type { FilterCat, Item, SortMode } from "@/lib/types";
+import { listCategories, listItems } from "@/lib/client";
+import type { Category, FilterCat, Item, SortMode } from "@/lib/types";
 
 const SORT_MODES: SortMode[] = ["newest", "name", "quantity", "expiry"];
 const SORT_LABELS: Record<SortMode, string> = {
@@ -33,20 +34,23 @@ function sortItems(arr: Item[], mode: SortMode): Item[] {
 
 export default function Page() {
   const [items, setItems] = useState<Item[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [filterCat, setFilterCat] = useState<FilterCat>("all");
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [managingCats, setManagingCats] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    listItems()
-      .then((data) => {
+    Promise.all([listItems(), listCategories()])
+      .then(([itemData, catData]) => {
         if (cancelled) return;
-        setItems(data);
+        setItems(itemData);
+        setCategories(catData);
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -75,6 +79,17 @@ export default function Page() {
 
   const sorted = useMemo(() => sortItems(filtered, sortMode), [filtered, sortMode]);
 
+  // If filter targets a category that no longer exists, reset to "all".
+  useEffect(() => {
+    if (
+      filterCat !== "all" &&
+      categories.length > 0 &&
+      !categories.includes(filterCat)
+    ) {
+      setFilterCat("all");
+    }
+  }, [categories, filterCat]);
+
   const total = filtered.reduce((s, i) => s + (i.quantity || 0), 0);
   const totalDisplay =
     total >= 1000
@@ -102,11 +117,13 @@ export default function Page() {
       </header>
 
       <AddItemForm
+        categories={categories}
         onResult={(next, msg) => {
           setItems(next);
           showToast(msg);
         }}
         onError={(msg) => showToast("Error: " + msg)}
+        onManageCategories={() => setManagingCats(true)}
       />
 
       <div className="list-head">
@@ -125,7 +142,11 @@ export default function Page() {
         />
       </div>
 
-      <FilterRow value={filterCat} onChange={setFilterCat} />
+      <FilterRow
+        categories={categories}
+        value={filterCat}
+        onChange={setFilterCat}
+      />
       <div className="list-hint">Tap any item to edit, use, or delete</div>
 
       {loading ? (
@@ -167,11 +188,25 @@ export default function Page() {
       {editing ? (
         <EditModal
           item={editing}
+          categories={categories}
           onClose={() => setEditingId(null)}
           onResult={(next, msg) => {
             setItems(next);
             showToast(msg);
           }}
+          onError={(msg) => showToast("Error: " + msg)}
+          onManageCategories={() => setManagingCats(true)}
+        />
+      ) : null}
+
+      {managingCats ? (
+        <ManageCategoriesModal
+          categories={categories}
+          items={items}
+          onClose={() => setManagingCats(false)}
+          onCategoriesChange={setCategories}
+          onItemsChange={setItems}
+          onToast={showToast}
           onError={(msg) => showToast("Error: " + msg)}
         />
       ) : null}

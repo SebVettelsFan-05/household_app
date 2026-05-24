@@ -1,7 +1,11 @@
 import type {
+  AddCategoryResponse,
   AddResponse,
   ApiResponse,
+  Category,
+  DeleteCategoryResponse,
   Item,
+  ListCategoriesResponse,
   ListResponse,
   MutateResponse,
 } from "./types";
@@ -20,10 +24,11 @@ function unwrap<T>(r: ApiResponse<T>): T {
   return r;
 }
 
+/* ----- items ----- */
+
 export async function listItems(): Promise<Item[]> {
   const res = await fetch("/api/items", { cache: "no-store" });
-  const data = unwrap(await parse<ListResponse>(res));
-  return data.items;
+  return unwrap(await parse<ListResponse>(res)).items;
 }
 
 export type AddInput = {
@@ -58,4 +63,28 @@ export async function deleteItem(id: string) {
     method: "DELETE",
   });
   return unwrap(await parse<MutateResponse>(res));
+}
+
+/* ----- categories ----- */
+
+export async function listCategories(): Promise<Category[]> {
+  const res = await fetch("/api/categories", { cache: "no-store" });
+  return unwrap(await parse<ListCategoriesResponse>(res)).categories;
+}
+
+export async function addCategory(name: string) {
+  const res = await fetch("/api/categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return unwrap(await parse<AddCategoryResponse>(res));
+}
+
+export async function deleteCategory(name: string) {
+  const res = await fetch(
+    `/api/categories?name=${encodeURIComponent(name)}`,
+    { method: "DELETE" }
+  );
+  return unwrap(await parse<DeleteCategoryResponse>(res));
 }

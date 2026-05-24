@@ -2,21 +2,30 @@
 
 import { useEffect, useState } from "react";
 import { deleteItem, updateItem } from "@/lib/client";
-import type { Category, Item } from "@/lib/types";
+import { FALLBACK_CATEGORY, type Category, type Item } from "@/lib/types";
 import CategoryPills from "./CategoryPills";
 
 type Props = {
   item: Item;
+  categories: Category[];
   onClose: () => void;
   onResult: (items: Item[], toast: string) => void;
   onError: (message: string) => void;
+  onManageCategories: () => void;
 };
 
-export default function EditModal({ item, onClose, onResult, onError }: Props) {
+export default function EditModal({
+  item,
+  categories,
+  onClose,
+  onResult,
+  onError,
+  onManageCategories,
+}: Props) {
   const [name, setName] = useState(item.name);
   const [qty, setQty] = useState(String(item.quantity));
   const [exp, setExp] = useState(item.expiry || "");
-  const [cat, setCat] = useState<Category>(item.category || "Other");
+  const [cat, setCat] = useState<Category>(item.category || FALLBACK_CATEGORY);
   const [useAmt, setUseAmt] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -27,6 +36,16 @@ export default function EditModal({ item, onClose, onResult, onError }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    if (categories.length > 0 && !categories.includes(cat)) {
+      setCat(
+        categories.includes(FALLBACK_CATEGORY)
+          ? FALLBACK_CATEGORY
+          : categories[0]
+      );
+    }
+  }, [categories, cat]);
 
   async function save() {
     const trimmed = name.trim();
@@ -75,7 +94,6 @@ export default function EditModal({ item, onClose, onResult, onError }: Props) {
     }
     const remaining = item.quantity - used;
     if (remaining <= 0) {
-      // Used it all → delete
       if (!confirm(`Using ${used}g empties this item. Remove it?`)) return;
       setBusy(true);
       try {
@@ -126,8 +144,17 @@ export default function EditModal({ item, onClose, onResult, onError }: Props) {
           />
         </div>
         <div className="field">
-          <label>Category</label>
-          <CategoryPills value={cat} onChange={setCat} />
+          <div className="cat-pills-row">
+            <label>Category</label>
+            <button
+              type="button"
+              className="manage-link"
+              onClick={onManageCategories}
+            >
+              Manage
+            </button>
+          </div>
+          <CategoryPills categories={categories} value={cat} onChange={setCat} />
         </div>
         <div className="field-row">
           <div className="field">

@@ -1,5 +1,6 @@
 "use client";
 
+import { getCategoryColor } from "@/lib/categoryColors";
 import type { Item } from "@/lib/types";
 import { expiryStatus, fmtQty } from "@/lib/format";
 
@@ -11,6 +12,7 @@ type Props = {
 export default function ItemRow({ item, onClick }: Props) {
   const exp = expiryStatus(item.expiry);
   const qty = fmtQty(item.quantity);
+  const { color } = getCategoryColor(item.category);
 
   return (
     <button
@@ -21,7 +23,7 @@ export default function ItemRow({ item, onClick }: Props) {
       <div className="item-main">
         <div className="item-name">{item.name}</div>
         <div className="item-meta">
-          <span className={`cat-tag cat-${item.category}`}>
+          <span className="cat-tag" style={{ color }}>
             {item.category}
           </span>
           {item.added ? (
