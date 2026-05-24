@@ -1,15 +1,22 @@
 import type {
   AddCategoryResponse,
+  AddExpenseCategoryResponse,
   AddResponse,
   ApiResponse,
   CategoryDef,
   DeleteCategoryResponse,
+  DeleteExpenseCategoryResponse,
+  Expense,
+  ExpenseCategoryDef,
+  ExpenseMutateResponse,
   FavoriteRecipe,
   FavoritesMutateResponse,
   GroceryItem,
   GroceryMutateResponse,
   Item,
   ListCategoriesResponse,
+  ListExpenseCategoriesResponse,
+  ListExpensesResponse,
   ListFavoritesResponse,
   ListGroceryResponse,
   ListRecipesResponse,
@@ -19,6 +26,7 @@ import type {
   RecipeIngredient,
   RecipeMutateResponse,
   UpdateCategoryResponse,
+  UpdateExpenseCategoryResponse,
 } from "./types";
 
 async function parse<T>(res: Response): Promise<ApiResponse<T>> {
@@ -260,4 +268,91 @@ export async function deleteFavorite(id: string) {
     method: "DELETE",
   });
   return unwrap(await parse<FavoritesMutateResponse>(res));
+}
+
+/* ----- expenses ----- */
+
+export async function listExpenses(): Promise<Expense[]> {
+  const res = await fetch("/api/expenses", { cache: "no-store" });
+  return unwrap(await parse<ListExpensesResponse>(res)).expenses;
+}
+
+export type AddExpenseInput = {
+  name: string;
+  amountCents: number;
+  category?: string;
+  store?: string;
+  paidBy: string;
+};
+
+export async function addExpense(input: AddExpenseInput) {
+  const res = await fetch("/api/expenses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<ExpenseMutateResponse>(res));
+}
+
+export type UpdateExpenseInput = Partial<AddExpenseInput> & { id: string };
+
+export async function updateExpense(input: UpdateExpenseInput) {
+  const res = await fetch("/api/expenses", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<ExpenseMutateResponse>(res));
+}
+
+export async function deleteExpense(id: string) {
+  const res = await fetch(`/api/expenses?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  return unwrap(await parse<ExpenseMutateResponse>(res));
+}
+
+export async function clearExpenses() {
+  const res = await fetch("/api/expenses/clear", { method: "POST" });
+  return unwrap(await parse<ExpenseMutateResponse>(res));
+}
+
+/* ----- expense categories ----- */
+
+export async function listExpenseCategories(): Promise<ExpenseCategoryDef[]> {
+  const res = await fetch("/api/expense-categories", { cache: "no-store" });
+  return unwrap(await parse<ListExpenseCategoriesResponse>(res))
+    .expenseCategories;
+}
+
+export async function addExpenseCategory(
+  name: string,
+  color?: string | null
+) {
+  const res = await fetch("/api/expense-categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, color: color ?? null }),
+  });
+  return unwrap(await parse<AddExpenseCategoryResponse>(res));
+}
+
+export async function updateExpenseCategoryColor(
+  name: string,
+  color: string | null
+) {
+  const res = await fetch("/api/expense-categories", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, color }),
+  });
+  return unwrap(await parse<UpdateExpenseCategoryResponse>(res));
+}
+
+export async function deleteExpenseCategory(name: string) {
+  const res = await fetch(
+    `/api/expense-categories?name=${encodeURIComponent(name)}`,
+    { method: "DELETE" }
+  );
+  return unwrap(await parse<DeleteExpenseCategoryResponse>(res));
 }

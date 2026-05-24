@@ -90,3 +90,36 @@ export type ListRecipesResponse = ApiOk<{ recipes: Recipe[] }>;
 export type RecipeMutateResponse = ApiOk<{ recipes: Recipe[] }>;
 export type ListFavoritesResponse = ApiOk<{ favorites: FavoriteRecipe[] }>;
 export type FavoritesMutateResponse = ApiOk<{ favorites: FavoriteRecipe[] }>;
+
+export type Expense = {
+  id: string;
+  name: string;
+  amountCents: number;
+  category: Category;
+  store: string;
+  paidBy: string;
+  added: string;
+};
+
+export type ExpenseCategoryDef = {
+  name: Category;
+  color: string | null;
+};
+
+export type ListExpensesResponse = ApiOk<{ expenses: Expense[] }>;
+export type ExpenseMutateResponse = ApiOk<{ expenses: Expense[] }>;
+export type ListExpenseCategoriesResponse = ApiOk<{
+  expenseCategories: ExpenseCategoryDef[];
+}>;
+export type AddExpenseCategoryResponse = ApiOk<{
+  expenseCategories: ExpenseCategoryDef[];
+  existed?: boolean;
+}>;
+export type UpdateExpenseCategoryResponse = ApiOk<{
+  expenseCategories: ExpenseCategoryDef[];
+}>;
+export type DeleteExpenseCategoryResponse = ApiOk<{
+  expenseCategories: ExpenseCategoryDef[];
+  expenses: Expense[];
+  reassigned: number;
+}>;

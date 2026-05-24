@@ -1,6 +1,9 @@
 export const FALLBACK_CATEGORY = "Other";
 export const DEFAULT_CATEGORIES = ["Meat", "Veggies", "Other"];
 
+export const EXPENSE_FALLBACK = "Misc";
+export const DEFAULT_EXPENSE_CATEGORIES = ["Rent + Utilities", "Food", "Misc"];
+
 export function normalizeName(s: string): string {
   return String(s ?? "")
     .toLowerCase()
@@ -8,11 +11,15 @@ export function normalizeName(s: string): string {
     .replace(/\s+/g, " ");
 }
 
-export function pickCategory(input: string | undefined, validList: string[]): string {
+export function pickCategory(
+  input: string | undefined,
+  validList: string[],
+  fallback: string = FALLBACK_CATEGORY
+): string {
   const s = String(input ?? "").trim();
-  if (!s) return FALLBACK_CATEGORY;
+  if (!s) return fallback;
   const match = validList.find((v) => v.toLowerCase() === s.toLowerCase());
-  return match || FALLBACK_CATEGORY;
+  return match || fallback;
 }
 
 export function formatDate(d: Date | null | undefined): string {

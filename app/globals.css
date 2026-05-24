@@ -63,12 +63,14 @@ header.app-header {
   margin: 0 0 18px;
 }
 .tab {
-  flex: 1; background: transparent; border: none;
+  flex: 1; min-width: 0;
+  background: transparent; border: none;
   color: var(--ink-soft); font-family: inherit;
-  font-size: 14px; font-weight: 600; letter-spacing: 0.01em;
-  padding: 10px 12px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+  padding: 9px 8px; border-radius: 8px;
   cursor: pointer; transition: background 0.15s, color 0.15s;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  white-space: nowrap;
 }
 .tab.active { background: var(--ink); color: var(--bg); }
 .tab-badge {
@@ -361,6 +363,102 @@ button:active { transform: scale(0.98); }
 .grocery-meta .cat-tag::before {
   content: ''; width: 7px; height: 7px;
   border-radius: 50%; background: currentColor;
+}
+
+/* ---------- Home ---------- */
+
+.home-view { padding: 4px 0; }
+.home-hero { margin: 0 4px 18px; }
+.home-lede {
+  font-family: 'Fraunces', serif; font-weight: 500;
+  font-size: 22px; letter-spacing: -0.01em; color: var(--ink);
+  margin: 0 0 6px;
+}
+.home-sub {
+  font-size: 14px; color: var(--ink-soft); line-height: 1.5;
+  margin: 0;
+}
+.home-cards {
+  display: grid; gap: 10px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 520px) {
+  .home-cards { grid-template-columns: 1fr 1fr; }
+}
+.home-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px; padding: 14px 16px;
+  text-align: left; font-family: inherit; color: var(--ink);
+  cursor: pointer; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.home-card:active { background: var(--surface-soft); }
+.home-card-title {
+  font-family: 'Fraunces', serif; font-weight: 500;
+  font-size: 18px; letter-spacing: -0.01em;
+}
+.home-card-blurb {
+  font-size: 13px; color: var(--ink-soft); line-height: 1.4;
+}
+.home-card-cta {
+  font-size: 12px; font-weight: 600; color: var(--accent);
+  letter-spacing: 0.04em; text-transform: uppercase;
+  margin-top: 4px;
+}
+
+/* ---------- Expenses ---------- */
+
+.split-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px 16px;
+  box-shadow: var(--shadow); margin-bottom: 22px;
+}
+.split-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; margin-bottom: 10px;
+}
+.split-head h2 {
+  font-family: 'Fraunces', serif; font-weight: 500;
+  font-size: 18px; margin: 0; letter-spacing: -0.01em;
+}
+.split-sub {
+  font-size: 12px; color: var(--ink-soft);
+}
+.split-sub strong { color: var(--ink); font-weight: 700; }
+.split-step {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 13px; color: var(--ink-soft); line-height: 1.4;
+  margin-bottom: 4px;
+}
+.split-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; flex-shrink: 0;
+  border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 700; margin-top: 1px;
+}
+.split-step strong { color: var(--ink); font-weight: 700; }
+.split-people {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 8px 0 4px;
+  padding-left: 26px;
+}
+.split-person {
+  display: grid;
+  grid-template-columns: minmax(70px, auto) 1fr auto;
+  gap: 10px; align-items: baseline;
+  font-size: 13px;
+}
+.split-person.quiet { opacity: 0.55; }
+.split-name { font-weight: 600; color: var(--ink); }
+.split-paid { color: var(--ink-soft); }
+.split-net { font-weight: 600; text-align: right; }
+.split-net.positive { color: var(--accent); }
+.split-net.negative { color: var(--warn); }
+.split-note {
+  font-size: 11px; color: var(--ink-soft);
+  font-style: italic;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--line);
 }
 
 /* ---------- Recipes ---------- */

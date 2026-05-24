@@ -29,6 +29,12 @@ const DAY_NAMES_GS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FAVORITES_SHEET = 'Favorite Recipes';
 const FAVORITES_HEADERS = ['ID', 'Name', 'Link', 'Description', 'Ingredients'];
 
+const EXPENSES_SHEET = 'Expenses';
+const EXPENSES_HEADERS = ['ID', 'Name', 'Amount', 'Category', 'Store', 'Paid by', 'Added'];
+
+const EXPENSE_CATS_SHEET = 'Expense Categories';
+const EXPENSE_CATS_HEADERS = ['Name', 'Color'];
+
 let _categoriesCache = null;
 function invalidateCategoriesCache_() { _categoriesCache = null; }
 
@@ -55,7 +61,9 @@ function doPost(e) {
         body.categories || [],
         body.grocery || [],
         body.recipes || [],
-        body.favorites || []
+        body.favorites || [],
+        body.expenses || [],
+        body.expenseCategories || []
       );
       return jsonOut_({ ok: true });
     }
@@ -65,7 +73,7 @@ function doPost(e) {
   }
 }
 
-function mirrorAll_(items, categories, grocery, recipes, favorites) {
+function mirrorAll_(items, categories, grocery, recipes, favorites, expenses, expenseCategories) {
   // Inventory sheet: drop all data rows, write the snapshot rows.
   const sheet = getSheet_();
   const lastRow = sheet.getLastRow();
@@ -171,6 +179,93 @@ function mirrorAll_(items, categories, grocery, recipes, favorites) {
       favSheet.getRange(2, 1, rows.length, FAVORITES_HEADERS.length).setValues(rows);
     }
   }
+
+  // Expenses sheet.
+  if (Array.isArray(expenses)) {
+    const expSheet = getExpensesSheet_();
+    const expLast = expSheet.getLastRow();
+    if (expLast > 1) {
+      expSheet.getRange(2, 1, expLast - 1, EXPENSES_HEADERS.length).clearContent();
+    }
+    if (expenses.length > 0) {
+      const rows = expenses.map(function (e) {
+        return [
+          e.id || '',
+          e.name || '',
+          (Number(e.amountCents) || 0) / 100,
+          e.category || 'Misc',
+          e.store || '',
+          e.paidBy || '',
+          e.added ? new Date(e.added + 'T00:00:00') : '',
+        ];
+      });
+      expSheet.getRange(2, 1, rows.length, EXPENSES_HEADERS.length).setValues(rows);
+      // Format the Amount column as currency so the sheet reads naturally.
+      expSheet.getRange(2, 3, rows.length, 1).setNumberFormat('$#,##0.00');
+    }
+  }
+
+  // Expense categories sheet.
+  if (Array.isArray(expenseCategories)) {
+    const ecSheet = getExpenseCatsSheet_();
+    const ecLast = ecSheet.getLastRow();
+    if (ecLast > 1) {
+      ecSheet.getRange(2, 1, ecLast - 1, EXPENSE_CATS_HEADERS.length).clearContent();
+    }
+    if (expenseCategories.length > 0) {
+      const rows = expenseCategories.map(function (c) {
+        if (typeof c === 'string') return [c, ''];
+        return [c.name || '', c.color || ''];
+      });
+      ecSheet.getRange(2, 1, rows.length, EXPENSE_CATS_HEADERS.length).setValues(rows);
+    }
+  }
+}
+
+function getExpensesSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(EXPENSES_SHEET);
+  if (sheet) {
+    const cols = Math.max(sheet.getLastColumn(), EXPENSES_HEADERS.length);
+    const headerRow = sheet.getRange(1, 1, 1, cols).getValues()[0];
+    let needsUpdate = false;
+    for (let i = 0; i < EXPENSES_HEADERS.length; i++) {
+      if (headerRow[i] !== EXPENSES_HEADERS[i]) { needsUpdate = true; break; }
+    }
+    if (needsUpdate) {
+      sheet.getRange(1, 1, 1, EXPENSES_HEADERS.length).setValues([EXPENSES_HEADERS]);
+      sheet.getRange(1, 1, 1, EXPENSES_HEADERS.length).setFontWeight('bold');
+    }
+    return sheet;
+  }
+  sheet = ss.insertSheet(EXPENSES_SHEET);
+  sheet.getRange(1, 1, 1, EXPENSES_HEADERS.length).setValues([EXPENSES_HEADERS]);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, EXPENSES_HEADERS.length).setFontWeight('bold');
+  return sheet;
+}
+
+function getExpenseCatsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(EXPENSE_CATS_SHEET);
+  if (sheet) {
+    const cols = Math.max(sheet.getLastColumn(), EXPENSE_CATS_HEADERS.length);
+    const headerRow = sheet.getRange(1, 1, 1, cols).getValues()[0];
+    let needsUpdate = false;
+    for (let i = 0; i < EXPENSE_CATS_HEADERS.length; i++) {
+      if (headerRow[i] !== EXPENSE_CATS_HEADERS[i]) { needsUpdate = true; break; }
+    }
+    if (needsUpdate) {
+      sheet.getRange(1, 1, 1, EXPENSE_CATS_HEADERS.length).setValues([EXPENSE_CATS_HEADERS]);
+      sheet.getRange(1, 1, 1, EXPENSE_CATS_HEADERS.length).setFontWeight('bold');
+    }
+    return sheet;
+  }
+  sheet = ss.insertSheet(EXPENSE_CATS_SHEET);
+  sheet.getRange(1, 1, 1, EXPENSE_CATS_HEADERS.length).setValues([EXPENSE_CATS_HEADERS]);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, EXPENSE_CATS_HEADERS.length).setFontWeight('bold');
+  return sheet;
 }
 
 function formatIngredients_(list) {

@@ -1,5 +1,7 @@
 import {
   listCategoriesRepo,
+  listExpenseCategoriesRepo,
+  listExpensesRepo,
   listFavoritesRepo,
   listGroceryRepo,
   listItemsRepo,
@@ -21,12 +23,22 @@ export async function mirrorToSheet(): Promise<void> {
     return;
   }
   try {
-    const [items, categories, grocery, recipes, favorites] = await Promise.all([
+    const [
+      items,
+      categories,
+      grocery,
+      recipes,
+      favorites,
+      expenses,
+      expenseCategories,
+    ] = await Promise.all([
       listItemsRepo(),
       listCategoriesRepo(),
       listGroceryRepo(),
       listRecipesRepo(),
       listFavoritesRepo(),
+      listExpensesRepo(),
+      listExpenseCategoriesRepo(),
     ]);
     const res = await fetch(url, {
       method: "POST",
@@ -39,6 +51,8 @@ export async function mirrorToSheet(): Promise<void> {
         grocery,
         recipes,
         favorites,
+        expenses,
+        expenseCategories,
       }),
     });
     if (!res.ok) {

@@ -72,6 +72,22 @@ export const favoriteRecipes = pgTable("favorite_recipes", {
     .defaultNow(),
 });
 
+export const expenses = pgTable("expenses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  // Stored as integer cents — avoids floating-point surprises in totals.
+  amountCents: integer("amount_cents").notNull(),
+  category: text("category").notNull().default("Misc"),
+  store: text("store"),
+  paidBy: text("paid_by").notNull(),
+  added: timestamp("added", { withTimezone: false }).notNull().defaultNow(),
+});
+
+export const expenseCategories = pgTable("expense_categories", {
+  name: text("name").primaryKey(),
+  color: text("color"),
+});
+
 export type ItemRow = typeof items.$inferSelect;
 export type NewItemRow = typeof items.$inferInsert;
 export type CategoryRow = typeof categories.$inferSelect;
@@ -80,3 +96,6 @@ export type NewGroceryRow = typeof groceryItems.$inferInsert;
 export type RecipeRow = typeof recipes.$inferSelect;
 export type NewRecipeRow = typeof recipes.$inferInsert;
 export type FavoriteRow = typeof favoriteRecipes.$inferSelect;
+export type ExpenseRow = typeof expenses.$inferSelect;
+export type NewExpenseRow = typeof expenses.$inferInsert;
+export type ExpenseCategoryRow = typeof expenseCategories.$inferSelect;

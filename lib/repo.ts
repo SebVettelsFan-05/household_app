@@ -2,6 +2,8 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   categories as categoriesTable,
+  expenseCategories as expenseCategoriesTable,
+  expenses as expensesTable,
   favoriteRecipes as favoritesTable,
   groceryItems as groceryTable,
   items as itemsTable,
@@ -10,6 +12,8 @@ import {
 import { thisWeekStart, nextWeekStart } from "./dates";
 import type {
   CategoryDef,
+  Expense,
+  ExpenseCategoryDef,
   FavoriteRecipe,
   GroceryItem,
   Item,
@@ -18,6 +22,8 @@ import type {
 } from "./types";
 import {
   DEFAULT_CATEGORIES,
+  DEFAULT_EXPENSE_CATEGORIES,
+  EXPENSE_FALLBACK,
   FALLBACK_CATEGORY,
   formatDate,
   normalizeName,
@@ -560,4 +566,217 @@ export async function deleteFavoriteRepo(id: string): Promise<FavoriteRecipe[]> 
   if (!id) throw new Error("id required");
   await db.delete(favoritesTable).where(eq(favoritesTable.id, id));
   return listFavoritesRepo();
+}
+
+/* ---------- Expense categories ---------- */
+
+async function ensureDefaultExpenseCategories(): Promise<void> {
+  await db
+    .insert(expenseCategoriesTable)
+    .values(DEFAULT_EXPENSE_CATEGORIES.map((name) => ({ name })))
+    .onConflictDoNothing();
+}
+
+export async function listExpenseCategoriesRepo(): Promise<ExpenseCategoryDef[]> {
+  const rows = await db.select().from(expenseCategoriesTable);
+  if (rows.length === 0) {
+    await ensureDefaultExpenseCategories();
+    return DEFAULT_EXPENSE_CATEGORIES.map((name) => ({ name, color: null }));
+  }
+  const list = rows.map((r) => ({ name: r.name, color: r.color ?? null }));
+  if (
+    !list.some(
+      (c) => c.name.toLowerCase() === EXPENSE_FALLBACK.toLowerCase()
+    )
+  ) {
+    list.unshift({ name: EXPENSE_FALLBACK, color: null });
+  }
+  return list;
+}
+
+function validateHexColor(color: string | undefined | null): string | null {
+  if (color === undefined || color === null || color === "") return null;
+  if (!/^#[0-9a-f]{6}$/i.test(color)) {
+    throw new Error("Color must be a 6-digit hex like #RRGGBB");
+  }
+  return color.toLowerCase();
+}
+
+export async function addExpenseCategoryRepo(
+  name: string,
+  color?: string | null
+): Promise<{ expenseCategories: ExpenseCategoryDef[]; existed: boolean }> {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) throw new Error("Name required");
+  if (trimmed.length > 32) throw new Error("Name is too long");
+  const validatedColor = validateHexColor(color);
+
+  const existing = await listExpenseCategoriesRepo();
+  if (existing.some((e) => e.name.toLowerCase() === trimmed.toLowerCase())) {
+    return { expenseCategories: existing, existed: true };
+  }
+  await db
+    .insert(expenseCategoriesTable)
+    .values({ name: trimmed, color: validatedColor })
+    .onConflictDoNothing();
+  return {
+    expenseCategories: await listExpenseCategoriesRepo(),
+    existed: false,
+  };
+}
+
+export async function updateExpenseCategoryColorRepo(
+  name: string,
+  color: string | null
+): Promise<ExpenseCategoryDef[]> {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) throw new Error("Name required");
+  const validatedColor = validateHexColor(color);
+  await db
+    .update(expenseCategoriesTable)
+    .set({ color: validatedColor })
+    .where(eq(expenseCategoriesTable.name, trimmed));
+  return listExpenseCategoriesRepo();
+}
+
+export async function deleteExpenseCategoryRepo(name: string): Promise<{
+  expenseCategories: ExpenseCategoryDef[];
+  expenses: Expense[];
+  reassigned: number;
+}> {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) throw new Error("Name required");
+  if (trimmed.toLowerCase() === EXPENSE_FALLBACK.toLowerCase()) {
+    throw new Error(
+      `Cannot delete the fallback category "${EXPENSE_FALLBACK}"`
+    );
+  }
+
+  const allExpenses = await db.select().from(expensesTable);
+  const affected = allExpenses.filter(
+    (e) => e.category.toLowerCase() === trimmed.toLowerCase()
+  );
+  if (affected.length > 0) {
+    for (const ex of affected) {
+      await db
+        .update(expensesTable)
+        .set({ category: EXPENSE_FALLBACK })
+        .where(eq(expensesTable.id, ex.id));
+    }
+  }
+
+  await db
+    .delete(expenseCategoriesTable)
+    .where(eq(expenseCategoriesTable.name, trimmed));
+
+  const [expenseCategories, expenses] = await Promise.all([
+    listExpenseCategoriesRepo(),
+    listExpensesRepo(),
+  ]);
+  return { expenseCategories, expenses, reassigned: affected.length };
+}
+
+/* ---------- Expenses ---------- */
+
+function rowToExpense(r: typeof expensesTable.$inferSelect): Expense {
+  return {
+    id: r.id,
+    name: r.name,
+    amountCents: r.amountCents,
+    category: r.category,
+    store: r.store || "",
+    paidBy: r.paidBy,
+    added: formatDate(r.added),
+  };
+}
+
+export async function listExpensesRepo(): Promise<Expense[]> {
+  const rows = await db.select().from(expensesTable);
+  return rows.map(rowToExpense);
+}
+
+export type AddExpenseInput = {
+  name: string;
+  amountCents: number;
+  category?: string;
+  store?: string;
+  paidBy: string;
+};
+
+export async function addExpenseRepo(
+  input: AddExpenseInput
+): Promise<Expense[]> {
+  const name = String(input.name ?? "").trim();
+  if (!name) throw new Error("Name required");
+  const amountCents = Math.round(Number(input.amountCents));
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    throw new Error("Amount must be greater than zero");
+  }
+  const paidBy = String(input.paidBy ?? "").trim();
+  if (!paidBy) throw new Error("Paid by required");
+
+  const validCats = (await listExpenseCategoriesRepo()).map((c) => c.name);
+  const category = pickCategory(input.category, validCats, EXPENSE_FALLBACK);
+  const store = input.store ? String(input.store).trim() || null : null;
+
+  await db
+    .insert(expensesTable)
+    .values({ name, amountCents, category, store, paidBy });
+  return listExpensesRepo();
+}
+
+export type UpdateExpenseInput = {
+  id: string;
+  name?: string;
+  amountCents?: number;
+  category?: string;
+  store?: string;
+  paidBy?: string;
+};
+
+export async function updateExpenseRepo(
+  input: UpdateExpenseInput
+): Promise<Expense[]> {
+  if (!input.id) throw new Error("id required");
+  const validCats = (await listExpenseCategoriesRepo()).map((c) => c.name);
+  const patch: Partial<typeof expensesTable.$inferInsert> = {};
+
+  if (input.name !== undefined) {
+    const t = String(input.name).trim();
+    if (!t) throw new Error("Name required");
+    patch.name = t;
+  }
+  if (input.amountCents !== undefined) {
+    const cents = Math.round(Number(input.amountCents));
+    if (!Number.isFinite(cents) || cents <= 0) {
+      throw new Error("Amount must be greater than zero");
+    }
+    patch.amountCents = cents;
+  }
+  if (input.category !== undefined) {
+    patch.category = pickCategory(input.category, validCats, EXPENSE_FALLBACK);
+  }
+  if (input.store !== undefined) {
+    const s = String(input.store).trim();
+    patch.store = s || null;
+  }
+  if (input.paidBy !== undefined) {
+    const p = String(input.paidBy).trim();
+    if (!p) throw new Error("Paid by required");
+    patch.paidBy = p;
+  }
+
+  await db.update(expensesTable).set(patch).where(eq(expensesTable.id, input.id));
+  return listExpensesRepo();
+}
+
+export async function deleteExpenseRepo(id: string): Promise<Expense[]> {
+  if (!id) throw new Error("id required");
+  await db.delete(expensesTable).where(eq(expensesTable.id, id));
+  return listExpensesRepo();
+}
+
+export async function clearExpensesRepo(): Promise<Expense[]> {
+  await db.delete(expensesTable);
+  return [];
 }
