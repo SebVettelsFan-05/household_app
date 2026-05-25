@@ -89,15 +89,77 @@ function preprocess(text: string): string {
 }
 
 /**
- * Splits dictation into one chunk per item. Comma / period / semicolon /
- * newline are the strong signals; "and"/"then"/"next"/"also" are softer
- * connectors used in spoken speech.
+ * Splits dictation into one chunk per item. Phone dictation punctuation is
+ * unreliable, so we anchor on weight tokens instead: each detected weight
+ * marks the end of a chunk. Trailing expiry information (keyword + date OR a
+ * standalone date pattern within a short window) is absorbed into the same
+ * chunk so it stays with its item.
  *
- * We don't split on conjunctions that fall inside a weight phrase
- * ("one and a half kilos"), so the split runs after stripping those out.
+ * Fallback to punctuation/connector splitting only when no weights are
+ * found at all — better than handing the whole blob to the chunk parser.
  */
 function splitIntoChunks(text: string): string[] {
-  // First protect "and a half" / "and a quarter" so it doesn't get split.
+  const weights: { start: number; end: number }[] = [];
+  const re = new RegExp(WEIGHT_RE.source, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    weights.push({ start: m.index, end: m.index + m[0].length });
+  }
+  if (weights.length === 0) {
+    // No weights — fall back to old punctuation/connector splitting so the
+    // user still gets per-row warnings for missing weight.
+    return punctuationFallbackSplit(text);
+  }
+
+  const chunks: string[] = [];
+  let start = 0;
+  for (const w of weights) {
+    const end = absorbTrailingExpiry(text, w.end);
+    const chunk = text.slice(start, end).trim();
+    if (chunk) chunks.push(chunk);
+    start = end;
+  }
+  const trailing = text.slice(start).trim();
+  if (trailing) chunks.push(trailing);
+  return chunks;
+}
+
+/**
+ * Looks at the text right after a weight match. If it starts with an
+ * expiry keyword + date, absorb both. If it starts with a bare date
+ * pattern (no keyword), absorb just the date. Returns the new end index.
+ */
+function absorbTrailingExpiry(text: string, weightEnd: number): number {
+  const tail = text.slice(weightEnd);
+  // Keyword-led expiry: "exp June 12", "best before May 30", etc.
+  const kw = tail.match(
+    /^\s*(?:expires?(?:\s*on)?|expiry|exp\.?|best\s*before|best\s*by|use\s*by|bb|bbd|consume\s*by|good\s*until)[:\s.]*([^\n]+?)(?=\s+[A-Za-z]{3,}|\s*$)/i
+  );
+  if (kw) {
+    // Look ahead for the first date within the captured tail.
+    const dateInTail = findFirstDate(kw[0]);
+    if (dateInTail.matched) {
+      const matchedEnd = kw[0].indexOf(dateInTail.matched) + dateInTail.matched.length;
+      return weightEnd + matchedEnd;
+    }
+    // Keyword without a parseable date — absorb the keyword itself.
+    return weightEnd + kw[0].length;
+  }
+  // Bare date: look for one within the first ~30 chars of the tail, but
+  // only if it's followed by what looks like a new item (whitespace + a
+  // word starting with a letter) or end of string. This avoids stealing a
+  // date that's actually part of the next item's name.
+  const trimmedTail = tail.match(/^\s*/);
+  const ws = trimmedTail ? trimmedTail[0].length : 0;
+  const candidate = tail.slice(ws, ws + 40);
+  const dateMatch = findFirstDate(candidate);
+  if (dateMatch.matched && candidate.indexOf(dateMatch.matched) === 0) {
+    return weightEnd + ws + dateMatch.matched.length;
+  }
+  return weightEnd;
+}
+
+function punctuationFallbackSplit(text: string): string[] {
   const protectedText = text.replace(
     /\band\s+(a\s+half|a\s+quarter|half|quarter)\b/gi,
     "_and_$1"
@@ -147,13 +209,25 @@ function parseChunk(raw: string): DictationItem {
 }
 
 function cleanName(text: string): string {
-  // Strip orphaned numbers (e.g. "six" left over from "six ounces" if our
-  // weight regex missed the unit) and stray punctuation.
-  const cleaned = text
+  let cleaned = text
     .replace(/\s+/g, " ")
     .replace(/^\s*[-:•]\s*/, "")
     .replace(/[-:•]\s*$/, "")
     .trim();
+  // Strip leading connectors that came from cross-item splits, e.g.
+  // "and onions" / "then yogurt" / "plus tomatoes" / "also milk".
+  cleaned = cleaned.replace(
+    /^(?:and|then|next|also|plus|with|of|for)\s+/i,
+    ""
+  );
+  // Drop trailing prep tails that crept in past chunk splitting
+  // ("garlic finely chopped" → "garlic"). Lifted from parseIngredient's
+  // modifier list; not worth importing the whole thing here.
+  cleaned = cleaned.replace(
+    /\s+(?:finely|coarsely|thinly|thickly|roughly|freshly|fresh)\s+(?:chopped|diced|sliced|grated|minced|ground|crumbled).*$/i,
+    ""
+  );
+  cleaned = cleaned.replace(/\s+(?:chopped|diced|sliced|grated|minced|crumbled)$/i, "");
   if (!cleaned) return "";
   return titleCaseName(cleaned);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
-import DictateInventoryModal from "@/components/DictateInventoryModal";
+import DictateItemsModal from "@/components/DictateItemsModal";
 import ScanLabelModal, {
   type ScanResult,
 } from "@/components/ScanLabelModal";
@@ -210,7 +210,8 @@ export default function AddItemForm({
         />
       ) : null}
       {dictating ? (
-        <DictateInventoryModal
+        <DictateItemsModal
+          mode="inventory"
           categories={categories}
           items={items}
           onClose={() => setDictating(false)}

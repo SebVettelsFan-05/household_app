@@ -1,40 +1,51 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import SplitCard, { type SplitLine } from "@/components/SplitCard";
 import { fmtMoney, parseCents } from "@/lib/money";
 import { titleCaseName } from "@/lib/normalize";
-import type { Expense } from "@/lib/types";
+import { BUYERS, type Expense } from "@/lib/types";
 
 /**
- * Recurring bills have history now.
+ * Monthly breakdown — three editable sections (one-time, recurring fixed,
+ * recurring variable) plus a per-person Rent block and a settlement section
+ * at the bottom that folds everything into a Send / Withdraw breakdown.
  *
- * Each bill carries:
- *   - `schedule`: ordered list of `{ from: "YYYY-MM", cents }` markers. The
- *     amount for a month is whatever the most recent marker said. Edits made
- *     while viewing the *current* month append/replace at the current month
- *     and trim future markers — that's the "write forward" rule.
- *   - `overrides`: per-month one-shot amounts. Edits to any month *other*
- *     than the current month land here, so past months never propagate.
+ * Rent is its own thing because each house member owes a different amount
+ * (e.g. Arthur $800, Daniel $800, Eli $700, …). We store per-person
+ * allocations with the same forward-write schedule + per-month overrides
+ * pattern used for the other bills, just keyed by name instead of carrying
+ * a single cents value.
  *
- * Resolution order for a month M: override[M] wins, otherwise the most recent
- * schedule marker with `from <= M`. Missing on both = 0.
- *
- * Variable bills (gas/water/electricity) are always per-month and live in a
- * simple map.
+ * Internet is folded into the 5-way share pool but recorded as fully paid
+ * by Arthur — that's the household convention, so the settlement math
+ * gives Arthur credit for the whole amount.
  */
+
+/* ---------- Types ---------- */
+
 type ScheduleEntry = { from: string; cents: number };
 type FixedRecurring = {
   id: string;
   name: string;
   protected?: boolean;
+  // When set, the bill's full amount is treated as "paid" by this person
+  // in the settlement math (the household's Internet convention).
+  paidBy?: string;
   schedule: ScheduleEntry[];
   overrides: Record<string, number>;
 };
 type VariableMap = Record<string, Record<string, number>>;
 
-// Bumped to v3 / v2 to wipe out stale test values from earlier development
-// — protected mainstays start at $0 again, variable utilities start blank,
-// and the old keys are removed on load so they don't linger.
+type RentAlloc = Record<string, number>; // name → cents
+type RentAllocSchedule = { from: string; alloc: RentAlloc };
+type RentState = {
+  schedule: RentAllocSchedule[];
+  overrides: Record<string, RentAlloc>;
+};
+
+/* ---------- Storage keys ---------- */
+
 const LS_FIXED_V3 = "monthly_recurring_fixed_v3";
 const LEGACY_FIXED_KEYS = [
   "monthly_recurring_fixed_v2",
@@ -42,15 +53,26 @@ const LEGACY_FIXED_KEYS = [
 ];
 const LS_VARIABLE_V2 = "monthly_recurring_variable_v2";
 const LEGACY_VARIABLE_KEYS = ["monthly_recurring_variable_v1"];
+const LS_RENT_V1 = "monthly_rent_alloc_v1";
 
-const PROTECTED_FIXED: Pick<FixedRecurring, "id" | "name">[] = [
-  { id: "fixed-mainstay-rent", name: "Rent" },
-  { id: "fixed-mainstay-internet", name: "Internet" },
+// Rent used to be a regular protected entry in the fixed list. It's been
+// promoted to its own per-person allocation block — filter the legacy id out
+// on load so it doesn't linger as an unprotected single-amount line.
+const LEGACY_RENT_ID = "fixed-mainstay-rent";
+
+/* ---------- Protected mainstays ---------- */
+
+type ProtectedSeed = Pick<FixedRecurring, "id" | "name" | "paidBy">;
+
+const PROTECTED_FIXED: ProtectedSeed[] = [
+  { id: "fixed-mainstay-internet", name: "Internet", paidBy: "Arthur" },
   { id: "fixed-mainstay-rental-insurance", name: "Rental insurance" },
 ];
 
 const VARIABLE_KEYS = ["Gas", "Water", "Electricity"] as const;
 type VariableKey = (typeof VARIABLE_KEYS)[number];
+
+/* ---------- Month helpers ---------- */
 
 function ym(date: Date): string {
   const y = date.getFullYear();
@@ -71,10 +93,13 @@ function shiftMonth(key: string, delta: number): string {
   return ym(d);
 }
 
+/* ---------- Fixed-bill load + persist ---------- */
+
 function emptyProtected(): FixedRecurring[] {
   return PROTECTED_FIXED.map((p) => ({
     id: p.id,
     name: p.name,
+    paidBy: p.paidBy,
     protected: true,
     schedule: [],
     overrides: {},
@@ -87,6 +112,7 @@ function parseFixedEntry(raw: unknown): FixedRecurring | null {
     id?: unknown;
     name?: unknown;
     protected?: unknown;
+    paidBy?: unknown;
     schedule?: unknown;
     overrides?: unknown;
   };
@@ -95,6 +121,7 @@ function parseFixedEntry(raw: unknown): FixedRecurring | null {
     id: r.id,
     name: r.name,
     protected: Boolean(r.protected),
+    paidBy: typeof r.paidBy === "string" ? r.paidBy : undefined,
     schedule: Array.isArray(r.schedule)
       ? (r.schedule as ScheduleEntry[]).filter(
           (s) =>
@@ -110,8 +137,6 @@ function parseFixedEntry(raw: unknown): FixedRecurring | null {
 
 function loadFixed(): FixedRecurring[] {
   if (typeof window === "undefined") return emptyProtected();
-  // Drop legacy keys on read so old test data doesn't keep coming back if
-  // someone uses both old and new builds.
   for (const key of LEGACY_FIXED_KEYS) {
     try {
       window.localStorage.removeItem(key);
@@ -138,6 +163,10 @@ function loadFixed(): FixedRecurring[] {
       arr = [];
     }
   }
+  // Rent migrated out of the fixed list — drop any stale entry so we don't
+  // double-count it against the per-person allocation.
+  arr = arr.filter((r) => r.id !== LEGACY_RENT_ID);
+
   for (const p of PROTECTED_FIXED) {
     const existing = arr.find((r) => r.id === p.id);
     if (!existing) {
@@ -145,12 +174,14 @@ function loadFixed(): FixedRecurring[] {
         id: p.id,
         name: p.name,
         protected: true,
+        paidBy: p.paidBy,
         schedule: [],
         overrides: {},
       });
     } else {
       existing.protected = true;
       existing.name = p.name;
+      existing.paidBy = p.paidBy;
       existing.schedule = existing.schedule ?? [];
       existing.overrides = existing.overrides ?? {};
     }
@@ -178,6 +209,34 @@ function loadVariable(): VariableMap {
   }
 }
 
+function loadRent(): RentState {
+  const empty: RentState = { schedule: [], overrides: {} };
+  if (typeof window === "undefined") return empty;
+  try {
+    const raw = window.localStorage.getItem(LS_RENT_V1);
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return empty;
+    const r = parsed as { schedule?: unknown; overrides?: unknown };
+    const schedule = Array.isArray(r.schedule)
+      ? (r.schedule as RentAllocSchedule[]).filter(
+          (s) =>
+            s &&
+            typeof s.from === "string" &&
+            s.alloc &&
+            typeof s.alloc === "object"
+        )
+      : [];
+    const overrides =
+      r.overrides && typeof r.overrides === "object"
+        ? (r.overrides as Record<string, RentAlloc>)
+        : {};
+    return { schedule, overrides };
+  } catch {
+    return empty;
+  }
+}
+
 function sortFixed(rows: FixedRecurring[]): FixedRecurring[] {
   const order = PROTECTED_FIXED.map((p) => p.id);
   const protectedRows = order
@@ -187,12 +246,13 @@ function sortFixed(rows: FixedRecurring[]): FixedRecurring[] {
   return [...protectedRows, ...others];
 }
 
+/* ---------- Resolution helpers ---------- */
+
 /** Resolves `bill`'s amount for the given month. Returns 0 if nothing matches. */
 function amountForMonth(bill: FixedRecurring, month: string): number {
   if (Object.prototype.hasOwnProperty.call(bill.overrides, month)) {
     return bill.overrides[month];
   }
-  // Walk schedule (ascending) and keep the latest entry whose `from <= month`.
   let result = 0;
   for (const entry of [...bill.schedule].sort((a, b) =>
     a.from.localeCompare(b.from)
@@ -207,17 +267,6 @@ function hasOverride(bill: FixedRecurring, month: string): boolean {
   return Object.prototype.hasOwnProperty.call(bill.overrides, month);
 }
 
-/**
- * Applies an edit.
- *
- *   - Editing the *current month or any future month* writes forward: trims
- *     schedule markers >= the edit month and appends a new marker at the
- *     edit month. Every subsequent month (until another forward-write or a
- *     per-month override) picks up the new amount.
- *   - Editing a *past month* only sets a per-month override. The schedule
- *     is left untouched, so accidentally typing in last August's rent
- *     doesn't repaint everything since.
- */
 function setBillAmount(
   bill: FixedRecurring,
   month: string,
@@ -235,15 +284,65 @@ function setBillAmount(
   };
 }
 
-/** Drops a month-level override and falls back to the schedule. */
-function clearBillOverride(bill: FixedRecurring, month: string): FixedRecurring {
+function clearBillOverride(
+  bill: FixedRecurring,
+  month: string
+): FixedRecurring {
   if (!hasOverride(bill, month)) return bill;
   const next = { ...bill.overrides };
   delete next[month];
   return { ...bill, overrides: next };
 }
 
-/* ---- Free-form amount input (commits on blur/Enter, never on keystroke) ---- */
+/** Resolves rent allocations for a month — same schedule/override rules. */
+function rentForMonth(state: RentState, month: string): RentAlloc {
+  if (Object.prototype.hasOwnProperty.call(state.overrides, month)) {
+    return state.overrides[month];
+  }
+  let result: RentAlloc = {};
+  for (const entry of [...state.schedule].sort((a, b) =>
+    a.from.localeCompare(b.from)
+  )) {
+    if (entry.from <= month) result = entry.alloc;
+    else break;
+  }
+  return result;
+}
+
+function hasRentOverride(state: RentState, month: string): boolean {
+  return Object.prototype.hasOwnProperty.call(state.overrides, month);
+}
+
+/**
+ * Applies a per-person rent edit. The whole alloc map for the month is
+ * written together — current/future edits forward-write, past edits go to
+ * overrides only. Caller passes the full new alloc map.
+ */
+function setRentAlloc(
+  state: RentState,
+  month: string,
+  currentMonth: string,
+  alloc: RentAlloc
+): RentState {
+  if (month >= currentMonth) {
+    const trimmed = state.schedule.filter((s) => s.from < month);
+    trimmed.push({ from: month, alloc });
+    return { ...state, schedule: trimmed };
+  }
+  return {
+    ...state,
+    overrides: { ...state.overrides, [month]: alloc },
+  };
+}
+
+function clearRentOverride(state: RentState, month: string): RentState {
+  if (!hasRentOverride(state, month)) return state;
+  const next = { ...state.overrides };
+  delete next[month];
+  return { ...state, overrides: next };
+}
+
+/* ---------- Free-form amount input ---------- */
 
 function AmountInput({
   cents,
@@ -298,6 +397,8 @@ function AmountInput({
   );
 }
 
+/* ---------- Component ---------- */
+
 type Props = {
   expenses: Expense[];
   onToast: (msg: string) => void;
@@ -305,22 +406,20 @@ type Props = {
 
 export default function MonthlyBreakdown({ expenses, onToast }: Props) {
   const [month, setMonth] = useState<string>(() => ym(new Date()));
-  // Recomputed each render so a tab left open overnight rolls into the new
-  // month without the user noticing.
   const currentMonth = ym(new Date());
   const isCurrentMonth = month === currentMonth;
 
   const [fixed, setFixed] = useState<FixedRecurring[]>([]);
   const [variable, setVariable] = useState<VariableMap>({});
-  const [newName, setNewName] = useState("");
-  const [newAmount, setNewAmount] = useState("");
+  const [rent, setRent] = useState<RentState>({ schedule: [], overrides: {} });
 
   useEffect(() => {
-    const loaded = sortFixed(loadFixed());
-    setFixed(loaded);
+    const loadedFixed = sortFixed(loadFixed());
+    setFixed(loadedFixed);
     setVariable(loadVariable());
+    setRent(loadRent());
     try {
-      window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(loaded));
+      window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(loadedFixed));
     } catch {
       /* ignore */
     }
@@ -342,6 +441,15 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
       window.localStorage.setItem(LS_VARIABLE_V2, JSON.stringify(next));
     } catch {
       onToast("Couldn't save utility amounts");
+    }
+  }
+
+  function persistRent(next: RentState) {
+    setRent(next);
+    try {
+      window.localStorage.setItem(LS_RENT_V1, JSON.stringify(next));
+    } catch {
+      onToast("Couldn't save rent allocations");
     }
   }
 
@@ -382,8 +490,33 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     const rows = Array.from(buckets.values()).sort(
       (a, b) => b.amount - a.amount
     );
-    return { rows, total, count: inMonth.length };
+    return { rows, total, count: inMonth.length, inMonth };
   }, [expenses, month]);
+
+  /* ---- Rent: resolved per displayed month ---- */
+
+  const monthRent = useMemo(() => rentForMonth(rent, month), [rent, month]);
+  const rentTotal = useMemo(
+    () => BUYERS.reduce((s, name) => s + (monthRent[name] ?? 0), 0),
+    [monthRent]
+  );
+  const rentOverridden = hasRentOverride(rent, month);
+
+  function commitRentForPerson(name: string, cents: number | null) {
+    const nextAlloc: RentAlloc = { ...monthRent };
+    if (cents === null || cents <= 0) {
+      delete nextAlloc[name];
+    } else {
+      nextAlloc[name] = cents;
+    }
+    persistRent(setRentAlloc(rent, month, currentMonth, nextAlloc));
+  }
+
+  function clearRent() {
+    if (rentOverridden) {
+      persistRent(clearRentOverride(rent, month));
+    }
+  }
 
   /* ---- Fixed recurring: resolved per displayed month ---- */
 
@@ -391,36 +524,6 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     () => fixed.reduce((s, r) => s + amountForMonth(r, month), 0),
     [fixed, month]
   );
-
-  function addFixed() {
-    const trimmed = newName.trim();
-    if (!trimmed) {
-      onToast("Name is required");
-      return;
-    }
-    const cents = parseCents(newAmount);
-    if (!cents || cents <= 0) {
-      onToast("Amount must be greater than zero");
-      return;
-    }
-    // New bills start from the current month forward, so they don't
-    // accidentally repaint past months with amounts the user never paid.
-    persistFixed([
-      ...fixed,
-      {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        name: trimmed,
-        schedule: [{ from: currentMonth, cents }],
-        overrides: {},
-      },
-    ]);
-    setNewName("");
-    setNewAmount("");
-  }
-
-  function renameFixed(id: string, name: string) {
-    persistFixed(fixed.map((r) => (r.id === id ? { ...r, name } : r)));
-  }
 
   function commitAmount(id: string, cents: number | null) {
     persistFixed(
@@ -436,14 +539,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     );
   }
 
-  function removeFixed(id: string) {
-    const row = fixed.find((r) => r.id === id);
-    if (!row || row.protected) return;
-    if (!confirm(`Remove "${row.name}" from recurring bills?`)) return;
-    persistFixed(fixed.filter((r) => r.id !== id));
-  }
-
-  /* ---- Variable recurring: per-month amounts for gas/water/electricity ---- */
+  /* ---- Variable recurring ---- */
 
   const monthVariable = variable[month] ?? {};
   const variableTotal = VARIABLE_KEYS.reduce(
@@ -464,7 +560,64 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     persistVariable(next);
   }
 
-  const grandTotal = oneTime.total + fixedTotal + variableTotal;
+  /* ---- Settlement math ---- */
+
+  const settlement = useMemo(() => {
+    const N = BUYERS.length;
+    // One-time pool: split N ways. Each person's "paid" picks up whatever
+    // they fronted in the expenses list.
+    const oneTimePaidBy = new Map<string, number>();
+    for (const b of BUYERS) oneTimePaidBy.set(b, 0);
+    for (const e of oneTime.inMonth) {
+      oneTimePaidBy.set(
+        e.paidBy,
+        (oneTimePaidBy.get(e.paidBy) ?? 0) + e.amountCents
+      );
+    }
+    const oneTimeShare = Math.round(oneTime.total / N);
+
+    // Five-way bills (non-rent recurring fixed without paidBy + variable).
+    // For each, the share is total/N and any paidBy gets credit for the
+    // full amount.
+    let fiveWayPool = 0;
+    const paidByExtra = new Map<string, number>();
+    for (const b of BUYERS) paidByExtra.set(b, 0);
+
+    for (const r of fixed) {
+      const cents = amountForMonth(r, month);
+      if (cents <= 0) continue;
+      fiveWayPool += cents;
+      if (r.paidBy && BUYERS.includes(r.paidBy as (typeof BUYERS)[number])) {
+        paidByExtra.set(r.paidBy, (paidByExtra.get(r.paidBy) ?? 0) + cents);
+      }
+    }
+    for (const k of VARIABLE_KEYS) {
+      const cents = monthVariable[k] ?? 0;
+      if (cents > 0) fiveWayPool += cents;
+    }
+    const fiveWayShare = Math.round(fiveWayPool / N);
+
+    // Settlement total = the entire monthly pool (one-time + 5-way + rent).
+    // Rent is per-person, so its share is whatever each person owes.
+    const grand = oneTime.total + fiveWayPool + rentTotal;
+
+    const lines: SplitLine[] = BUYERS.map((name) => {
+      const paid =
+        (oneTimePaidBy.get(name) ?? 0) + (paidByExtra.get(name) ?? 0);
+      const share =
+        oneTimeShare + fiveWayShare + (monthRent[name] ?? 0);
+      return { name, paid, share };
+    });
+
+    // Compute the rounding remainder so the total ÷ N share notes still
+    // line up. For mixed pools the cleanest representation is the sum of
+    // shares vs the grand total.
+    const sumOfShares = lines.reduce((s, l) => s + l.share, 0);
+    const roundingRemainder = grand - sumOfShares;
+    return { lines, grand, roundingRemainder };
+  }, [oneTime, fixed, month, monthVariable, rentTotal, monthRent]);
+
+  const grandTotal = settlement.grand;
 
   return (
     <section className="monthly-card">
@@ -545,6 +698,48 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
 
       <div className="monthly-section">
         <div className="monthly-section-head">
+          <h3>
+            Rent (per person)
+            {rentOverridden ? (
+              <span
+                className="monthly-row-desc"
+                title="A custom allocation is set just for this month"
+              >
+                {" "}(override)
+              </span>
+            ) : null}
+          </h3>
+          <span className="monthly-sub">
+            <strong>{fmtMoney(rentTotal)}</strong> this month
+          </span>
+        </div>
+        <div className="monthly-list">
+          {BUYERS.map((name) => (
+            <div className="monthly-row is-protected" key={name}>
+              <span className="monthly-row-name">{name}</span>
+              <AmountInput
+                cents={monthRent[name] || undefined}
+                onCommit={(cents) => commitRentForPerson(name, cents)}
+                ariaLabel={`${name}'s rent share`}
+              />
+            </div>
+          ))}
+          {rentOverridden && !isCurrentMonth ? (
+            <button
+              type="button"
+              className="cat-mgr-link"
+              onClick={clearRent}
+              style={{ alignSelf: "flex-start" }}
+              title="Drop this month's override and fall back to the default split"
+            >
+              ↺ Reset this month
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="monthly-section">
+        <div className="monthly-section-head">
           <h3>Recurring (fixed)</h3>
           <span className="monthly-sub">
             <strong>{fmtMoney(fixedTotal)}</strong> this month
@@ -555,31 +750,18 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
             const monthCents = amountForMonth(r, month);
             const overridden = hasOverride(r, month);
             return (
-              <div
-                className={`monthly-row${r.protected ? " is-protected" : " editable"}`}
-                key={r.id}
-              >
-                {r.protected ? (
-                  <span className="monthly-row-name">
-                    {r.name}
-                    {overridden ? (
-                      <span
-                        className="monthly-row-desc"
-                        title="A custom amount is set just for this month"
-                      >
-                        {" "}(override)
-                      </span>
-                    ) : null}
-                  </span>
-                ) : (
-                  <input
-                    className="monthly-input-name"
-                    type="text"
-                    value={r.name}
-                    onChange={(e) => renameFixed(r.id, e.target.value)}
-                    maxLength={32}
-                  />
-                )}
+              <div className="monthly-row is-protected" key={r.id}>
+                <span className="monthly-row-name">
+                  {r.name}
+                  {overridden ? (
+                    <span
+                      className="monthly-row-desc"
+                      title="A custom amount is set just for this month"
+                    >
+                      {" "}(override)
+                    </span>
+                  ) : null}
+                </span>
                 <AmountInput
                   cents={monthCents || undefined}
                   onCommit={(cents) => commitAmount(r.id, cents)}
@@ -595,38 +777,10 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                   >
                     ↺
                   </button>
-                ) : r.protected ? null : (
-                  <button
-                    type="button"
-                    className="monthly-remove"
-                    onClick={() => removeFixed(r.id)}
-                    aria-label={`Remove ${r.name}`}
-                  >
-                    ×
-                  </button>
-                )}
+                ) : null}
               </div>
             );
           })}
-        </div>
-        <div className="monthly-add">
-          <input
-            type="text"
-            placeholder="e.g. Phone bill"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            maxLength={32}
-          />
-          <input
-            type="text"
-            inputMode="decimal"
-            placeholder="0.00"
-            value={newAmount}
-            onChange={(e) => setNewAmount(e.target.value)}
-          />
-          <button type="button" className="btn-accent" onClick={addFixed}>
-            Add
-          </button>
         </div>
       </div>
 
@@ -658,6 +812,14 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         <span>Total for {ymLabel(month)}</span>
         <strong>{fmtMoney(grandTotal)}</strong>
       </div>
+
+      {grandTotal > 0 ? (
+        <SplitCard
+          title={`Settlement for ${ymLabel(month)}`}
+          lines={settlement.lines}
+          roundingRemainder={settlement.roundingRemainder}
+        />
+      ) : null}
     </section>
   );
 }

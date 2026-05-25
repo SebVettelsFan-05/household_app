@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
+import DictateItemsModal from "@/components/DictateItemsModal";
 import ScanLabelModal, {
   type ScanResult,
 } from "@/components/ScanLabelModal";
@@ -45,6 +46,7 @@ export default function AddGroceryForm({
   // they keep typing. Reset on submit so the next entry auto-suggests again.
   const [userPickedCat, setUserPickedCat] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [dictating, setDictating] = useState(false);
 
   function applyScan(r: ScanResult) {
     if (r.name) setName(r.name);
@@ -143,14 +145,24 @@ export default function AddGroceryForm({
     <section className="add-card">
       <div className="add-card-head">
         <h2>Add to list</h2>
-        <button
-          type="button"
-          className="scan-trigger"
-          onClick={() => setScanning(true)}
-          title="Scan a barcode / label with your camera"
-        >
-          📷 Scan
-        </button>
+        <div className="add-card-actions">
+          <button
+            type="button"
+            className="scan-trigger"
+            onClick={() => setDictating(true)}
+            title="Dictate several items at once using your phone keyboard mic"
+          >
+            🎙️ Dictate
+          </button>
+          <button
+            type="button"
+            className="scan-trigger"
+            onClick={() => setScanning(true)}
+            title="Scan a barcode / label with your camera"
+          >
+            📷 Scan
+          </button>
+        </div>
       </div>
       <div className="field">
         <label htmlFor="g-name">Name</label>
@@ -255,6 +267,17 @@ export default function AddGroceryForm({
           withExpiry={false}
           onConfirm={applyScan}
           onClose={() => setScanning(false)}
+        />
+      ) : null}
+      {dictating ? (
+        <DictateItemsModal
+          mode="grocery"
+          categories={categories}
+          grocery={grocery}
+          fridgeItems={fridgeItems}
+          onClose={() => setDictating(false)}
+          onResult={onResult}
+          onError={onError}
         />
       ) : null}
     </section>

@@ -7,7 +7,7 @@ import ExpenseRow from "@/components/ExpenseRow";
 import MonthlyBreakdown from "@/components/MonthlyBreakdown";
 import { clearExpenses } from "@/lib/client";
 import { fmtMoney } from "@/lib/money";
-import { BUYERS, type Expense } from "@/lib/types";
+import { type Expense } from "@/lib/types";
 
 type Props = {
   expenses: Expense[];
@@ -45,26 +45,10 @@ export default function ExpensesView({
     });
   }, [expenses]);
 
-  // ---- Split math ----
-  // Five-way even split. Per-person share rounded to the nearest cent;
-  // any remainder from rounding is shown so totals balance to the penny.
-  const summary = useMemo(() => {
-    const total = expenses.reduce((s, e) => s + e.amountCents, 0);
-    const share = Math.round(total / BUYERS.length);
-    const paidBy = new Map<string, number>();
-    for (const b of BUYERS) paidBy.set(b, 0);
-    for (const e of expenses) {
-      paidBy.set(e.paidBy, (paidBy.get(e.paidBy) ?? 0) + e.amountCents);
-    }
-    const lines = BUYERS.map((b) => {
-      const paid = paidBy.get(b) ?? 0;
-      const net = paid - share;
-      return { name: b, paid, net };
-    });
-    // True remainder so the math reads honestly when total doesn't divide evenly.
-    const roundingRemainder = total - share * BUYERS.length;
-    return { total, share, lines, roundingRemainder };
-  }, [expenses]);
+  const total = useMemo(
+    () => expenses.reduce((s, e) => s + e.amountCents, 0),
+    [expenses]
+  );
 
   async function clearAll() {
     if (expenses.length === 0) return;
@@ -94,7 +78,7 @@ export default function ExpensesView({
           {expenses.length === 1 ? "" : "s"}
         </div>
         <div>
-          <strong>{fmtMoney(summary.total)}</strong> total
+          <strong>{fmtMoney(total)}</strong> total
         </div>
       </div>
 
@@ -127,14 +111,9 @@ export default function ExpensesView({
             onError={(msg) => onToast("Error: " + msg)}
           />
 
-          {expenses.length > 0 ? (
-            <SplitCard
-              total={summary.total}
-              share={summary.share}
-              lines={summary.lines}
-              roundingRemainder={summary.roundingRemainder}
-            />
-          ) : null}
+          {/* Split breakdown lives on the Monthly tab now — the math is
+              month-specific once rent + utilities are folded in, so an
+              all-time split here would be misleading. */}
 
           <div className="list-head">
             <h2>Expenses</h2>
@@ -192,104 +171,3 @@ export default function ExpensesView({
   );
 }
 
-/**
- * Settlement breakdown. Two columns of actionable rows — "Send to joint
- * account" for people whose share exceeds what they paid, "Withdraw from
- * joint account" for people who fronted more than their share. Even rows
- * (paid exactly their share) drop off both lists since they have nothing to
- * do. Each row carries a Paid / Share sub-line so the amount is auditable
- * at a glance.
- *
- * Sorted by amount descending within each group, so the biggest movers
- * read first.
- */
-function SplitCard({
-  total,
-  share,
-  lines,
-  roundingRemainder,
-}: {
-  total: number;
-  share: number;
-  lines: { name: string; paid: number; net: number }[];
-  roundingRemainder: number;
-}) {
-  const senders = lines
-    .filter((l) => l.net < 0)
-    .map((l) => ({ name: l.name, paid: l.paid, amount: -l.net }))
-    .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
-  const receivers = lines
-    .filter((l) => l.net > 0)
-    .map((l) => ({ name: l.name, paid: l.paid, amount: l.net }))
-    .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
-  const evens = lines.filter((l) => l.net === 0).map((l) => l.name);
-
-  return (
-    <section className="split-card">
-      <h2>Split</h2>
-
-      <dl className="split-summary">
-        <div>
-          <dt>Total group expenses</dt>
-          <dd>{fmtMoney(total)}</dd>
-        </div>
-        <div>
-          <dt>Target share per person</dt>
-          <dd>{fmtMoney(share)}</dd>
-        </div>
-      </dl>
-
-      {senders.length > 0 ? (
-        <div className="split-group split-group-send">
-          <h3>Send to joint account</h3>
-          <ul>
-            {senders.map((s) => (
-              <li key={s.name}>
-                <div className="split-row-main">
-                  <span className="split-name">{s.name}</span>
-                  <span className="split-amount">{fmtMoney(s.amount)}</span>
-                </div>
-                <div className="split-row-sub">
-                  Paid {fmtMoney(s.paid)} — Share {fmtMoney(share)}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {receivers.length > 0 ? (
-        <div className="split-group split-group-receive">
-          <h3>Withdraw from joint account</h3>
-          <ul>
-            {receivers.map((r) => (
-              <li key={r.name}>
-                <div className="split-row-main">
-                  <span className="split-name">{r.name}</span>
-                  <span className="split-amount">{fmtMoney(r.amount)}</span>
-                </div>
-                <div className="split-row-sub">
-                  Paid {fmtMoney(r.paid)} — Share {fmtMoney(share)}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {evens.length > 0 ? (
-        <p className="split-note">
-          Already even: {evens.join(", ")}
-        </p>
-      ) : null}
-
-      {roundingRemainder !== 0 ? (
-        <p className="split-note">
-          Rounding leaves {fmtMoney(Math.abs(roundingRemainder))}{" "}
-          {roundingRemainder > 0 ? "short of" : "over"} the total — one
-          person can absorb it.
-        </p>
-      ) : null}
-    </section>
-  );
-}
