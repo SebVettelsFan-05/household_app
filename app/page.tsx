@@ -12,20 +12,22 @@ import ThemeToggle from "@/components/ThemeToggle";
 import Toast, { type ToastMessage } from "@/components/Toast";
 import {
   listCategories,
-  listExpenseCategories,
   listExpenses,
   listGrocery,
   listItems,
   listRecipes,
+  seedSampleGrocery,
 } from "@/lib/client";
+import { sortCategories } from "@/lib/normalize";
 import type {
   CategoryDef,
   Expense,
-  ExpenseCategoryDef,
   GroceryItem,
   Item,
   Recipe,
 } from "@/lib/types";
+
+const GROCERY_SEED_FLAG = "grocery_sample_seeded_v1";
 
 export default function Page() {
   const [items, setItems] = useState<Item[]>([]);
@@ -33,9 +35,6 @@ export default function Page() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<CategoryDef[]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<
-    ExpenseCategoryDef[]
-  >([]);
   const [itemsLoading, setItemsLoading] = useState(true);
   const [itemsError, setItemsError] = useState<string | null>(null);
   const [groceryLoading, setGroceryLoading] = useState(true);
@@ -64,8 +63,30 @@ export default function Page() {
       });
 
     listGrocery()
-      .then((d) => {
+      .then(async (d) => {
         if (cancelled) return;
+        // First-run testing seed: only when the table is genuinely empty AND
+        // we've never seeded before. The localStorage flag means clearing the
+        // list later won't trigger a re-seed.
+        if (
+          d.length === 0 &&
+          typeof window !== "undefined" &&
+          !window.localStorage.getItem(GROCERY_SEED_FLAG)
+        ) {
+          const result = await seedSampleGrocery();
+          if (result.ok) {
+            try {
+              window.localStorage.setItem(GROCERY_SEED_FLAG, "1");
+            } catch {
+              /* localStorage unavailable — flag-less, but still seeded once */
+            }
+            const seeded = await listGrocery().catch(() => d);
+            if (cancelled) return;
+            setGrocery(seeded);
+            setGroceryLoading(false);
+            return;
+          }
+        }
         setGrocery(d);
         setGroceryLoading(false);
       })
@@ -102,29 +123,27 @@ export default function Page() {
     listCategories()
       .then((d) => {
         if (cancelled) return;
-        setCategories(d);
+        setCategories(sortCategories(d));
       })
       .catch(() => {
         if (cancelled) return;
-        setCategories([
-          { name: "Meat", color: null },
-          { name: "Veggies", color: null },
-          { name: "Other", color: null },
-        ]);
-      });
-
-    listExpenseCategories()
-      .then((d) => {
-        if (cancelled) return;
-        setExpenseCategories(d);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setExpenseCategories([
-          { name: "Rent + Utilities", color: null },
-          { name: "Food", color: null },
-          { name: "Misc", color: null },
-        ]);
+        setCategories(
+          sortCategories(
+            [
+              "Meat",
+              "Veggies",
+              "Fruits",
+              "Dairy",
+              "Bakery",
+              "Pantry",
+              "Frozen",
+              "Snacks",
+              "Beverages",
+              "Condiments",
+              "Other",
+            ].map((name) => ({ name, color: null }))
+          )
+        );
       });
 
     return () => {
@@ -141,7 +160,7 @@ export default function Page() {
     tab === "home"
       ? "Household"
       : tab === "fridge"
-        ? "Fridge"
+        ? "Inventory"
         : tab === "grocery"
           ? "Grocery"
           : tab === "recipes"
@@ -177,6 +196,7 @@ export default function Page() {
           loading={groceryLoading}
           loadError={groceryError}
           onGroceryChange={setGrocery}
+          onItemsChange={setItems}
           onToast={showToast}
           onManageCategories={() => setManagingCats(true)}
         />
@@ -194,11 +214,9 @@ export default function Page() {
       ) : (
         <ExpensesView
           expenses={expenses}
-          categories={expenseCategories}
           loading={expensesLoading}
           loadError={expensesError}
           onExpensesChange={setExpenses}
-          onCategoriesChange={setExpenseCategories}
           onToast={showToast}
         />
       )}

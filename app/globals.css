@@ -105,6 +105,18 @@ h1 {
   font-family: 'Fraunces', serif; font-weight: 500;
   font-size: 18px; margin: 0 0 12px; letter-spacing: -0.01em;
 }
+.add-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 4px;
+}
+.add-card-head h2 { margin-bottom: 0; }
+.scan-trigger {
+  background: var(--surface-soft); border: 1px solid var(--line);
+  color: var(--ink); padding: 6px 12px; border-radius: 999px;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.scan-trigger:hover { background: var(--accent-soft); border-color: var(--accent); }
 .field { margin-bottom: 10px; }
 .field label {
   display: block; font-size: 12px; font-weight: 500;
@@ -157,9 +169,10 @@ h1 {
   margin-top: 6px; flex-shrink: 0;
 }
 
-.cat-pills { display: flex; gap: 6px; }
+.cat-pills { display: flex; flex-wrap: wrap; gap: 6px; }
 .cat-pill {
-  flex: 1; padding: 10px 8px;
+  flex: 1 0 calc(33.333% - 6px); padding: 10px 8px;
+  min-width: 90px; max-width: 100%;
   background: var(--bg); border: 1px solid var(--line);
   border-radius: 10px; font-family: inherit;
   font-size: 14px; font-weight: 500; color: var(--ink-soft);
@@ -245,8 +258,8 @@ button:active { transform: scale(0.98); }
 .search-row input:focus { outline: none; border-color: var(--accent); }
 
 .filter-row {
-  display: flex; gap: 6px; margin: 0 0 12px;
-  overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px;
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px;
+  padding-bottom: 2px;
 }
 .filter-row::-webkit-scrollbar { display: none; }
 .filter-pill {
@@ -308,6 +321,26 @@ button:active { transform: scale(0.98); }
 }
 .item:active .item-chev { opacity: 0.9; transform: translateX(2px); }
 .list-hint { font-size: 12px; color: var(--ink-soft); margin: -4px 4px 12px; font-style: italic; opacity: 0.8; }
+
+/* Category groups — shared by the fridge and shopping lists. Items still
+   render inside a flex column (.items > gap), so each group also keeps the
+   same gap between its rows. */
+.cat-group { display: flex; flex-direction: column; gap: 8px; }
+.cat-group-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 6px 2px;
+  border-bottom: 1px solid var(--line);
+  margin-top: 4px;
+}
+.cat-group:first-child .cat-group-head { margin-top: 0; }
+.cat-group-name { line-height: 1; }
+.cat-group-count {
+  color: var(--ink-soft); font-weight: 600; font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.cat-group-done { color: var(--ink-soft); }
 
 .grocery-row {
   display: flex; align-items: stretch; gap: 0;
@@ -461,11 +494,219 @@ button:active { transform: scale(0.98); }
   border-top: 1px solid var(--line);
 }
 
+/* Receipt attachment UI (add form + edit modal) */
+.receipt-picker { display: flex; flex-direction: column; gap: 8px; }
+.receipt-picker input[type="file"] {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+.receipt-picker-cta {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-soft); color: var(--ink);
+  border: 1px dashed var(--line); border-radius: 10px;
+  padding: 12px 14px; font-size: 14px; font-weight: 500;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.receipt-picker-cta:hover { background: var(--accent-soft); border-color: var(--accent); }
+.receipt-hint {
+  margin: 0; font-size: 12px; color: var(--ink-soft); font-style: italic;
+}
+.receipt-preview {
+  position: relative;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface-soft);
+}
+.receipt-preview img {
+  max-width: 100%; max-height: 220px;
+  border-radius: 8px; object-fit: contain;
+  background: var(--bg);
+  cursor: zoom-in;
+}
+.receipt-existing-thumb { cursor: zoom-in; }
+.receipt-preview-file {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14px; color: var(--ink);
+}
+.receipt-file-icon { font-size: 20px; }
+.receipt-clear {
+  position: absolute; top: 6px; right: 6px;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(0,0,0,0.55); color: #fff;
+  border: none; font-size: 18px; line-height: 1;
+  cursor: pointer;
+}
+.receipt-clear:hover { background: rgba(0,0,0,0.75); }
+.receipt-existing {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 8px; background: var(--surface-soft);
+}
+.receipt-existing-thumb {
+  width: 64px; height: 64px; object-fit: cover;
+  border-radius: 8px; flex-shrink: 0; background: var(--bg);
+}
+.receipt-existing-icon {
+  font-size: 32px; width: 64px; height: 64px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg); border-radius: 8px; flex-shrink: 0;
+}
+.receipt-existing-meta {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.receipt-existing-link {
+  font-size: 14px; color: var(--accent); text-decoration: none;
+  font-weight: 500;
+}
+.receipt-existing-link:hover { text-decoration: underline; }
+.receipt-legacy-note {
+  font-size: 12px; color: var(--ink-soft); font-style: italic;
+  margin: 0 0 8px;
+}
+
+/* Full-screen receipt viewer — opens on click of any receipt thumbnail */
+.receipt-lightbox {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+.receipt-lightbox img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain; border-radius: 8px;
+  cursor: default;
+}
+.receipt-lightbox-close {
+  position: absolute; top: 16px; right: 16px;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16); color: #fff;
+  border: none; font-size: 24px; line-height: 1;
+  cursor: pointer;
+}
+.receipt-lightbox-close:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* Camera scan modal — live video preview with overlay reticle + action panels */
+.scan-modal { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }
+.scan-camera-wrap {
+  position: relative; width: 100%; aspect-ratio: 4 / 3;
+  background: #000; border-radius: 12px; overflow: hidden;
+}
+.scan-camera {
+  width: 100%; height: 100%; object-fit: cover;
+  background: #000;
+}
+.scan-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px;
+  pointer-events: none;
+}
+.scan-reticle {
+  width: 70%; max-width: 320px; aspect-ratio: 2 / 1;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.25);
+}
+.scan-status {
+  background: rgba(0, 0, 0, 0.6); color: #fff;
+  padding: 6px 14px; border-radius: 999px;
+  font-size: 13px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.scan-status .spinner {
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+}
+
+.scan-section {
+  background: var(--surface-soft); border-radius: 10px;
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.scan-product-name {
+  font-size: 15px; font-weight: 600; color: var(--ink);
+  font-family: 'Fraunces', serif; letter-spacing: -0.01em;
+}
+.scan-product-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 12px;
+  font-size: 12px; color: var(--ink-soft);
+}
+.scan-barcode {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+}
+.scan-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.scan-actions button { flex: 1; min-width: 0; }
+.scan-error {
+  margin: 0; color: var(--danger); font-size: 14px;
+}
+.scan-hint {
+  margin: 0; font-size: 12px; font-style: italic; color: var(--ink-soft);
+}
+
+/* Row indicators — paperclip when a receipt is present, "no receipt" pill
+   on legacy rows so they're easy to spot and backfill. */
+.receipt-pill {
+  font-size: 13px; line-height: 1; color: var(--accent);
+  text-decoration: none;
+  padding: 2px 4px; border-radius: 6px;
+}
+.receipt-pill:hover { background: var(--accent-soft); }
+.receipt-missing {
+  font-size: 11px; font-style: italic; color: var(--warn);
+  letter-spacing: 0.02em;
+}
+.item-desc { color: var(--ink-soft); font-style: italic; }
+
 /* ---------- Recipes ---------- */
 
 .recipes-toolbar {
-  display: flex; justify-content: flex-end; margin: 0 0 12px;
+  display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 12px;
 }
+
+/* Archive modal — past weeks of recipes, read-only summary */
+.archive-modal { max-width: 560px; }
+.archive-sub {
+  margin: -4px 0 14px;
+  font-size: 13px; color: var(--ink-soft);
+}
+.archive-list {
+  display: flex; flex-direction: column; gap: 18px;
+  max-height: 60vh; overflow-y: auto;
+  padding-right: 4px;
+}
+.archive-week {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.archive-week h3 {
+  margin: 0;
+  font-family: 'Fraunces', serif; font-weight: 600;
+  font-size: 16px; letter-spacing: -0.01em;
+  padding-bottom: 4px; border-bottom: 1px solid var(--line);
+}
+.archive-recipes {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.archive-recipe {
+  background: var(--surface-soft); border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.archive-recipe-head {
+  display: flex; justify-content: space-between;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+.archive-name { font-size: 15px; font-weight: 600; color: var(--ink); }
+.archive-desc { font-size: 13px; color: var(--ink-soft); }
+.archive-link {
+  font-size: 12px; color: var(--accent);
+  text-decoration: none; align-self: flex-start;
+}
+.archive-link:hover { text-decoration: underline; }
 .week-section { margin-bottom: 22px; }
 .recipe-grid {
   display: grid; gap: 8px;
@@ -474,7 +715,9 @@ button:active { transform: scale(0.98); }
 @media (min-width: 520px) {
   .recipe-grid { grid-template-columns: 1fr 1fr; }
 }
+.recipe-card-wrap { position: relative; }
 .recipe-card {
+  width: 100%;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: 12px; padding: 14px 16px;
   text-align: left; font-family: inherit; color: var(--ink);
@@ -482,6 +725,19 @@ button:active { transform: scale(0.98); }
   display: flex; flex-direction: column; gap: 6px;
   min-height: 80px;
 }
+.recipe-card-wrap .recipe-card { padding-right: 40px; }
+.recipe-fav {
+  position: absolute; top: 8px; right: 8px;
+  background: transparent; border: none;
+  width: 32px; height: 32px; border-radius: 50%;
+  font-size: 18px; line-height: 1; color: var(--ink-soft);
+  cursor: pointer; transition: background 0.15s, color 0.15s, transform 0.05s;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.recipe-fav:hover { background: var(--surface-soft); color: var(--ink); }
+.recipe-fav.on { color: #E0A82E; }
+.recipe-fav.on:hover { color: #E0A82E; }
+.recipe-fav:disabled { opacity: 0.5; cursor: not-allowed; }
 .recipe-card:active { background: var(--surface-soft); }
 .recipe-card.empty-slot {
   background: transparent; border-style: dashed;
@@ -513,6 +769,10 @@ button:active { transform: scale(0.98); }
 .recipe-empty-cta {
   font-size: 13px; font-weight: 500;
 }
+.link-row { display: flex; gap: 8px; align-items: stretch; }
+.link-row input { flex: 1; min-width: 0; }
+.link-fetch { flex-shrink: 0; white-space: nowrap; }
+
 .recipe-link {
   font-size: 12px;
 }
@@ -555,15 +815,21 @@ button:active { transform: scale(0.98); }
   font-size: 13px; color: var(--ink-soft); font-style: italic;
   padding: 6px 0;
 }
+/*
+ * Single-row layout. Qty column was 64px (too narrow for "1500g"); now 80px,
+ * with the category column shrunk to ~96px to compensate. The standalone "g"
+ * column is gone — the qty input has a `g` suffix baked in via the wrapper
+ * below, which buys back the 14px it was eating.
+ */
 .ingredient-row {
   display: grid;
-  grid-template-columns: 12px 1fr 64px 14px minmax(80px, 110px) 28px;
+  grid-template-columns: 12px 1fr 80px minmax(86px, 100px) 28px;
   gap: 6px; align-items: center;
   padding: 4px 0;
 }
 .ingredient-add {
   display: grid;
-  grid-template-columns: 1fr 64px minmax(80px, 110px) auto;
+  grid-template-columns: 1fr 80px minmax(86px, 100px) auto;
   gap: 6px; align-items: center;
   padding-top: 8px; border-top: 1px dashed var(--line); margin-top: 4px;
 }
@@ -700,6 +966,11 @@ button:active { transform: scale(0.98); }
   border-radius: 20px 20px 0 0;
   padding: 22px 18px calc(22px + env(safe-area-inset-bottom));
   animation: slideUp 0.2s ease-out;
+  /* Cap to the viewport so long content (especially the ingredient list)
+     scrolls inside the modal instead of overflowing past the bottom. */
+  max-height: 90vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 @media (min-width: 520px) {
   .modal-bg { align-items: center; padding: 20px; }
@@ -743,6 +1014,10 @@ button:active { transform: scale(0.98); }
   border-radius: 6px; font-family: inherit; cursor: pointer;
 }
 .cat-mgr-link:hover { background: var(--surface-soft); color: var(--ink); }
+.cat-mgr-link:disabled {
+  opacity: 0.35; cursor: not-allowed; background: none;
+}
+.cat-mgr-link:disabled:hover { background: none; color: var(--ink-soft); }
 
 /* Color swatch button — the visible "click to pick" target. */
 .cat-swatch {
@@ -806,6 +1081,131 @@ button:active { transform: scale(0.98); }
   background: var(--cat-meat-soft); border: 1px solid var(--cat-meat);
   color: var(--cat-meat); padding: 16px; border-radius: 12px;
   margin: 16px 0; font-size: 14px; line-height: 1.5;
+}
+
+/* Sub-tabs used inside a single view (e.g. Current ↔ Monthly on expenses) */
+.sub-tabs {
+  display: inline-flex; gap: 2px;
+  background: var(--surface-soft); border: 1px solid var(--line);
+  border-radius: 10px; padding: 3px;
+  margin: 0 0 14px;
+}
+.sub-tab {
+  background: transparent; border: none;
+  color: var(--ink-soft); font-family: inherit;
+  font-size: 13px; font-weight: 600;
+  padding: 6px 14px; border-radius: 7px;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.sub-tab.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+
+/* Monthly breakdown card */
+.monthly-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 16px;
+  box-shadow: var(--shadow); margin-bottom: 18px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.monthly-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.monthly-nav {
+  background: var(--surface-soft); border: 1px solid var(--line);
+  color: var(--ink); width: 34px; height: 34px;
+  border-radius: 50%; font-size: 18px; line-height: 1; font-weight: 600;
+  cursor: pointer; transition: background 0.15s;
+}
+.monthly-nav:hover { background: var(--accent-soft); }
+.monthly-label {
+  font-family: 'Fraunces', serif; font-weight: 600;
+  font-size: 22px; letter-spacing: -0.01em;
+}
+.monthly-section { display: flex; flex-direction: column; gap: 8px; }
+.monthly-section-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px;
+}
+.monthly-section-head h3 {
+  margin: 0; font-family: 'DM Sans', sans-serif;
+  font-size: 14px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft);
+}
+.monthly-sub { font-size: 13px; color: var(--ink-soft); }
+.monthly-sub strong { color: var(--ink); font-weight: 600; }
+.monthly-empty {
+  font-size: 13px; color: var(--ink-soft); font-style: italic;
+  margin: 0; padding: 6px 0;
+}
+.monthly-list { display: flex; flex-direction: column; gap: 6px; }
+.monthly-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface-soft); border-radius: 8px;
+}
+.monthly-row.editable { padding: 6px 8px 6px 10px; }
+.monthly-row-name { font-size: 14px; color: var(--ink); }
+.monthly-row-desc {
+  color: var(--ink-soft); font-size: 13px; font-style: italic;
+}
+.monthly-row-amount {
+  font-size: 14px; color: var(--ink); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.monthly-input-name {
+  flex: 1; background: transparent; border: none;
+  font-family: inherit; font-size: 14px; color: var(--ink);
+  padding: 4px 0;
+}
+.monthly-input-name:focus { outline: none; }
+.monthly-input-amount {
+  width: 90px; text-align: right;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 8px;
+  font-family: inherit; font-size: 14px; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.monthly-input-amount:focus {
+  outline: none; border-color: var(--accent);
+}
+.monthly-remove {
+  background: transparent; border: none;
+  color: var(--ink-soft); font-size: 18px; line-height: 1;
+  width: 28px; height: 28px; border-radius: 50%;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.monthly-remove:hover { background: var(--surface); color: var(--danger); }
+.monthly-row.is-protected .monthly-row-name { font-weight: 600; }
+.monthly-row.is-protected .monthly-row-name {
+  flex: 1; /* push the amount input to the right edge */
+}
+.monthly-add {
+  display: flex; gap: 8px; align-items: stretch;
+  margin-top: 4px;
+}
+.monthly-add input[type="text"] {
+  flex: 1; min-width: 0;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px;
+  font-family: inherit; font-size: 14px; color: var(--ink);
+}
+.monthly-add input[type="text"]:last-of-type {
+  flex: 0 0 100px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.monthly-add input[type="text"]:focus {
+  outline: none; border-color: var(--accent);
+}
+.monthly-total {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--accent-soft); border-radius: 10px;
+  font-size: 15px; color: var(--ink);
+}
+.monthly-total strong {
+  font-family: 'Fraunces', serif; font-weight: 600; font-size: 20px;
+  font-variant-numeric: tabular-nums;
 }
 .config-error code {
   background: rgba(0,0,0,0.06); padding: 2px 6px;

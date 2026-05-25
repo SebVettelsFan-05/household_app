@@ -86,6 +86,21 @@ export function ensureTables(): Promise<void> {
         added TIMESTAMP NOT NULL DEFAULT NOW()
       )
     `);
+    await db.execute(sql`
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS occurred_on DATE
+    `);
+    await db.execute(sql`
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS description TEXT
+    `);
+    await db.execute(sql`
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt_url TEXT
+    `);
+    await db.execute(sql`
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt_file_id TEXT
+    `);
+    await db.execute(sql`
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt_mime TEXT
+    `);
   })().catch((err) => {
     // If the bootstrap itself failed, clear the cache so the next request
     // gets to retry — otherwise we'd permanently 500 on a transient outage.

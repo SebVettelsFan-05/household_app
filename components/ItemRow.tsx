@@ -25,12 +25,6 @@ export default function ItemRow({ item, color, onClick }: Props) {
           <span className="cat-tag" style={{ color }}>
             {item.category}
           </span>
-          {item.added ? (
-            <>
-              <span className="dot" />
-              <span>Added {item.added}</span>
-            </>
-          ) : null}
           {exp.label ? (
             <>
               <span className="dot" />

@@ -5,29 +5,29 @@ import AddItemForm from "@/components/AddItemForm";
 import EditModal from "@/components/EditModal";
 import FilterRow from "@/components/FilterRow";
 import ItemRow from "@/components/ItemRow";
-import { buildColorLookup } from "@/lib/categoryColors";
-import type { CategoryDef, FilterCat, Item, SortMode } from "@/lib/types";
+import { buildColorLookup, getCategoryColor } from "@/lib/categoryColors";
+import { sortCategories } from "@/lib/normalize";
+import type { CategoryDef, Item, SortMode } from "@/lib/types";
 
-const SORT_MODES: SortMode[] = ["newest", "name", "quantity", "expiry"];
-const SORT_LABELS: Record<SortMode, string> = {
-  newest: "newest",
+type FridgeSortMode = Exclude<SortMode, "newest">;
+const SORT_MODES: FridgeSortMode[] = ["expiry", "name", "quantity"];
+const SORT_LABELS: Record<FridgeSortMode, string> = {
   name: "A–Z",
   quantity: "quantity",
   expiry: "expiry",
 };
 
-function sortItems(arr: Item[], mode: SortMode): Item[] {
+function sortItems(arr: Item[], mode: FridgeSortMode): Item[] {
   const copy = arr.slice();
   if (mode === "name") return copy.sort((a, b) => a.name.localeCompare(b.name));
   if (mode === "quantity") return copy.sort((a, b) => b.quantity - a.quantity);
-  if (mode === "expiry")
-    return copy.sort((a, b) => {
-      if (!a.expiry && !b.expiry) return 0;
-      if (!a.expiry) return 1;
-      if (!b.expiry) return -1;
-      return a.expiry.localeCompare(b.expiry);
-    });
-  return copy.sort((a, b) => (b.added || "").localeCompare(a.added || ""));
+  // expiry — soonest first; missing expiries sink to the bottom.
+  return copy.sort((a, b) => {
+    if (!a.expiry && !b.expiry) return 0;
+    if (!a.expiry) return 1;
+    if (!b.expiry) return -1;
+    return a.expiry.localeCompare(b.expiry);
+  });
 }
 
 type Props = {
@@ -49,37 +49,74 @@ export default function FridgeView({
   onToast,
   onManageCategories,
 }: Props) {
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
-  const [filterCat, setFilterCat] = useState<FilterCat>("all");
+  const [sortMode, setSortMode] = useState<FridgeSortMode>("name");
+  // Multi-select: empty set = show all. Clicking a pill toggles its presence;
+  // the "All" pill empties the set.
+  const [filterCats, setFilterCats] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Prune the selection when categories disappear (deleted from manage),
+  // so an old filter doesn't keep silently hiding everything.
   useEffect(() => {
-    if (
-      filterCat !== "all" &&
-      categories.length > 0 &&
-      !categories.some((c) => c.name === filterCat)
-    ) {
-      setFilterCat("all");
-    }
-  }, [categories, filterCat]);
+    setFilterCats((prev) => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(categories.map((c) => c.name));
+      const next = new Set<string>();
+      let changed = false;
+      for (const name of prev) {
+        if (valid.has(name)) next.add(name);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [categories]);
+
+  function toggleCat(name: string) {
+    setFilterCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  function clearCats() {
+    setFilterCats(new Set());
+  }
 
   const editing = editingId ? items.find((i) => i.id === editingId) : null;
 
   const filtered = useMemo(() => {
     const byCat =
-      filterCat === "all"
+      filterCats.size === 0
         ? items
-        : items.filter((i) => i.category === filterCat);
+        : items.filter((i) => filterCats.has(i.category));
     const term = search.trim().toLowerCase();
     if (!term) return byCat;
     return byCat.filter((i) => i.name.toLowerCase().includes(term));
-  }, [items, filterCat, search]);
+  }, [items, filterCats, search]);
 
   const sorted = useMemo(
     () => sortItems(filtered, sortMode),
     [filtered, sortMode]
   );
+
+  // When showing "all", group the sorted list by category — categories follow
+  // the same user-added-first / Other-last order used elsewhere, and items
+  // within each group keep the chosen sort mode (newest, expiry, etc.).
+  const grouped = useMemo(() => {
+    const order = sortCategories(categories).map((c) => c.name);
+    const buckets = new Map<string, Item[]>();
+    for (const name of order) buckets.set(name, []);
+    for (const it of sorted) {
+      if (!buckets.has(it.category)) buckets.set(it.category, []);
+      buckets.get(it.category)!.push(it);
+    }
+    return Array.from(buckets.entries())
+      .filter(([, list]) => list.length > 0)
+      .map(([name, list]) => ({ name, items: list }));
+  }, [sorted, categories]);
 
   const colorFor = useMemo(() => buildColorLookup(categories), [categories]);
 
@@ -109,6 +146,7 @@ export default function FridgeView({
 
       <AddItemForm
         categories={categories}
+        items={items}
         onResult={(next, msg) => {
           onItemsChange(next);
           onToast(msg);
@@ -118,7 +156,7 @@ export default function FridgeView({
       />
 
       <div className="list-head">
-        <h2>In the fridge</h2>
+        <h2>Inventory</h2>
         <button type="button" className="sort-toggle" onClick={cycleSort}>
           Sort: {SORT_LABELS[sortMode]}
         </button>
@@ -135,8 +173,9 @@ export default function FridgeView({
 
       <FilterRow
         categories={categories}
-        value={filterCat}
-        onChange={setFilterCat}
+        selected={filterCats}
+        onToggle={toggleCat}
+        onClear={clearCats}
       />
       <div className="list-hint">Tap any item to edit, use, or delete</div>
 
@@ -153,7 +192,7 @@ export default function FridgeView({
       ) : items.length === 0 ? (
         <div className="empty">
           <div className="icon">∅</div>
-          <p>Your fridge is empty.</p>
+          <p>Your inventory is empty.</p>
           <p style={{ fontSize: 13 }}>Add something above to get started.</p>
         </div>
       ) : sorted.length === 0 ? (
@@ -162,22 +201,37 @@ export default function FridgeView({
             No{" "}
             {search.trim()
               ? "matching"
-              : filterCat === "all"
+              : filterCats.size === 0
                 ? "items"
-                : filterCat.toLowerCase()}{" "}
+                : Array.from(filterCats).join(" / ").toLowerCase()}{" "}
             items.
           </p>
         </div>
       ) : (
         <div className="items">
-          {sorted.map((it) => (
-            <ItemRow
-              key={it.id}
-              item={it}
-              color={colorFor(it.category)}
-              onClick={setEditingId}
-            />
-          ))}
+          {grouped.map((g) => {
+            const cat = categories.find((c) => c.name === g.name);
+            const headColor = getCategoryColor(g.name, cat?.color ?? null);
+            return (
+              <div key={g.name} className="cat-group">
+                <div
+                  className="cat-group-head"
+                  style={{ color: headColor }}
+                >
+                  <span className="cat-group-name">{g.name}</span>
+                  <span className="cat-group-count">{g.items.length}</span>
+                </div>
+                {g.items.map((it) => (
+                  <ItemRow
+                    key={it.id}
+                    item={it}
+                    color={colorFor(it.category)}
+                    onClick={setEditingId}
+                  />
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
 

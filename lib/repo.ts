@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   categories as categoriesTable,
@@ -25,9 +25,14 @@ import {
   DEFAULT_EXPENSE_CATEGORIES,
   EXPENSE_FALLBACK,
   FALLBACK_CATEGORY,
+  MAINSTAY_CATEGORIES,
   formatDate,
+  isProtectedCategory,
+  mergeAddedBy,
   normalizeName,
   pickCategory,
+  sortCategories,
+  titleCaseName,
 } from "./normalize";
 
 function rowToItem(r: typeof itemsTable.$inferSelect): Item {
@@ -58,15 +63,25 @@ export async function listCategoriesRepo(): Promise<CategoryDef[]> {
   const rows = await db.select().from(categoriesTable);
   if (rows.length === 0) {
     await ensureDefaultCategories();
-    return DEFAULT_CATEGORIES.map((name) => ({ name, color: null }));
+    return sortCategories(
+      DEFAULT_CATEGORIES.map((name) => ({ name, color: null }))
+    );
   }
   const list = rows.map(rowToCategory);
-  // Defensive: ensure fallback is always offered, even if someone deleted it
-  // directly in the DB.
-  if (!list.some((c) => c.name.toLowerCase() === FALLBACK_CATEGORY.toLowerCase())) {
-    list.unshift({ name: FALLBACK_CATEGORY, color: null });
+  // Defensive: ensure mainstays + fallback are always present, even on older
+  // databases that predate them or if someone deleted one directly in the DB.
+  const required = [...MAINSTAY_CATEGORIES, FALLBACK_CATEGORY];
+  const missing = required.filter(
+    (r) => !list.some((c) => c.name.toLowerCase() === r.toLowerCase())
+  );
+  if (missing.length > 0) {
+    await db
+      .insert(categoriesTable)
+      .values(missing.map((name) => ({ name })))
+      .onConflictDoNothing();
+    for (const m of missing) list.push({ name: m, color: null });
   }
-  return list;
+  return sortCategories(list);
 }
 
 function validateColor(color: string | undefined | null): string | null {
@@ -117,8 +132,8 @@ export async function deleteCategoryRepo(
 ): Promise<{ categories: CategoryDef[]; items: Item[]; reassigned: number }> {
   const trimmed = String(name ?? "").trim();
   if (!trimmed) throw new Error("Name required");
-  if (trimmed.toLowerCase() === FALLBACK_CATEGORY.toLowerCase()) {
-    throw new Error(`Cannot delete the fallback category "${FALLBACK_CATEGORY}"`);
+  if (isProtectedCategory(trimmed)) {
+    throw new Error(`Cannot delete the default category "${trimmed}"`);
   }
 
   const allItems = await db.select().from(itemsTable);
@@ -281,9 +296,33 @@ export async function addGroceryRepo(
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const category = pickCategory(input.category, validCats);
   const store = input.store ? String(input.store).trim() : null;
+  const canonicalName = titleCaseName(trimmedName);
+
+  // Case-insensitive merge against open (not-done) rows. Done rows are left
+  // alone — those represent items already bought, so the user is asking for
+  // more of the same and we open a fresh line for it.
+  const all = await db.select().from(groceryTable);
+  const normNew = normalizeName(canonicalName);
+  const existing = all.find(
+    (g) => !g.done && normalizeName(g.name) === normNew
+  );
+
+  if (existing) {
+    await db
+      .update(groceryTable)
+      .set({
+        quantity: existing.quantity + qty,
+        name: canonicalName,
+        // Track every requester so "For Arthur" + "For Eli" becomes
+        // "For Arthur, Eli" instead of silently dropping the new person.
+        addedBy: mergeAddedBy(existing.addedBy, addedBy),
+      })
+      .where(eq(groceryTable.id, existing.id));
+    return listGroceryRepo();
+  }
 
   await db.insert(groceryTable).values({
-    name: trimmedName,
+    name: canonicalName,
     quantity: qty,
     category,
     store,
@@ -313,7 +352,7 @@ export async function updateGroceryRepo(
   if (input.name !== undefined) {
     const trimmed = String(input.name).trim();
     if (!trimmed) throw new Error("Name required");
-    patch.name = trimmed;
+    patch.name = titleCaseName(trimmed);
   }
   if (input.quantity !== undefined) {
     const qty = Number(input.quantity);
@@ -351,6 +390,83 @@ export async function clearGroceryRepo(): Promise<GroceryItem[]> {
   return [];
 }
 
+/**
+ * Moves every checked-off grocery row into the inventory (items table) and
+ * deletes those grocery rows. Returns the post-move state for both tables
+ * plus a count, so the UI can pop a "moved N items" toast and refresh.
+ *
+ * Merge behavior matches the regular add-to-inventory path: if a matching
+ * item already exists, quantities add. Category is preserved; expiry is
+ * left empty (the user can fill it in after).
+ */
+export async function moveDoneGroceryToItemsRepo(): Promise<{
+  items: Item[];
+  grocery: GroceryItem[];
+  moved: number;
+}> {
+  const allGrocery = await db.select().from(groceryTable);
+  const done = allGrocery.filter((g) => g.done);
+  if (done.length === 0) {
+    return {
+      items: await listItemsRepo(),
+      grocery: await listGroceryRepo(),
+      moved: 0,
+    };
+  }
+
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
+  const inventoryRows = await db.select().from(itemsTable);
+
+  // Cache existing inventory by normalized name so consecutive moves merge
+  // into the same row instead of inserting duplicates.
+  const byNorm = new Map<string, typeof itemsTable.$inferSelect>();
+  for (const r of inventoryRows) byNorm.set(normalizeName(r.name), r);
+
+  for (const g of done) {
+    const name = String(g.name ?? "").trim();
+    if (!name) continue;
+    const category = pickCategory(g.category, validCats);
+    const norm = normalizeName(name);
+    const existing = byNorm.get(norm);
+    if (existing) {
+      const nextQty = existing.quantity + (g.quantity || 0);
+      await db
+        .update(itemsTable)
+        .set({ quantity: nextQty })
+        .where(eq(itemsTable.id, existing.id));
+      existing.quantity = nextQty;
+    } else {
+      const [inserted] = await db
+        .insert(itemsTable)
+        .values({
+          name,
+          quantity: g.quantity || 0,
+          // Inventory items don't currently carry store/addedBy.
+          category,
+        })
+        .returning();
+      if (inserted) byNorm.set(norm, inserted);
+    }
+  }
+
+  // Drop the moved grocery rows after inventory writes succeed, so a
+  // partial failure leaves the user with both lists rather than nothing.
+  await db
+    .delete(groceryTable)
+    .where(
+      inArray(
+        groceryTable.id,
+        done.map((d) => d.id)
+      )
+    );
+
+  return {
+    items: await listItemsRepo(),
+    grocery: await listGroceryRepo(),
+    moved: done.length,
+  };
+}
+
 export async function bulkAddGroceryRepo(
   inputs: Array<{
     name: string;
@@ -362,23 +478,67 @@ export async function bulkAddGroceryRepo(
 ): Promise<GroceryItem[]> {
   if (inputs.length === 0) return listGroceryRepo();
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
-  const rows = inputs.map((input) => {
-    const name = String(input.name ?? "").trim();
+
+  // Snapshot the current rows once so we can match against existing open
+  // entries by normalized name (same merge rule as addGroceryRepo).
+  const existingRows = await db.select().from(groceryTable);
+  const openByNorm = new Map<string, typeof groceryTable.$inferSelect>();
+  for (const r of existingRows) {
+    if (!r.done) openByNorm.set(normalizeName(r.name), r);
+  }
+
+  const toInsert: Array<typeof groceryTable.$inferInsert> = [];
+  for (const input of inputs) {
+    const rawName = String(input.name ?? "").trim();
     const qty = Number(input.quantity);
     const addedBy = String(input.addedBy ?? "").trim();
-    if (!name) throw new Error("Each ingredient needs a name");
+    if (!rawName) throw new Error("Each ingredient needs a name");
     if (!qty || qty <= 0)
-      throw new Error(`Quantity for "${name}" must be > 0`);
+      throw new Error(`Quantity for "${rawName}" must be > 0`);
     if (!addedBy) throw new Error("Added by required");
-    return {
-      name,
-      quantity: qty,
-      category: pickCategory(input.category, validCats),
-      store: input.store ? String(input.store).trim() || null : null,
-      addedBy,
-    };
-  });
-  await db.insert(groceryTable).values(rows);
+
+    const canonicalName = titleCaseName(rawName);
+    const norm = normalizeName(canonicalName);
+    const existing = openByNorm.get(norm);
+
+    if (existing) {
+      const nextQty = existing.quantity + qty;
+      const nextAddedBy = mergeAddedBy(existing.addedBy, addedBy);
+      await db
+        .update(groceryTable)
+        .set({
+          quantity: nextQty,
+          name: canonicalName,
+          addedBy: nextAddedBy,
+        })
+        .where(eq(groceryTable.id, existing.id));
+      existing.quantity = nextQty;
+      existing.name = canonicalName;
+      existing.addedBy = nextAddedBy;
+    } else {
+      const row = {
+        name: canonicalName,
+        quantity: qty,
+        category: pickCategory(input.category, validCats),
+        store: input.store ? String(input.store).trim() || null : null,
+        addedBy,
+      };
+      toInsert.push(row);
+      // Mark as "open" so a later ingredient with the same name merges
+      // against this fresh row instead of inserting a duplicate.
+      openByNorm.set(norm, {
+        ...row,
+        id: "",
+        done: false,
+        added: new Date(),
+        store: row.store ?? null,
+      } as typeof groceryTable.$inferSelect);
+    }
+  }
+
+  if (toInsert.length > 0) {
+    await db.insert(groceryTable).values(toInsert);
+  }
   return listGroceryRepo();
 }
 
@@ -439,6 +599,23 @@ export async function listRecipesRepo(): Promise<Recipe[]> {
     .from(recipesTable)
     .where(inArray(recipesTable.weekStart, weeks));
   return rows.map(rowToRecipe);
+}
+
+// Past-week recipes — everything with a weekStart strictly before the
+// current week. Sorted newest-first by (weekStart, day) so the archive UI
+// can render a reverse chronology without re-sorting.
+export async function listArchivedRecipesRepo(): Promise<Recipe[]> {
+  const cutoff = thisWeekStart();
+  const rows = await db
+    .select()
+    .from(recipesTable)
+    .where(lt(recipesTable.weekStart, cutoff));
+  const archive = rows.map(rowToRecipe);
+  archive.sort((a, b) => {
+    if (a.weekStart !== b.weekStart) return b.weekStart.localeCompare(a.weekStart);
+    return a.day - b.day;
+  });
+  return archive;
 }
 
 export type AddRecipeInput = {
@@ -547,19 +724,37 @@ export async function addFavoriteRepo(input: {
   link?: string;
   description?: string;
   ingredients?: unknown;
-}): Promise<FavoriteRecipe[]> {
+}): Promise<{ favorites: FavoriteRecipe[]; existed: boolean }> {
   const name = String(input.name ?? "").trim();
   if (!name) throw new Error("Name required");
+  const link = input.link ? String(input.link).trim() : "";
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
+
+  // Dedupe: a favorite already exists if its name matches case-insensitively,
+  // OR if both have a link and the links match case-insensitively. Same
+  // recipe pasted twice (or favorited from the modal twice) is treated as a
+  // no-op rather than a duplicate row.
+  const nameKey = name.toLowerCase();
+  const linkKey = link.toLowerCase();
+  const existing = await listFavoritesRepo();
+  const dup = existing.find((f) => {
+    if (f.name.trim().toLowerCase() === nameKey) return true;
+    if (linkKey && (f.link || "").trim().toLowerCase() === linkKey) return true;
+    return false;
+  });
+  if (dup) {
+    return { favorites: existing, existed: true };
+  }
+
   await db.insert(favoritesTable).values({
     name,
-    link: input.link ? String(input.link).trim() || null : null,
+    link: link || null,
     description: input.description
       ? String(input.description).trim() || null
       : null,
     ingredients: sanitizeIngredients(input.ingredients, validCats),
   });
-  return listFavoritesRepo();
+  return { favorites: await listFavoritesRepo(), existed: false };
 }
 
 export async function deleteFavoriteRepo(id: string): Promise<FavoriteRecipe[]> {
@@ -577,11 +772,29 @@ async function ensureDefaultExpenseCategories(): Promise<void> {
     .onConflictDoNothing();
 }
 
+// Mirror the fridge-category ordering: user-added first (A–Z), then the
+// Misc fallback pinned to the end.
+function sortExpenseCategories(
+  list: ExpenseCategoryDef[]
+): ExpenseCategoryDef[] {
+  const fallbackLower = EXPENSE_FALLBACK.toLowerCase();
+  const rest: ExpenseCategoryDef[] = [];
+  let fallback: ExpenseCategoryDef | undefined;
+  for (const c of list) {
+    if (c.name.toLowerCase() === fallbackLower) fallback = c;
+    else rest.push(c);
+  }
+  rest.sort((a, b) => a.name.localeCompare(b.name));
+  return [...rest, ...(fallback ? [fallback] : [])];
+}
+
 export async function listExpenseCategoriesRepo(): Promise<ExpenseCategoryDef[]> {
   const rows = await db.select().from(expenseCategoriesTable);
   if (rows.length === 0) {
     await ensureDefaultExpenseCategories();
-    return DEFAULT_EXPENSE_CATEGORIES.map((name) => ({ name, color: null }));
+    return sortExpenseCategories(
+      DEFAULT_EXPENSE_CATEGORIES.map((name) => ({ name, color: null }))
+    );
   }
   const list = rows.map((r) => ({ name: r.name, color: r.color ?? null }));
   if (
@@ -589,9 +802,9 @@ export async function listExpenseCategoriesRepo(): Promise<ExpenseCategoryDef[]>
       (c) => c.name.toLowerCase() === EXPENSE_FALLBACK.toLowerCase()
     )
   ) {
-    list.unshift({ name: EXPENSE_FALLBACK, color: null });
+    list.push({ name: EXPENSE_FALLBACK, color: null });
   }
-  return list;
+  return sortExpenseCategories(list);
 }
 
 function validateHexColor(color: string | undefined | null): string | null {
@@ -686,8 +899,46 @@ function rowToExpense(r: typeof expensesTable.$inferSelect): Expense {
     category: r.category,
     store: r.store || "",
     paidBy: r.paidBy,
+    // Legacy rows didn't have occurred_on — fall back to the creation date so
+    // monthly bucketing/display stays sensible.
+    occurredOn: r.occurredOn || formatDate(r.added),
+    description: r.description || "",
+    receiptUrl: r.receiptUrl || "",
+    receiptFileId: r.receiptFileId || "",
+    receiptMime: r.receiptMime || "",
     added: formatDate(r.added),
   };
+}
+
+// "Costco 2026-05-26" → "Costco May 26"
+function expenseDisplayName(store: string, occurredOn: string): string {
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const [, mStr, dStr] = occurredOn.split("-");
+  const mIdx = (Number(mStr) || 1) - 1;
+  const day = Number(dStr) || 1;
+  const label = `${months[mIdx]} ${day}`;
+  const trimmedStore = store.trim();
+  return trimmedStore ? `${trimmedStore} ${label}` : `Expense ${label}`;
+}
+
+function todayYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function validateOccurredOn(input: string | undefined): string {
+  const s = String(input ?? "").trim();
+  if (!s) return todayYmd();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    throw new Error("Date must be YYYY-MM-DD");
+  }
+  return s;
 }
 
 export async function listExpensesRepo(): Promise<Expense[]> {
@@ -696,18 +947,19 @@ export async function listExpensesRepo(): Promise<Expense[]> {
 }
 
 export type AddExpenseInput = {
-  name: string;
   amountCents: number;
-  category?: string;
   store?: string;
   paidBy: string;
+  occurredOn?: string;
+  description?: string;
+  receiptUrl?: string;
+  receiptFileId?: string;
+  receiptMime?: string;
 };
 
 export async function addExpenseRepo(
   input: AddExpenseInput
 ): Promise<Expense[]> {
-  const name = String(input.name ?? "").trim();
-  if (!name) throw new Error("Name required");
   const amountCents = Math.round(Number(input.amountCents));
   if (!Number.isFinite(amountCents) || amountCents <= 0) {
     throw new Error("Amount must be greater than zero");
@@ -715,37 +967,48 @@ export async function addExpenseRepo(
   const paidBy = String(input.paidBy ?? "").trim();
   if (!paidBy) throw new Error("Paid by required");
 
-  const validCats = (await listExpenseCategoriesRepo()).map((c) => c.name);
-  const category = pickCategory(input.category, validCats, EXPENSE_FALLBACK);
-  const store = input.store ? String(input.store).trim() || null : null;
+  const store = input.store ? String(input.store).trim() : "";
+  const description = input.description
+    ? String(input.description).trim()
+    : "";
+  const occurredOn = validateOccurredOn(input.occurredOn);
+  const name = expenseDisplayName(store, occurredOn);
 
-  await db
-    .insert(expensesTable)
-    .values({ name, amountCents, category, store, paidBy });
+  await db.insert(expensesTable).values({
+    name,
+    amountCents,
+    category: EXPENSE_FALLBACK,
+    store: store || null,
+    paidBy,
+    occurredOn,
+    description: description || null,
+    receiptUrl: input.receiptUrl || null,
+    receiptFileId: input.receiptFileId || null,
+    receiptMime: input.receiptMime || null,
+  });
   return listExpensesRepo();
 }
 
 export type UpdateExpenseInput = {
   id: string;
-  name?: string;
   amountCents?: number;
-  category?: string;
   store?: string;
   paidBy?: string;
+  occurredOn?: string;
+  description?: string;
+  // Set together when replacing the attached receipt. Caller is responsible
+  // for deleting the old Drive file *after* the DB update succeeds.
+  receiptUrl?: string;
+  receiptFileId?: string;
+  receiptMime?: string;
 };
 
 export async function updateExpenseRepo(
   input: UpdateExpenseInput
 ): Promise<Expense[]> {
   if (!input.id) throw new Error("id required");
-  const validCats = (await listExpenseCategoriesRepo()).map((c) => c.name);
   const patch: Partial<typeof expensesTable.$inferInsert> = {};
 
-  if (input.name !== undefined) {
-    const t = String(input.name).trim();
-    if (!t) throw new Error("Name required");
-    patch.name = t;
-  }
   if (input.amountCents !== undefined) {
     const cents = Math.round(Number(input.amountCents));
     if (!Number.isFinite(cents) || cents <= 0) {
@@ -753,30 +1016,82 @@ export async function updateExpenseRepo(
     }
     patch.amountCents = cents;
   }
-  if (input.category !== undefined) {
-    patch.category = pickCategory(input.category, validCats, EXPENSE_FALLBACK);
-  }
-  if (input.store !== undefined) {
-    const s = String(input.store).trim();
-    patch.store = s || null;
-  }
   if (input.paidBy !== undefined) {
     const p = String(input.paidBy).trim();
     if (!p) throw new Error("Paid by required");
     patch.paidBy = p;
+  }
+  if (input.description !== undefined) {
+    const d = String(input.description).trim();
+    patch.description = d || null;
+  }
+  if (input.receiptUrl !== undefined) {
+    patch.receiptUrl = input.receiptUrl || null;
+  }
+  if (input.receiptFileId !== undefined) {
+    patch.receiptFileId = input.receiptFileId || null;
+  }
+  if (input.receiptMime !== undefined) {
+    patch.receiptMime = input.receiptMime || null;
+  }
+
+  // Store and date both feed into the auto-name, so if either changes we
+  // need both current values to rebuild it. Fetch the existing row, merge
+  // in the patch, and recompute the display name.
+  if (input.store !== undefined || input.occurredOn !== undefined) {
+    const existing = await db
+      .select()
+      .from(expensesTable)
+      .where(eq(expensesTable.id, input.id))
+      .limit(1);
+    if (existing.length === 0) throw new Error("Expense not found");
+    const row = existing[0];
+    const newStore =
+      input.store !== undefined
+        ? String(input.store).trim()
+        : row.store || "";
+    const newOccurredOn =
+      input.occurredOn !== undefined
+        ? validateOccurredOn(input.occurredOn)
+        : row.occurredOn || formatDate(row.added);
+    patch.store = newStore || null;
+    patch.occurredOn = newOccurredOn;
+    patch.name = expenseDisplayName(newStore, newOccurredOn);
   }
 
   await db.update(expensesTable).set(patch).where(eq(expensesTable.id, input.id));
   return listExpensesRepo();
 }
 
-export async function deleteExpenseRepo(id: string): Promise<Expense[]> {
+export async function deleteExpenseRepo(
+  id: string
+): Promise<{ expenses: Expense[]; removedReceiptFileId: string | null }> {
   if (!id) throw new Error("id required");
+  const existing = await db
+    .select({ receiptFileId: expensesTable.receiptFileId })
+    .from(expensesTable)
+    .where(eq(expensesTable.id, id))
+    .limit(1);
+  const removedReceiptFileId =
+    existing.length > 0 ? existing[0].receiptFileId : null;
   await db.delete(expensesTable).where(eq(expensesTable.id, id));
-  return listExpensesRepo();
+  return {
+    expenses: await listExpensesRepo(),
+    removedReceiptFileId,
+  };
 }
 
-export async function clearExpensesRepo(): Promise<Expense[]> {
+export async function clearExpensesRepo(): Promise<{
+  expenses: Expense[];
+  removedReceiptFileIds: string[];
+}> {
+  // Collect any receipts we need to clean up before the rows are gone.
+  const rows = await db
+    .select({ receiptFileId: expensesTable.receiptFileId })
+    .from(expensesTable);
+  const removedReceiptFileIds = rows
+    .map((r) => r.receiptFileId)
+    .filter((id): id is string => Boolean(id));
   await db.delete(expensesTable);
-  return [];
+  return { expenses: [], removedReceiptFileIds };
 }

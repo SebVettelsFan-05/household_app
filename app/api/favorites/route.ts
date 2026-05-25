@@ -30,14 +30,14 @@ export async function POST(req: NextRequest) {
   try {
     await ensureTables();
     const body = (await req.json().catch(() => ({}))) as AddBody;
-    const favorites = await addFavoriteRepo({
+    const { favorites, existed } = await addFavoriteRepo({
       name: body.name ?? "",
       link: body.link,
       description: body.description,
       ingredients: body.ingredients,
     });
-    after(() => mirrorToSheet());
-    return NextResponse.json({ ok: true, favorites });
+    if (!existed) after(() => mirrorToSheet());
+    return NextResponse.json({ ok: true, favorites, existed });
   } catch (e) {
     return err(e instanceof Error ? e.message : String(e));
   }

@@ -1,33 +1,44 @@
 "use client";
 
 import { getCategoryColor } from "@/lib/categoryColors";
-import type { CategoryDef, FilterCat } from "@/lib/types";
+import type { CategoryDef } from "@/lib/types";
 
 type Props = {
   categories: CategoryDef[];
-  value: FilterCat;
-  onChange: (f: FilterCat) => void;
+  // Empty set = "no filter, show everything". Each pill toggles its membership.
+  selected: Set<string>;
+  onToggle: (name: string) => void;
+  // Clears the entire selection so the list reverts to showing every item.
+  onClear: () => void;
 };
 
-export default function FilterRow({ categories, value, onChange }: Props) {
+export default function FilterRow({
+  categories,
+  selected,
+  onToggle,
+  onClear,
+}: Props) {
+  const showingAll = selected.size === 0;
   return (
     <div className="filter-row">
       <button
         type="button"
-        className={`filter-pill${value === "all" ? " active" : ""}`}
-        onClick={() => onChange("all")}
+        className={`filter-pill${showingAll ? " active" : ""}`}
+        onClick={onClear}
+        title="Clear category filters"
       >
         All
       </button>
       {categories.map((c) => {
         const color = getCategoryColor(c.name, c.color);
-        const active = value === c.name;
+        const active = selected.has(c.name);
         return (
           <button
             key={c.name}
             type="button"
             className={`filter-pill${active ? " active" : ""}`}
-            onClick={() => onChange(c.name)}
+            onClick={() => onToggle(c.name)}
+            aria-pressed={active}
             style={!active ? { color } : undefined}
           >
             <span className="dot-cat" />

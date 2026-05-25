@@ -4,16 +4,20 @@ import { useEffect, useState } from "react";
 import {
   addFavorite,
   addRecipe,
+  deleteFavorite,
   deleteRecipe,
+  scrapeRecipeFromUrl,
   updateRecipe,
 } from "@/lib/client";
 import {
   BUYERS,
   type CategoryDef,
+  type FavoriteRecipe,
   type Recipe,
   type RecipeIngredient,
 } from "@/lib/types";
 import { DAY_LONG, shortDayLabel } from "@/lib/dates";
+import { findFavoriteMatch, isFavoriteMatch } from "@/lib/favoriteMatch";
 import IngredientList from "./IngredientList";
 
 export type RecipeFields = {
@@ -32,6 +36,13 @@ type Props = {
   initial: RecipeFields;
   categories: CategoryDef[];
   fridgeItems: import("@/lib/types").Item[];
+  // The two weeks currently visible (this week, next week). The user can
+  // move/place a recipe in either of these slots from inside the modal.
+  weekOptions: { weekStart: string; label: string }[];
+  // Lets the modal show the correct star state and route the toggle without
+  // duplicating the matching logic that already lives in RecipesView.
+  favorites: FavoriteRecipe[];
+  onFavoritesChange: (favorites: FavoriteRecipe[]) => void;
   onClose: () => void;
   onResult: (recipes: Recipe[], toast: string) => void;
   onError: (msg: string) => void;
@@ -50,6 +61,9 @@ export default function RecipeModal({
   initial,
   categories,
   fridgeItems,
+  weekOptions,
+  favorites,
+  onFavoritesChange,
   onClose,
   onResult,
   onError,
@@ -65,7 +79,54 @@ export default function RecipeModal({
     initial.ingredients
   );
   const [day, setDay] = useState<number>(initial.day);
+  const [weekStart, setWeekStart] = useState<string>(initial.weekStart);
   const [busy, setBusy] = useState(false);
+  const [scraping, setScraping] = useState(false);
+
+  async function fetchFromLink() {
+    const trimmed = link.trim();
+    if (!trimmed) {
+      onError("Paste a recipe URL first");
+      return;
+    }
+    setScraping(true);
+    try {
+      const data = await scrapeRecipeFromUrl(trimmed);
+      // Only fill name/description if they're empty — don't overwrite what
+      // the user already typed.
+      if (!name.trim() && data.name) setName(data.name);
+      if (!description.trim() && data.description) {
+        setDescription(data.description);
+      }
+      if (data.ingredients.length > 0) {
+        // Append rather than replace so a user mid-edit doesn't lose what
+        // they've manually entered. Dedupe by case-insensitive name so a
+        // second fetch (e.g. user re-pastes the URL) doesn't double up.
+        setIngredients((prev) => {
+          const seen = new Set(prev.map((p) => p.name.toLowerCase()));
+          const next = [...prev];
+          for (const ing of data.ingredients) {
+            if (!seen.has(ing.name.toLowerCase())) {
+              next.push(ing);
+              seen.add(ing.name.toLowerCase());
+            }
+          }
+          return next;
+        });
+      }
+      const summary = `Fetched ${data.ingredients.length} ingredient${data.ingredients.length === 1 ? "" : "s"}`;
+      onResult(
+        [],
+        data.hasApproximate
+          ? `${summary} (some quantities are estimates — double-check)`
+          : summary
+      );
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setScraping(false);
+    }
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -95,12 +156,12 @@ export default function RecipeModal({
           description,
           ingredients,
           day,
-          weekStart: initial.weekStart,
+          weekStart,
         });
         onResult(res.recipes, "Saved");
       } else {
         const res = await addRecipe({
-          weekStart: initial.weekStart,
+          weekStart,
           day,
           assignedTo,
           name: trimmed,
@@ -133,7 +194,12 @@ export default function RecipeModal({
     }
   }
 
-  async function favorite() {
+  // Shared with the card star — same `name OR link` rule on both ends, so a
+  // recipe that's already in favorites under a slightly different name still
+  // shows ★ in both places.
+  const isFavorited = isFavoriteMatch({ name, link }, favorites);
+
+  async function toggleFavorite() {
     const trimmed = name.trim();
     if (!trimmed) {
       onError("Recipe needs a name to favorite");
@@ -141,13 +207,28 @@ export default function RecipeModal({
     }
     setBusy(true);
     try {
-      await addFavorite({
-        name: trimmed,
-        link: link || undefined,
-        description: description || undefined,
-        ingredients,
-      });
-      onResult([], `Saved "${trimmed}" to favorites`);
+      if (isFavorited) {
+        const match = findFavoriteMatch({ name, link }, favorites);
+        if (match) {
+          const res = await deleteFavorite(match.id);
+          onFavoritesChange(res.favorites);
+          onResult([], `Removed "${trimmed}" from favorites`);
+        }
+      } else {
+        const res = await addFavorite({
+          name: trimmed,
+          link: link || undefined,
+          description: description || undefined,
+          ingredients,
+        });
+        onFavoritesChange(res.favorites);
+        onResult(
+          [],
+          res.existed
+            ? `"${trimmed}" was already in favorites`
+            : `Saved "${trimmed}" to favorites`
+        );
+      }
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -167,9 +248,7 @@ export default function RecipeModal({
     });
   }
 
-  const label = initial.weekStart
-    ? shortDayLabel(initial.weekStart, day)
-    : DAY_LONG[day];
+  const label = weekStart ? shortDayLabel(weekStart, day) : DAY_LONG[day];
 
   return (
     <div
@@ -186,6 +265,21 @@ export default function RecipeModal({
 
         <div className="field-row">
           <div className="field">
+            <label htmlFor="r-week">Week</label>
+            <select
+              id="r-week"
+              className="select"
+              value={weekStart}
+              onChange={(e) => setWeekStart(e.target.value)}
+            >
+              {weekOptions.map((opt) => (
+                <option key={opt.weekStart} value={opt.weekStart}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
             <label htmlFor="r-day">Day</label>
             <select
               id="r-day"
@@ -200,24 +294,24 @@ export default function RecipeModal({
               ))}
             </select>
           </div>
-          <div className="field">
-            <label htmlFor="r-who">Cook</label>
-            <select
-              id="r-who"
-              className="select"
-              value={assignedTo}
-              onChange={(e) => setAssignedTo(e.target.value)}
-            >
-              <option value="" disabled>
-                Pick a cook…
+        </div>
+        <div className="field">
+          <label htmlFor="r-who">Cook</label>
+          <select
+            id="r-who"
+            className="select"
+            value={assignedTo}
+            onChange={(e) => setAssignedTo(e.target.value)}
+          >
+            <option value="" disabled>
+              Pick a cook…
+            </option>
+            {BUYERS.map((b) => (
+              <option key={b} value={b}>
+                {b}
               </option>
-              {BUYERS.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </div>
+            ))}
+          </select>
         </div>
 
         <div className="field">
@@ -233,13 +327,24 @@ export default function RecipeModal({
 
         <div className="field">
           <label htmlFor="r-link">Link (optional)</label>
-          <input
-            id="r-link"
-            type="url"
-            placeholder="https://…"
-            value={link}
-            onChange={(e) => setLink(e.target.value)}
-          />
+          <div className="link-row">
+            <input
+              id="r-link"
+              type="url"
+              placeholder="https://…"
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+            />
+            <button
+              type="button"
+              className="btn-secondary link-fetch"
+              onClick={fetchFromLink}
+              disabled={scraping || busy || !link.trim()}
+              title="Pull ingredients from the link automatically"
+            >
+              {scraping ? "Fetching…" : "Fetch"}
+            </button>
+          </div>
         </div>
 
         <div className="field">
@@ -267,12 +372,17 @@ export default function RecipeModal({
         <div className="recipe-actions-row">
           <button
             type="button"
-            className="btn-secondary"
-            onClick={favorite}
+            className={`btn-secondary${isFavorited ? " is-favorited" : ""}`}
+            onClick={toggleFavorite}
             disabled={busy || !name.trim()}
-            title="Save this recipe to favorites"
+            aria-pressed={isFavorited}
+            title={
+              isFavorited
+                ? "Remove this recipe from favorites"
+                : "Save this recipe to favorites"
+            }
           >
-            ★ Favorite
+            {isFavorited ? "★ Favorited" : "☆ Favorite"}
           </button>
           <button
             type="button"

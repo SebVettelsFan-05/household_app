@@ -1,20 +1,18 @@
 import { after, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
-import { clearExpensesRepo } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
-import { deleteReceipt } from "@/lib/receipts";
+import { moveDoneGroceryToItemsRepo } from "@/lib/repo";
 
 export const dynamic = "force-dynamic";
 
 export async function POST() {
   try {
     await ensureTables();
-    const { expenses, removedReceiptFileIds } = await clearExpensesRepo();
-    for (const id of removedReceiptFileIds) {
-      after(() => deleteReceipt(id));
+    const result = await moveDoneGroceryToItemsRepo();
+    if (result.moved > 0) {
+      after(() => mirrorToSheet());
     }
-    after(() => mirrorToSheet());
-    return NextResponse.json({ ok: true, expenses });
+    return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : String(e) },
