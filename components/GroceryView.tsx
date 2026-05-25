@@ -5,7 +5,8 @@ import AddGroceryForm from "@/components/AddGroceryForm";
 import EditGroceryModal from "@/components/EditGroceryModal";
 import GroceryItemRow from "@/components/GroceryItemRow";
 import { clearGrocery, updateGrocery } from "@/lib/client";
-import { buildColorLookup } from "@/lib/categoryColors";
+import { buildColorLookup, getCategoryColor } from "@/lib/categoryColors";
+import { sortCategories } from "@/lib/normalize";
 import type { CategoryDef, GroceryItem, Item } from "@/lib/types";
 
 type SortMode = "newest" | "store" | "name";
@@ -39,7 +40,7 @@ export default function GroceryView({
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [sortMode, setSortMode] = useState<SortMode>("store");
 
   const colorFor = useMemo(() => buildColorLookup(categories), [categories]);
 
@@ -53,18 +54,17 @@ export default function GroceryView({
       : `${totalGrams} g`;
   const [totalNum, totalUnit] = totalDisplay.split(" ");
 
-  // Done items always sink to the bottom (newest first) so the active
-  // shopping list stays readable. The chosen sortMode only reorders the
-  // open items above.
-  const sorted = useMemo(() => {
+  // Items are grouped by category (user-added → mainstays → Other) and sorted
+  // within each group by the chosen sortMode. Done items keep their category
+  // — they just sink to the bottom of that bucket so the still-to-buy items
+  // stay visible at a glance.
+  const grouped = useMemo(() => {
     const byNewest = (a: GroceryItem, b: GroceryItem) =>
       (b.added || "").localeCompare(a.added || "");
 
     const byStore = (a: GroceryItem, b: GroceryItem) => {
       const sa = (a.store || "").trim();
       const sb = (b.store || "").trim();
-      // Items without a store sink within the open group so each store
-      // cluster stays clean.
       if (!sa && !sb) return byNewest(a, b);
       if (!sa) return 1;
       if (!sb) return -1;
@@ -75,13 +75,27 @@ export default function GroceryView({
     const byName = (a: GroceryItem, b: GroceryItem) =>
       a.name.localeCompare(b.name);
 
-    const comparator =
+    const inner =
       sortMode === "store" ? byStore : sortMode === "name" ? byName : byNewest;
 
-    const open = grocery.filter((g) => !g.done).sort(comparator);
-    const done = grocery.filter((g) => g.done).sort(byNewest);
-    return [...open, ...done];
-  }, [grocery, sortMode]);
+    // Two-level compare: not-done first within a category, then the chosen
+    // sort. Keeps done items visible in context but out of the way.
+    const comparator = (a: GroceryItem, b: GroceryItem) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      return inner(a, b);
+    };
+
+    const order = sortCategories(categories).map((c) => c.name);
+    const buckets = new Map<string, GroceryItem[]>();
+    for (const name of order) buckets.set(name, []);
+    for (const g of grocery) {
+      if (!buckets.has(g.category)) buckets.set(g.category, []);
+      buckets.get(g.category)!.push(g);
+    }
+    return Array.from(buckets.entries())
+      .filter(([, list]) => list.length > 0)
+      .map(([name, list]) => ({ name, items: list.sort(comparator) }));
+  }, [grocery, sortMode, categories]);
 
   function cycleSort() {
     setSortMode(
@@ -185,16 +199,31 @@ export default function GroceryView({
         </div>
       ) : (
         <div className="items">
-          {sorted.map((g) => (
-            <GroceryItemRow
-              key={g.id}
-              item={g}
-              color={colorFor(g.category)}
-              busy={busy}
-              onToggle={toggle}
-              onOpen={setEditingId}
-            />
-          ))}
+          {grouped.map((g) => {
+            const cat = categories.find((c) => c.name === g.name);
+            const headColor = getCategoryColor(g.name, cat?.color ?? null);
+            return (
+              <div key={g.name} className="cat-group">
+                <div
+                  className="cat-group-head"
+                  style={{ color: headColor }}
+                >
+                  <span className="cat-group-name">{g.name}</span>
+                  <span className="cat-group-count">{g.items.length}</span>
+                </div>
+                {g.items.map((it) => (
+                  <GroceryItemRow
+                    key={it.id}
+                    item={it}
+                    color={colorFor(it.category)}
+                    busy={busy}
+                    onToggle={toggle}
+                    onOpen={setEditingId}
+                  />
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
 

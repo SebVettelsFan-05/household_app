@@ -7,6 +7,7 @@ import {
   updateCategoryColor,
 } from "@/lib/client";
 import { getCategoryColor } from "@/lib/categoryColors";
+import { isProtectedCategory, sortCategories } from "@/lib/normalize";
 import {
   FALLBACK_CATEGORY,
   type CategoryDef,
@@ -128,10 +129,10 @@ export default function ManageCategoriesModal({
       <div className="modal">
         <h2>Categories</h2>
         <div className="cat-mgr-list">
-          {categories.map((c) => {
+          {sortCategories(categories).map((c) => {
             const resolved = getCategoryColor(c.name, c.color);
             const inUse = items.filter((i) => i.category === c.name).length;
-            const protectedCat = c.name === FALLBACK_CATEGORY;
+            const protectedCat = isProtectedCategory(c.name);
             const swatchValue = c.color || resolved;
             const inputId = `color-${c.name}`;
             return (
@@ -156,17 +157,19 @@ export default function ManageCategoriesModal({
                 <span className="cat-mgr-meta">
                   {inUse} item{inUse === 1 ? "" : "s"}
                 </span>
-                {c.color ? (
-                  <button
-                    type="button"
-                    className="cat-mgr-link"
-                    onClick={() => resetColor(c.name)}
-                    disabled={busy}
-                    title="Reset to default palette color"
-                  >
-                    Reset
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  className="cat-mgr-link"
+                  onClick={() => resetColor(c.name)}
+                  disabled={busy || !c.color}
+                  title={
+                    c.color
+                      ? "Reset to default palette color"
+                      : "Already using default color"
+                  }
+                >
+                  Reset
+                </button>
                 {protectedCat ? (
                   <span className="cat-mgr-protected">default</span>
                 ) : (

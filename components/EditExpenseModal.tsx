@@ -1,43 +1,55 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ReceiptPicker } from "@/components/AddExpenseForm";
 import { deleteExpense, updateExpense } from "@/lib/client";
+import { prepareReceipt } from "@/lib/imageResize";
 import { fmtMoney, parseCents } from "@/lib/money";
-import {
-  BUYERS,
-  type Category,
-  type Expense,
-  type ExpenseCategoryDef,
-} from "@/lib/types";
-import CategoryPills from "./CategoryPills";
-
-const EXPENSE_FALLBACK = "Misc";
+import { BUYERS, type Expense } from "@/lib/types";
 
 type Props = {
   item: Expense;
-  categories: ExpenseCategoryDef[];
   onClose: () => void;
   onResult: (expenses: Expense[], toast: string) => void;
   onError: (message: string) => void;
-  onManageCategories: () => void;
 };
 
 export default function EditExpenseModal({
   item,
-  categories,
   onClose,
   onResult,
   onError,
-  onManageCategories,
 }: Props) {
-  const [name, setName] = useState(item.name);
+  const [store, setStore] = useState(item.store || "");
   const [amount, setAmount] = useState(
     fmtMoney(item.amountCents).replace("$", "")
   );
-  const [store, setStore] = useState(item.store || "");
   const [paidBy, setPaidBy] = useState(item.paidBy);
-  const [cat, setCat] = useState<Category>(item.category || EXPENSE_FALLBACK);
+  const [occurredOn, setOccurredOn] = useState(item.occurredOn || item.added);
+  const [description, setDescription] = useState(item.description || "");
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const hasExistingReceipt = Boolean(item.receiptUrl);
+  const existingIsImage =
+    hasExistingReceipt &&
+    !!item.receiptMime &&
+    item.receiptMime.startsWith("image/");
+
+  useEffect(() => {
+    if (!receipt) {
+      setPreviewUrl(null);
+      return;
+    }
+    if (!receipt.type.startsWith("image/")) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(receipt);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [receipt]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -47,18 +59,14 @@ export default function EditExpenseModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  useEffect(() => {
-    if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
-      const hasFallback = categories.some((c) => c.name === EXPENSE_FALLBACK);
-      setCat(hasFallback ? EXPENSE_FALLBACK : categories[0].name);
-    }
-  }, [categories, cat]);
-
   async function save() {
-    const trimmed = name.trim();
     const cents = parseCents(amount);
-    if (!trimmed || cents === null || cents <= 0) {
-      onError("Check your inputs");
+    if (cents === null || cents <= 0) {
+      onError("Amount must be greater than $0");
+      return;
+    }
+    if (!store.trim()) {
+      onError("Store / source is required");
       return;
     }
     if (!paidBy) {
@@ -67,15 +75,19 @@ export default function EditExpenseModal({
     }
     setBusy(true);
     try {
+      const prepared = receipt ? await prepareReceipt(receipt) : null;
       const res = await updateExpense({
         id: item.id,
-        name: trimmed,
         amountCents: cents,
-        category: cat,
-        store,
+        store: store.trim(),
         paidBy,
+        occurredOn,
+        description: description.trim(),
+        ...(prepared
+          ? { receipt: { blob: prepared.blob, filename: prepared.filename } }
+          : {}),
       });
-      onResult(res.expenses, "Saved");
+      onResult(res.expenses, prepared ? "Saved (receipt replaced)" : "Saved");
       onClose();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -108,29 +120,22 @@ export default function EditExpenseModal({
       <div className="modal">
         <h2>Edit expense</h2>
         <div className="field">
-          <label htmlFor="ee-name">Name</label>
+          <label htmlFor="ee-store">Store / source</label>
           <input
-            id="ee-name"
+            id="ee-store"
             type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={store}
+            onChange={(e) => setStore(e.target.value)}
           />
         </div>
         <div className="field">
-          <div className="cat-pills-row">
-            <label>Category</label>
-            <button
-              type="button"
-              className="manage-link"
-              onClick={onManageCategories}
-            >
-              Manage
-            </button>
-          </div>
-          <CategoryPills
-            categories={categories}
-            value={cat}
-            onChange={setCat}
+          <label htmlFor="ee-desc">Description (optional)</label>
+          <input
+            id="ee-desc"
+            type="text"
+            placeholder="e.g. Gas, Pizza"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
           />
         </div>
         <div className="field-row">
@@ -145,13 +150,12 @@ export default function EditExpenseModal({
             />
           </div>
           <div className="field">
-            <label htmlFor="ee-store">Store / To</label>
+            <label htmlFor="ee-date">Date</label>
             <input
-              id="ee-store"
-              type="text"
-              placeholder="(optional)"
-              value={store}
-              onChange={(e) => setStore(e.target.value)}
+              id="ee-date"
+              type="date"
+              value={occurredOn}
+              onChange={(e) => setOccurredOn(e.target.value)}
             />
           </div>
         </div>
@@ -172,6 +176,48 @@ export default function EditExpenseModal({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="field">
+          <label>Receipt</label>
+          {hasExistingReceipt && !receipt ? (
+            <div className="receipt-existing">
+              {existingIsImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={item.receiptUrl}
+                  alt="Current receipt"
+                  className="receipt-existing-thumb"
+                />
+              ) : (
+                <span className="receipt-existing-icon">📄</span>
+              )}
+              <div className="receipt-existing-meta">
+                <a
+                  href={item.receiptUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="receipt-existing-link"
+                >
+                  Open current receipt ↗
+                </a>
+                <p className="receipt-hint">
+                  Attach a new file below to replace it.
+                </p>
+              </div>
+            </div>
+          ) : !hasExistingReceipt && !receipt ? (
+            <p className="receipt-legacy-note">
+              This expense was logged before receipts were required — attach
+              one now to backfill (optional).
+            </p>
+          ) : null}
+          <ReceiptPicker
+            inputId="ee-receipt"
+            file={receipt}
+            previewUrl={previewUrl}
+            onChange={setReceipt}
+          />
         </div>
 
         <div className="modal-actions">

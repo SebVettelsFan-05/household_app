@@ -74,12 +74,30 @@ export const favoriteRecipes = pgTable("favorite_recipes", {
 
 export const expenses = pgTable("expenses", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // Auto-derived display label ("Costco May 26") — kept on the row so the
+  // sheet mirror stays simple and reads/exports without recomputation.
   name: text("name").notNull(),
   // Stored as integer cents — avoids floating-point surprises in totals.
   amountCents: integer("amount_cents").notNull(),
+  // Kept on the schema for backwards compatibility with older rows. New
+  // expenses no longer expose a category in the UI; everything is "Misc".
   category: text("category").notNull().default("Misc"),
   store: text("store"),
   paidBy: text("paid_by").notNull(),
+  // Date the expense occurred on. The user picks this; defaults to today.
+  // Distinct from `added`, which is the row creation timestamp.
+  occurredOn: date("occurred_on"),
+  // Optional free-text description ("Gas", "Pizza", etc.). Shown beside the
+  // store name in the monthly breakdown and used as a secondary grouping
+  // key, so "Costco" and "Costco (Gas)" tally separately.
+  description: text("description"),
+  // Receipt attachment — uploaded to Drive (via the existing GAS webhook).
+  // Mandatory at ADD time, optional on existing legacy rows. All three null
+  // means "no receipt on file yet"; all three set means we can render a
+  // thumbnail link and clean up the file when the row is deleted.
+  receiptUrl: text("receipt_url"),
+  receiptFileId: text("receipt_file_id"),
+  receiptMime: text("receipt_mime"),
   added: timestamp("added", { withTimezone: false }).notNull().defaultNow(),
 });
 

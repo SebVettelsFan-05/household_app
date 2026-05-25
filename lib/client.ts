@@ -200,10 +200,34 @@ export async function bulkAddGrocery(input: BulkGroceryInput) {
   return unwrap(await parse<GroceryMutateResponse>(res));
 }
 
+// Hits the testing-only seed endpoint. Server refuses if the table already
+// has rows, so this is safe to call defensively.
+export async function seedSampleGrocery(): Promise<{
+  ok: boolean;
+  inserted?: number;
+}> {
+  try {
+    const res = await fetch("/api/seed/grocery", { method: "POST" });
+    const body = (await res.json().catch(() => null)) as
+      | { ok: true; inserted: number }
+      | { ok: false; error: string }
+      | null;
+    if (body && body.ok) return { ok: true, inserted: body.inserted };
+    return { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /* ----- recipes ----- */
 
 export async function listRecipes(): Promise<Recipe[]> {
   const res = await fetch("/api/recipes", { cache: "no-store" });
+  return unwrap(await parse<ListRecipesResponse>(res)).recipes;
+}
+
+export async function listArchivedRecipes(): Promise<Recipe[]> {
+  const res = await fetch("/api/recipes/archive", { cache: "no-store" });
   return unwrap(await parse<ListRecipesResponse>(res)).recipes;
 }
 
@@ -278,18 +302,42 @@ export async function listExpenses(): Promise<Expense[]> {
 }
 
 export type AddExpenseInput = {
-  name: string;
   amountCents: number;
-  category?: string;
   store?: string;
   paidBy: string;
+  occurredOn?: string;
+  description?: string;
+  // Required at the API level. Made optional in the type so the form can
+  // also call this in places that haven't wired a receipt yet (legacy
+  // tests); the server returns a 400 if the file is missing.
+  receipt?: { blob: Blob; filename: string };
 };
 
+function expenseToFormData(
+  input: Partial<AddExpenseInput> & { id?: string }
+): FormData {
+  const fd = new FormData();
+  if (input.id !== undefined) fd.append("id", input.id);
+  if (input.amountCents !== undefined)
+    fd.append("amountCents", String(input.amountCents));
+  if (input.store !== undefined) fd.append("store", input.store);
+  if (input.paidBy !== undefined) fd.append("paidBy", input.paidBy);
+  if (input.occurredOn !== undefined)
+    fd.append("occurredOn", input.occurredOn);
+  if (input.description !== undefined)
+    fd.append("description", input.description);
+  if (input.receipt) {
+    fd.append("receipt", input.receipt.blob, input.receipt.filename);
+  }
+  return fd;
+}
+
 export async function addExpense(input: AddExpenseInput) {
+  // Always multipart so the receipt field travels alongside the metadata.
+  // Don't set Content-Type manually — the browser fills in the boundary.
   const res = await fetch("/api/expenses", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: expenseToFormData(input),
   });
   return unwrap(await parse<ExpenseMutateResponse>(res));
 }
@@ -299,8 +347,7 @@ export type UpdateExpenseInput = Partial<AddExpenseInput> & { id: string };
 export async function updateExpense(input: UpdateExpenseInput) {
   const res = await fetch("/api/expenses", {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: expenseToFormData(input),
   });
   return unwrap(await parse<ExpenseMutateResponse>(res));
 }

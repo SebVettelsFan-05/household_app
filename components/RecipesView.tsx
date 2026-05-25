@@ -1,12 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AddRecipeToGroceryModal from "@/components/AddRecipeToGroceryModal";
 import FavoritesModal from "@/components/FavoritesModal";
+import RecipeArchiveModal from "@/components/RecipeArchiveModal";
 import RecipeCard from "@/components/RecipeCard";
 import RecipeModal, { type RecipeFields } from "@/components/RecipeModal";
-import { listFavorites } from "@/lib/client";
-import { COOKING_DAYS, nextWeekStart, thisWeekStart } from "@/lib/dates";
+import {
+  addFavorite,
+  deleteFavorite,
+  listFavorites,
+  listRecipes,
+} from "@/lib/client";
+import {
+  COOKING_DAYS,
+  msUntilNextLocalMidnight,
+  nextWeekStart,
+  thisWeekStart,
+} from "@/lib/dates";
 import type {
   CategoryDef,
   FavoriteRecipe,
@@ -73,11 +84,106 @@ export default function RecipesView({
     defaultAddedBy: string;
   } | null>(null);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteRecipe[]>([]);
   const [favsLoaded, setFavsLoaded] = useState(false);
+  const [favBusy, setFavBusy] = useState(false);
 
-  const week1 = useMemo(() => thisWeekStart(), []);
-  const week2 = useMemo(() => nextWeekStart(), []);
+  // Preload favorites on first mount so the star state on each card is
+  // accurate from the first render — without it the cards would briefly show
+  // unfavorited and then "snap" to favorited once the user opens the modal.
+  useEffect(() => {
+    if (favsLoaded) return;
+    let cancelled = false;
+    listFavorites()
+      .then((data) => {
+        if (cancelled) return;
+        setFavorites(data);
+        setFavsLoaded(true);
+      })
+      .catch(() => {
+        // Silent — the modal will surface load errors on demand.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [favsLoaded]);
+
+  // Recipe matches a favorite when names compare equal case-insensitively.
+  const favoriteNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of favorites) set.add(f.name.trim().toLowerCase());
+    return set;
+  }, [favorites]);
+
+  function isFavorited(name: string): boolean {
+    return favoriteNames.has(name.trim().toLowerCase());
+  }
+
+  async function toggleFavorite(recipe: Recipe) {
+    if (favBusy) return;
+    setFavBusy(true);
+    try {
+      const match = favorites.find(
+        (f) => f.name.trim().toLowerCase() === recipe.name.trim().toLowerCase()
+      );
+      if (match) {
+        const res = await deleteFavorite(match.id);
+        setFavorites(res.favorites);
+        onToast(`Removed "${recipe.name}" from favorites`);
+      } else {
+        const res = await addFavorite({
+          name: recipe.name,
+          link: recipe.link,
+          description: recipe.description,
+          ingredients: recipe.ingredients,
+        });
+        setFavorites(res.favorites);
+        onToast(`Saved "${recipe.name}" to favorites`);
+      }
+    } catch (err) {
+      onToast(
+        "Error: " + (err instanceof Error ? err.message : String(err))
+      );
+    } finally {
+      setFavBusy(false);
+    }
+  }
+
+  // Re-computed when `today` changes. A timer schedules itself for the next
+  // local midnight, so the week boundary advances live without a refresh —
+  // and on Sunday at 00:00 "next week" naturally becomes "this week".
+  const [today, setToday] = useState<Date>(() => new Date());
+  const week1 = useMemo(() => thisWeekStart(today), [today]);
+  const week2 = useMemo(() => nextWeekStart(today), [today]);
+
+  useEffect(() => {
+    const delay = msUntilNextLocalMidnight(today);
+    const t = window.setTimeout(() => setToday(new Date()), delay);
+    return () => window.clearTimeout(t);
+  }, [today]);
+
+  // When the week actually rolls over, refetch so the server-side window
+  // (this/next week) returns the recipes for the new range. Skipped on the
+  // first render so we don't double-fetch right after mount.
+  const firstRender = useMemo(() => ({ v: true }), []);
+  useEffect(() => {
+    if (firstRender.v) {
+      firstRender.v = false;
+      return;
+    }
+    listRecipes()
+      .then(onRecipesChange)
+      .catch((err: unknown) => {
+        onToast(
+          "Error reloading recipes: " +
+            (err instanceof Error ? err.message : String(err))
+        );
+      });
+    // intentionally only depends on week1 — we want a refetch precisely when
+    // the active window slides forward.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [week1]);
 
   const recipesByWeek = useMemo(() => {
     const map = new Map<string, Map<number, Recipe>>();
@@ -134,6 +240,13 @@ export default function RecipesView({
         <button type="button" className="btn-secondary" onClick={openFavorites}>
           ★ Favorites
         </button>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => setArchiveOpen(true)}
+        >
+          ⌛ Archive
+        </button>
       </div>
 
       {loading ? (
@@ -165,6 +278,11 @@ export default function RecipesView({
                       weekStart={weekStart}
                       day={d}
                       recipe={recipe}
+                      favorited={recipe ? isFavorited(recipe.name) : false}
+                      favBusy={favBusy}
+                      onToggleFavorite={
+                        recipe ? () => toggleFavorite(recipe) : undefined
+                      }
                       onClick={() =>
                         recipe
                           ? setEditing({
@@ -225,6 +343,13 @@ export default function RecipesView({
           onChange={setFavorites}
           onUse={useFavoriteAsTemplate}
           onToast={onToast}
+          onError={(msg) => onToast("Error: " + msg)}
+        />
+      ) : null}
+
+      {archiveOpen ? (
+        <RecipeArchiveModal
+          onClose={() => setArchiveOpen(false)}
           onError={(msg) => onToast("Error: " + msg)}
         />
       ) : null}

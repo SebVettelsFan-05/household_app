@@ -5,7 +5,8 @@ import AddItemForm from "@/components/AddItemForm";
 import EditModal from "@/components/EditModal";
 import FilterRow from "@/components/FilterRow";
 import ItemRow from "@/components/ItemRow";
-import { buildColorLookup } from "@/lib/categoryColors";
+import { buildColorLookup, getCategoryColor } from "@/lib/categoryColors";
+import { sortCategories } from "@/lib/normalize";
 import type { CategoryDef, FilterCat, Item, SortMode } from "@/lib/types";
 
 const SORT_MODES: SortMode[] = ["newest", "name", "quantity", "expiry"];
@@ -80,6 +81,22 @@ export default function FridgeView({
     () => sortItems(filtered, sortMode),
     [filtered, sortMode]
   );
+
+  // When showing "all", group the sorted list by category — categories follow
+  // the same user-added-first / Other-last order used elsewhere, and items
+  // within each group keep the chosen sort mode (newest, expiry, etc.).
+  const grouped = useMemo(() => {
+    const order = sortCategories(categories).map((c) => c.name);
+    const buckets = new Map<string, Item[]>();
+    for (const name of order) buckets.set(name, []);
+    for (const it of sorted) {
+      if (!buckets.has(it.category)) buckets.set(it.category, []);
+      buckets.get(it.category)!.push(it);
+    }
+    return Array.from(buckets.entries())
+      .filter(([, list]) => list.length > 0)
+      .map(([name, list]) => ({ name, items: list }));
+  }, [sorted, categories]);
 
   const colorFor = useMemo(() => buildColorLookup(categories), [categories]);
 
@@ -168,7 +185,7 @@ export default function FridgeView({
             items.
           </p>
         </div>
-      ) : (
+      ) : filterCat !== "all" ? (
         <div className="items">
           {sorted.map((it) => (
             <ItemRow
@@ -178,6 +195,32 @@ export default function FridgeView({
               onClick={setEditingId}
             />
           ))}
+        </div>
+      ) : (
+        <div className="items">
+          {grouped.map((g) => {
+            const cat = categories.find((c) => c.name === g.name);
+            const headColor = getCategoryColor(g.name, cat?.color ?? null);
+            return (
+              <div key={g.name} className="cat-group">
+                <div
+                  className="cat-group-head"
+                  style={{ color: headColor }}
+                >
+                  <span className="cat-group-name">{g.name}</span>
+                  <span className="cat-group-count">{g.items.length}</span>
+                </div>
+                {g.items.map((it) => (
+                  <ItemRow
+                    key={it.id}
+                    item={it}
+                    color={colorFor(it.category)}
+                    onClick={setEditingId}
+                  />
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
 

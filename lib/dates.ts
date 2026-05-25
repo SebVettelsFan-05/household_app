@@ -52,6 +52,18 @@ export function nextWeekStart(now: Date = new Date()): string {
   return ymd(addDays(weekStartFor(now), 7));
 }
 
+/**
+ * Milliseconds from `now` until the next local midnight. Used by the recipes
+ * view to schedule a single re-render at 00:00 so "this week" / "next week"
+ * roll forward without requiring a page refresh.
+ */
+export function msUntilNextLocalMidnight(now: Date = new Date()): number {
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0);
+  const diff = next.getTime() - now.getTime();
+  return diff > 0 ? diff : 1000; // safety: never schedule a zero/negative timeout
+}
+
 /** Pretty label like "Sun, May 24". */
 export function shortDayLabel(weekStart: string, day: number): string {
   const d = addDays(parseYmd(weekStart), day);

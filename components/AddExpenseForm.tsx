@@ -2,73 +2,86 @@
 
 import { KeyboardEvent, useEffect, useState } from "react";
 import { addExpense } from "@/lib/client";
+import { prepareReceipt } from "@/lib/imageResize";
 import { parseCents } from "@/lib/money";
-import {
-  BUYERS,
-  type Category,
-  type Expense,
-  type ExpenseCategoryDef,
-} from "@/lib/types";
-import CategoryPills from "./CategoryPills";
+import { BUYERS, type Expense } from "@/lib/types";
 
 type Props = {
-  categories: ExpenseCategoryDef[];
   onResult: (expenses: Expense[], toast: string) => void;
   onError: (message: string) => void;
-  onManageCategories: () => void;
 };
 
-const EXPENSE_FALLBACK = "Misc";
+function todayYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
-export default function AddExpenseForm({
-  categories,
-  onResult,
-  onError,
-  onManageCategories,
-}: Props) {
-  const [name, setName] = useState("");
-  const [amount, setAmount] = useState("");
+const ACCEPT = "image/*,application/pdf";
+
+export default function AddExpenseForm({ onResult, onError }: Props) {
   const [store, setStore] = useState("");
+  const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState("");
-  const [cat, setCat] = useState<Category>(EXPENSE_FALLBACK);
+  const [occurredOn, setOccurredOn] = useState<string>(todayYmd);
+  const [description, setDescription] = useState("");
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Object URLs need to be revoked or the browser leaks the blob.
   useEffect(() => {
-    if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
-      const hasFallback = categories.some((c) => c.name === EXPENSE_FALLBACK);
-      setCat(hasFallback ? EXPENSE_FALLBACK : categories[0].name);
-    }
-  }, [categories, cat]);
-
-  async function submit() {
-    const trimmed = name.trim();
-    const cents = parseCents(amount);
-    if (!trimmed) {
-      onError("Name is required");
+    if (!receipt) {
+      setPreviewUrl(null);
       return;
     }
+    if (!receipt.type.startsWith("image/")) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(receipt);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [receipt]);
+
+  async function submit() {
+    const cents = parseCents(amount);
     if (cents === null || cents <= 0) {
       onError("Amount must be greater than $0");
+      return;
+    }
+    if (!store.trim()) {
+      onError("Store / source is required");
       return;
     }
     if (!paidBy) {
       onError("Pick who paid");
       return;
     }
+    if (!receipt) {
+      onError("Attach a receipt photo or PDF");
+      return;
+    }
     setBusy(true);
     try {
+      const prepared = await prepareReceipt(receipt);
       const res = await addExpense({
-        name: trimmed,
         amountCents: cents,
-        category: cat,
-        store: store.trim() || undefined,
+        store: store.trim(),
         paidBy,
+        occurredOn,
+        description: description.trim() || undefined,
+        receipt: { blob: prepared.blob, filename: prepared.filename },
       });
       onResult(res.expenses, "Expense added");
-      setName("");
-      setAmount("");
       setStore("");
-      // Keep paidBy + category for fast repeated entry.
+      setAmount("");
+      setDescription("");
+      setReceipt(null);
+      setOccurredOn(todayYmd());
+      // Keep paidBy for fast repeated entry.
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -83,31 +96,31 @@ export default function AddExpenseForm({
   return (
     <section className="add-card">
       <h2>Add expense</h2>
+
       <div className="field">
-        <label htmlFor="e-name">Name</label>
+        <label htmlFor="e-store">Store / source</label>
         <input
-          id="e-name"
+          id="e-store"
           type="text"
-          placeholder="e.g. Costco run, March rent"
+          placeholder="e.g. Costco"
           autoComplete="off"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          value={store}
+          onChange={(e) => setStore(e.target.value)}
           onKeyDown={onEnter}
         />
       </div>
 
       <div className="field">
-        <div className="cat-pills-row">
-          <label>Category</label>
-          <button
-            type="button"
-            className="manage-link"
-            onClick={onManageCategories}
-          >
-            Manage
-          </button>
-        </div>
-        <CategoryPills categories={categories} value={cat} onChange={setCat} />
+        <label htmlFor="e-desc">Description (optional)</label>
+        <input
+          id="e-desc"
+          type="text"
+          placeholder="e.g. Gas, Pizza"
+          autoComplete="off"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          onKeyDown={onEnter}
+        />
       </div>
 
       <div className="field-row">
@@ -117,21 +130,19 @@ export default function AddExpenseForm({
             id="e-amount"
             type="text"
             inputMode="decimal"
-            placeholder="49.99"
+            placeholder="17.38"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             onKeyDown={onEnter}
           />
         </div>
         <div className="field">
-          <label htmlFor="e-store">Store / To (optional)</label>
+          <label htmlFor="e-date">Date</label>
           <input
-            id="e-store"
-            type="text"
-            placeholder="e.g. Costco, Hydro Quebec"
-            autoComplete="off"
-            value={store}
-            onChange={(e) => setStore(e.target.value)}
+            id="e-date"
+            type="date"
+            value={occurredOn}
+            onChange={(e) => setOccurredOn(e.target.value)}
             onKeyDown={onEnter}
           />
         </div>
@@ -156,14 +167,80 @@ export default function AddExpenseForm({
         </select>
       </div>
 
+      <div className="field">
+        <label htmlFor="e-receipt">Receipt</label>
+        <ReceiptPicker
+          inputId="e-receipt"
+          file={receipt}
+          previewUrl={previewUrl}
+          onChange={setReceipt}
+        />
+      </div>
+
       <button
         className="btn-primary"
         onClick={submit}
         disabled={busy}
         type="button"
       >
-        {busy ? "Adding…" : "Add expense"}
+        {busy ? "Uploading…" : "Add expense"}
       </button>
     </section>
+  );
+}
+
+export function ReceiptPicker({
+  inputId,
+  file,
+  previewUrl,
+  onChange,
+}: {
+  inputId: string;
+  file: File | null;
+  previewUrl: string | null;
+  onChange: (file: File | null) => void;
+}) {
+  return (
+    <div className="receipt-picker">
+      <label htmlFor={inputId} className="receipt-picker-cta">
+        {file ? "Choose a different file" : "Take photo or choose file"}
+      </label>
+      <input
+        id={inputId}
+        type="file"
+        accept={ACCEPT}
+        capture="environment"
+        onChange={(e) => {
+          const f = e.target.files?.[0] ?? null;
+          onChange(f);
+          // Reset the input so re-picking the same file still fires onChange.
+          e.target.value = "";
+        }}
+      />
+      {file ? (
+        <div className="receipt-preview">
+          {previewUrl ? (
+            // Local preview — never sent anywhere until submit.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={previewUrl} alt="Receipt preview" />
+          ) : (
+            <div className="receipt-preview-file">
+              <span className="receipt-file-icon">📄</span>
+              <span>{file.name}</span>
+            </div>
+          )}
+          <button
+            type="button"
+            className="receipt-clear"
+            onClick={() => onChange(null)}
+            aria-label="Remove attached receipt"
+          >
+            ×
+          </button>
+        </div>
+      ) : (
+        <p className="receipt-hint">JPEG, PNG, HEIC, or PDF. Max 4 MB.</p>
+      )}
+    </div>
   );
 }

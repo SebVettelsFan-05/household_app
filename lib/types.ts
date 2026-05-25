@@ -16,7 +16,7 @@ export type Item = {
   category: Category;
 };
 
-export const BUYERS = ["Minh", "Arthur", "Ibrahim", "Daniel", "Eli"] as const;
+export const BUYERS = ["Arthur", "Daniel", "Eli", "Ibrahim", "Minh"] as const;
 export type Buyer = (typeof BUYERS)[number];
 
 export type GroceryItem = {
@@ -98,6 +98,17 @@ export type Expense = {
   category: Category;
   store: string;
   paidBy: string;
+  // YYYY-MM-DD — the date the user said the expense happened. Falls back to
+  // `added` when missing (legacy rows).
+  occurredOn: string;
+  // Optional free-text qualifier shown next to the store in the monthly view
+  // (e.g. "Gas" → "Costco (Gas)"). Also used as a secondary grouping key.
+  description: string;
+  // Receipt attachment metadata. All three are empty strings when no receipt
+  // is on file (legacy rows pre-feature, or rows the upload errored on).
+  receiptUrl: string;
+  receiptFileId: string;
+  receiptMime: string;
   added: string;
 };
 
