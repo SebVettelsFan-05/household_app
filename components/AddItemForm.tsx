@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
+import DictateInventoryModal from "@/components/DictateInventoryModal";
 import ScanLabelModal, {
   type ScanResult,
 } from "@/components/ScanLabelModal";
@@ -38,6 +39,7 @@ export default function AddItemForm({
   // your choice until the form submits.
   const [userPickedCat, setUserPickedCat] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [dictating, setDictating] = useState(false);
 
   function applyScan(r: ScanResult) {
     if (r.name) setName(r.name);
@@ -116,14 +118,24 @@ export default function AddItemForm({
     <section className="add-card">
       <div className="add-card-head">
         <h2>Add item</h2>
-        <button
-          type="button"
-          className="scan-trigger"
-          onClick={() => setScanning(true)}
-          title="Scan a barcode / label with your camera"
-        >
-          📷 Scan
-        </button>
+        <div className="add-card-actions">
+          <button
+            type="button"
+            className="scan-trigger"
+            onClick={() => setDictating(true)}
+            title="Dictate several items at once using your phone keyboard mic"
+          >
+            🎙️ Dictate
+          </button>
+          <button
+            type="button"
+            className="scan-trigger"
+            onClick={() => setScanning(true)}
+            title="Scan a barcode / label with your camera"
+          >
+            📷 Scan
+          </button>
+        </div>
       </div>
       <div className="field">
         <label htmlFor="name">Name</label>
@@ -195,6 +207,15 @@ export default function AddItemForm({
           withExpiry
           onConfirm={applyScan}
           onClose={() => setScanning(false)}
+        />
+      ) : null}
+      {dictating ? (
+        <DictateInventoryModal
+          categories={categories}
+          items={items}
+          onClose={() => setDictating(false)}
+          onResult={onResult}
+          onError={onError}
         />
       ) : null}
     </section>

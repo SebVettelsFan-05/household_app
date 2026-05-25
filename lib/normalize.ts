@@ -69,11 +69,69 @@ export function isProtectedCategory(name: string): boolean {
   return MAINSTAY_CATEGORIES.some((m) => m.toLowerCase() === lc);
 }
 
+/**
+ * Lowercase, trim, collapse whitespace, AND singularize each word so plurals
+ * match their singular form. "Tomatoes" and "tomato" both key to "tomato";
+ * "Bell Peppers" to "bell pepper"; "Berries" to "berry".
+ *
+ * Used as the dedupe key for grocery + inventory merges. Display names are
+ * unaffected — only matching.
+ */
 export function normalizeName(s: string): string {
-  return String(s ?? "")
+  const cleaned = String(s ?? "")
     .toLowerCase()
     .trim()
     .replace(/\s+/g, " ");
+  if (!cleaned) return "";
+  return cleaned.split(" ").map(singularizeWord).join(" ");
+}
+
+// Words that look plural but aren't — singularizing them produces nonsense
+// ("chips" → "chip" is technically fine, but "scissors" → "scissor" isn't).
+const DONT_SINGULARIZE = new Set([
+  "chips", "crisps", "molasses", "asparagus", "couscous", "hummus",
+  "lettuce", "rice", "pasta", "spaghetti", "linguine", "fettuccine",
+  "quinoa", "oats", "grits",
+  "scissors", "tongs", "pants", "shorts",
+]);
+
+// Irregular plurals where the rule-based stripper wouldn't get it right.
+const IRREGULAR_SINGULAR: Record<string, string> = {
+  loaves: "loaf",
+  leaves: "leaf",
+  knives: "knife",
+  lives: "life",
+  halves: "half",
+  shelves: "shelf",
+  wolves: "wolf",
+  calves: "calf",
+  feet: "foot",
+  teeth: "tooth",
+  mice: "mouse",
+  geese: "goose",
+  men: "man",
+  women: "woman",
+  children: "child",
+  people: "person",
+};
+
+function singularizeWord(word: string): string {
+  if (word.length < 4) return word;
+  if (DONT_SINGULARIZE.has(word)) return word;
+  if (IRREGULAR_SINGULAR[word]) return IRREGULAR_SINGULAR[word];
+  // berries → berry, cherries → cherry. The non-vowel guard avoids "ties"
+  // / "lies" style words (those are <4 char already, but defensive).
+  if (/[^aeiou]ies$/.test(word)) return word.slice(0, -3) + "y";
+  // tomatoes → tomato, potatoes → potato.
+  if (/oes$/.test(word) && word.length > 4) return word.slice(0, -2);
+  // dishes → dish, branches → branch, boxes → box, buzzes → buzz.
+  if (/(sh|ch|x|z)es$/.test(word)) return word.slice(0, -2);
+  // Skip "ss" / "us" / "is" endings so glass / asparagus / basis aren't
+  // mangled. Plain trailing "s" otherwise drops: apples → apple,
+  // avocados → avocado, eggs → egg.
+  if (/(ss|us|is)$/.test(word)) return word;
+  if (/s$/.test(word)) return word.slice(0, -1);
+  return word;
 }
 
 // "chicken NOODLE soup" → "Chicken Noodle Soup". Preserves internal

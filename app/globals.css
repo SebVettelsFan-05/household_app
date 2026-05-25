@@ -110,6 +110,7 @@ h1 {
   gap: 8px; margin-bottom: 4px;
 }
 .add-card-head h2 { margin-bottom: 0; }
+.add-card-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .scan-trigger {
   background: var(--surface-soft); border: 1px solid var(--line);
   color: var(--ink); padding: 6px 12px; border-radius: 999px;
@@ -117,6 +118,55 @@ h1 {
   cursor: pointer; transition: background 0.15s, border-color 0.15s;
 }
 .scan-trigger:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+/* Dictation modal — textarea + parsed-row preview list */
+.dictate-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 0 6px;
+}
+.dictate-rows {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 6px 0 10px;
+  max-height: 40vh; overflow-y: auto;
+}
+.dictate-row {
+  background: var(--surface-soft); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.dictate-row-head {
+  display: flex; align-items: center; gap: 8px;
+}
+.dictate-row-fields {
+  display: grid;
+  grid-template-columns: 90px 1fr 1fr;
+  gap: 6px; align-items: center;
+}
+.dictate-input-name,
+.dictate-input-qty,
+.dictate-input-exp,
+.dictate-input-cat {
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px;
+  font-family: inherit; font-size: 14px; color: var(--ink);
+  min-width: 0;
+}
+.dictate-input-name { flex: 1; }
+.dictate-input-name:focus,
+.dictate-input-qty:focus,
+.dictate-input-exp:focus,
+.dictate-input-cat:focus {
+  outline: none; border-color: var(--accent); background: var(--surface);
+}
+.dictate-input-cat {
+  appearance: none; -webkit-appearance: none;
+  padding-right: 22px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-soft) 50%),
+                    linear-gradient(135deg, var(--ink-soft) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
 .field { margin-bottom: 10px; }
 .field label {
   display: block; font-size: 12px; font-weight: 500;
@@ -443,55 +493,83 @@ button:active { transform: scale(0.98); }
 
 .split-card {
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 14px 16px;
+  border-radius: var(--radius); padding: 16px;
   box-shadow: var(--shadow); margin-bottom: 22px;
+  display: flex; flex-direction: column; gap: 14px;
 }
-.split-head {
-  display: flex; align-items: baseline; justify-content: space-between;
-  gap: 8px; margin-bottom: 10px;
-}
-.split-head h2 {
+.split-card h2 {
   font-family: 'Fraunces', serif; font-weight: 500;
-  font-size: 18px; margin: 0; letter-spacing: -0.01em;
+  font-size: 20px; margin: 0; letter-spacing: -0.01em;
 }
-.split-sub {
+
+/* Summary rail — totals at the top, no command verbs. */
+.split-summary {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  margin: 0; padding: 12px;
+  background: var(--surface-soft); border-radius: 10px;
+}
+.split-summary > div { display: flex; flex-direction: column; gap: 2px; }
+.split-summary dt {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-soft);
+  margin: 0;
+}
+.split-summary dd {
+  margin: 0;
+  font-family: 'Fraunces', serif; font-weight: 600;
+  font-size: 20px; letter-spacing: -0.01em; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Per-action groups — Send vs Withdraw. The accent stripe on the left of
+   each row reinforces direction at a glance. */
+.split-group { display: flex; flex-direction: column; gap: 6px; }
+.split-group h3 {
+  margin: 0;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-soft);
+}
+.split-group ul {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.split-group li {
+  position: relative;
+  padding: 10px 12px 10px 14px;
+  background: var(--surface-soft); border-radius: 10px;
+}
+.split-group li::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px;
+  width: 3px; border-radius: 2px;
+}
+.split-group-send li::before { background: var(--warn); }
+.split-group-receive li::before { background: var(--accent); }
+
+.split-row-main {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px;
+}
+.split-name {
+  font-size: 15px; font-weight: 600; color: var(--ink);
+}
+.split-amount {
+  font-family: 'Fraunces', serif; font-weight: 600;
+  font-size: 17px; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.split-group-send .split-amount { color: var(--warn); }
+.split-group-receive .split-amount { color: var(--accent); }
+.split-row-sub {
+  margin-top: 2px;
   font-size: 12px; color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
 }
-.split-sub strong { color: var(--ink); font-weight: 700; }
-.split-step {
-  display: flex; gap: 8px; align-items: flex-start;
-  font-size: 13px; color: var(--ink-soft); line-height: 1.4;
-  margin-bottom: 4px;
-}
-.split-step-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; flex-shrink: 0;
-  border-radius: 50%; background: var(--accent-soft); color: var(--accent);
-  font-size: 11px; font-weight: 700; margin-top: 1px;
-}
-.split-step strong { color: var(--ink); font-weight: 700; }
-.split-people {
-  display: flex; flex-direction: column; gap: 4px;
-  margin: 8px 0 4px;
-  padding-left: 26px;
-}
-.split-person {
-  display: grid;
-  grid-template-columns: minmax(70px, auto) 1fr auto;
-  gap: 10px; align-items: baseline;
-  font-size: 13px;
-}
-.split-person.quiet { opacity: 0.55; }
-.split-name { font-weight: 600; color: var(--ink); }
-.split-paid { color: var(--ink-soft); }
-.split-net { font-weight: 600; text-align: right; }
-.split-net.positive { color: var(--accent); }
-.split-net.negative { color: var(--warn); }
+
 .split-note {
-  font-size: 11px; color: var(--ink-soft);
+  margin: 0;
+  font-size: 12px; color: var(--ink-soft);
   font-style: italic;
-  margin-top: 8px; padding-top: 8px;
-  border-top: 1px solid var(--line);
+  padding-top: 8px; border-top: 1px solid var(--line);
 }
 
 /* Receipt attachment UI (add form + edit modal) */
@@ -604,9 +682,9 @@ button:active { transform: scale(0.98); }
   pointer-events: none;
 }
 .scan-reticle {
-  width: 70%; max-width: 320px; aspect-ratio: 2 / 1;
+  width: 60%; max-width: 280px; aspect-ratio: 1 / 1;
   border: 2px solid rgba(255, 255, 255, 0.7);
-  border-radius: 12px;
+  border-radius: 16px;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.25);
 }
 .scan-status {

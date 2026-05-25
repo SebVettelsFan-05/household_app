@@ -30,11 +30,19 @@ export default function ExpensesView({
 
   const editing = editingId ? expenses.find((e) => e.id === editingId) : null;
 
-  // Newest first.
+  // Chronological by the user-picked date (May 1, May 2, May 3 …). `added`
+  // is the row creation timestamp and reflects when you typed it in, which
+  // had been scrambling the order during backfill — `occurredOn` is what
+  // people actually care about. Tiebreak on `added` so multiple entries
+  // dated the same day stay in insertion order. Legacy rows without
+  // `occurredOn` fall back to `added`.
   const sorted = useMemo(() => {
-    return expenses
-      .slice()
-      .sort((a, b) => (b.added || "").localeCompare(a.added || ""));
+    const dateOf = (e: Expense) => e.occurredOn || e.added || "";
+    return expenses.slice().sort((a, b) => {
+      const cmp = dateOf(a).localeCompare(dateOf(b));
+      if (cmp !== 0) return cmp;
+      return (a.added || "").localeCompare(b.added || "");
+    });
   }, [expenses]);
 
   // ---- Split math ----
@@ -120,64 +128,12 @@ export default function ExpensesView({
           />
 
           {expenses.length > 0 ? (
-            <section className="split-card">
-              <div className="split-head">
-                <h2>Split</h2>
-                <span className="split-sub">
-                  {fmtMoney(summary.total)} ÷ {BUYERS.length} ={" "}
-                  <strong>{fmtMoney(summary.share)}</strong> each
-                </span>
-              </div>
-
-              <div className="split-step">
-                <span className="split-step-num">1</span>
-                <span>
-                  Everyone deposits <strong>{fmtMoney(summary.share)}</strong>{" "}
-                  into the joint account.
-                </span>
-              </div>
-
-              {summary.lines.some((l) => l.paid > 0) ? (
-                <div className="split-step">
-                  <span className="split-step-num">2</span>
-                  <span>
-                    Reimburse from the joint account back to whoever paid:
-                  </span>
-                </div>
-              ) : null}
-
-              <div className="split-people">
-                {summary.lines.map((l) => (
-                  <div
-                    key={l.name}
-                    className={`split-person${l.paid === 0 ? " quiet" : ""}`}
-                  >
-                    <span className="split-name">{l.name}</span>
-                    <span className="split-paid">
-                      paid {fmtMoney(l.paid)}
-                    </span>
-                    <span
-                      className={`split-net${l.net > 0 ? " positive" : l.net < 0 ? " negative" : ""}`}
-                    >
-                      {l.net > 0
-                        ? `receives ${fmtMoney(l.net)}`
-                        : l.net < 0
-                          ? `still owes ${fmtMoney(-l.net)}`
-                          : "even"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {summary.roundingRemainder !== 0 ? (
-                <div className="split-note">
-                  Rounding leaves{" "}
-                  {fmtMoney(Math.abs(summary.roundingRemainder))}{" "}
-                  {summary.roundingRemainder > 0 ? "short of" : "over"} the
-                  total — one person can absorb it.
-                </div>
-              ) : null}
-            </section>
+            <SplitCard
+              total={summary.total}
+              share={summary.share}
+              lines={summary.lines}
+              roundingRemainder={summary.roundingRemainder}
+            />
           ) : null}
 
           <div className="list-head">
@@ -233,5 +189,107 @@ export default function ExpensesView({
         />
       ) : null}
     </>
+  );
+}
+
+/**
+ * Settlement breakdown. Two columns of actionable rows — "Send to joint
+ * account" for people whose share exceeds what they paid, "Withdraw from
+ * joint account" for people who fronted more than their share. Even rows
+ * (paid exactly their share) drop off both lists since they have nothing to
+ * do. Each row carries a Paid / Share sub-line so the amount is auditable
+ * at a glance.
+ *
+ * Sorted by amount descending within each group, so the biggest movers
+ * read first.
+ */
+function SplitCard({
+  total,
+  share,
+  lines,
+  roundingRemainder,
+}: {
+  total: number;
+  share: number;
+  lines: { name: string; paid: number; net: number }[];
+  roundingRemainder: number;
+}) {
+  const senders = lines
+    .filter((l) => l.net < 0)
+    .map((l) => ({ name: l.name, paid: l.paid, amount: -l.net }))
+    .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
+  const receivers = lines
+    .filter((l) => l.net > 0)
+    .map((l) => ({ name: l.name, paid: l.paid, amount: l.net }))
+    .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
+  const evens = lines.filter((l) => l.net === 0).map((l) => l.name);
+
+  return (
+    <section className="split-card">
+      <h2>Split</h2>
+
+      <dl className="split-summary">
+        <div>
+          <dt>Total group expenses</dt>
+          <dd>{fmtMoney(total)}</dd>
+        </div>
+        <div>
+          <dt>Target share per person</dt>
+          <dd>{fmtMoney(share)}</dd>
+        </div>
+      </dl>
+
+      {senders.length > 0 ? (
+        <div className="split-group split-group-send">
+          <h3>Send to joint account</h3>
+          <ul>
+            {senders.map((s) => (
+              <li key={s.name}>
+                <div className="split-row-main">
+                  <span className="split-name">{s.name}</span>
+                  <span className="split-amount">{fmtMoney(s.amount)}</span>
+                </div>
+                <div className="split-row-sub">
+                  Paid {fmtMoney(s.paid)} — Share {fmtMoney(share)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {receivers.length > 0 ? (
+        <div className="split-group split-group-receive">
+          <h3>Withdraw from joint account</h3>
+          <ul>
+            {receivers.map((r) => (
+              <li key={r.name}>
+                <div className="split-row-main">
+                  <span className="split-name">{r.name}</span>
+                  <span className="split-amount">{fmtMoney(r.amount)}</span>
+                </div>
+                <div className="split-row-sub">
+                  Paid {fmtMoney(r.paid)} — Share {fmtMoney(share)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {evens.length > 0 ? (
+        <p className="split-note">
+          Already even: {evens.join(", ")}
+        </p>
+      ) : null}
+
+      {roundingRemainder !== 0 ? (
+        <p className="split-note">
+          Rounding leaves {fmtMoney(Math.abs(roundingRemainder))}{" "}
+          {roundingRemainder > 0 ? "short of" : "over"} the total — one
+          person can absorb it.
+        </p>
+      ) : null}
+    </section>
   );
 }

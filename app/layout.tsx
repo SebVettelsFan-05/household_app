@@ -5,6 +5,11 @@ export const metadata: Metadata = {
   title: "Household",
   description: "Track what's in the household — inventory, groceries, recipes, expenses.",
   manifest: "/manifest.json",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    shortcut: [{ url: "/icon.svg" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

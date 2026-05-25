@@ -106,34 +106,75 @@ const QUALITY_MODIFIERS = [
   "unbleached",
   "uncured",
   "no-antibiotics", "no antibiotics",
+  // prep instructions written as a prefix ("finely chopped fresh rosemary",
+  // "thinly sliced onions"). Two-word combos must be listed before their
+  // single-word substrings so the loop strips the longer form first.
+  "finely chopped", "roughly chopped", "coarsely chopped", "freshly chopped",
+  "finely diced", "roughly diced", "coarsely diced", "freshly diced",
+  "finely sliced", "thinly sliced", "thickly sliced", "freshly sliced",
+  "finely grated", "freshly grated", "coarsely grated",
+  "finely minced", "freshly minced",
+  "finely ground", "freshly ground", "coarsely ground",
+  "finely crumbled", "freshly crumbled",
+  "finely",
+  "coarsely",
+  "thinly", "thickly", "roughly",
 ];
+
+/**
+ * Color prefixes we strip on ingredients where the color is a varietal but
+ * recipes treat them as interchangeable. "Red bell pepper", "orange bell
+ * pepper", "green bell pepper" all collapse to "bell pepper" so they merge
+ * in inventory. Distinct from the broader rule, where color stays —
+ * "red onion" ≠ "white onion".
+ */
+const STRIPABLE_COLOR_PREFIXES: Array<{ pattern: RegExp; replacement: string }> =
+  [
+    {
+      pattern: /^(red|green|orange|yellow|purple|black)\s+bell\s+pepper(s?)\b/i,
+      replacement: "bell pepper$2",
+    },
+  ];
 
 /**
  * Tightens up a free-text ingredient name so "Lean ground beef (85/15)"
  * collapses to "ground beef". Used after the parser strips quantity/units
  * so the residue stays short enough to match the user's inventory.
+ *
+ * Pipeline:
+ *   1. Drop parentheticals — "(85/15)", "(divided)", etc.
+ *   2. Drop everything after the first comma — recipe ingredients almost
+ *      always use comma-suffixes for prep instructions ("garlic, finely
+ *      chopped" → "garlic"; "olive oil, extra virgin" → "olive oil").
+ *   3. Strip leading quality / prep modifiers until none match.
+ *   4. Collapse known color-prefix varietals ("red bell pepper" → "bell
+ *      pepper") so seasonal swaps merge.
  */
 export function cleanIngredientName(raw: string): string {
   let s = raw.replace(/\s*\([^)]*\)/g, " ").trim();
-  // Pull leading modifiers off one by one. A small fixed-point loop lets
-  // chains like "extra lean organic chicken" → "chicken" work without
-  // bespoke ordering.
+  const commaIdx = s.indexOf(",");
+  if (commaIdx >= 0) s = s.slice(0, commaIdx).trim();
+
   let changed = true;
   while (changed) {
     changed = false;
     const lower = s.toLowerCase();
     for (const mod of QUALITY_MODIFIERS) {
-      if (
-        lower === mod ||
-        lower.startsWith(mod + " ") ||
-        lower.startsWith(mod + ",")
-      ) {
+      if (lower === mod || lower.startsWith(mod + " ")) {
         s = s.slice(mod.length).replace(/^[\s,]+/, "");
         changed = true;
         break;
       }
     }
   }
+
+  for (const { pattern, replacement } of STRIPABLE_COLOR_PREFIXES) {
+    if (pattern.test(s)) {
+      s = s.replace(pattern, replacement);
+      break;
+    }
+  }
+
   return s.replace(/\s+/g, " ").trim();
 }
 

@@ -30,7 +30,12 @@ type Stage =
   | {
       kind: "review";
       product: ProductScan | null;
-      ocr: { expiry: string; weightGrams: number; rawText: string };
+      ocr: {
+        expiry: string;
+        weightGrams: number;
+        name: string;
+        rawText: string;
+      };
     }
   | { kind: "error"; message: string };
 
@@ -58,7 +63,13 @@ export default function ScanLabelModal({
       }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
+          video: {
+            facingMode: { ideal: "environment" },
+            // 720p is a sweet spot: enough detail for barcodes / label text
+            // without slowing down per-frame detection.
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
           audio: false,
         });
         if (cancelled) {
@@ -66,6 +77,24 @@ export default function ScanLabelModal({
           return;
         }
         streamRef.current = stream;
+        // Best-effort: ask the camera to keep refocusing continuously. Most
+        // phone browsers honor this; the rest silently ignore. Without it,
+        // close-up labels can stay blurry for the first second or two and
+        // BarcodeDetector can't read what it can't see.
+        try {
+          const track = stream.getVideoTracks()[0];
+          if (track && "applyConstraints" in track) {
+            await track
+              .applyConstraints({
+                advanced: [
+                  { focusMode: "continuous" } as MediaTrackConstraintSet,
+                ],
+              })
+              .catch(() => {});
+          }
+        } catch {
+          /* unsupported — fine */
+        }
         const video = videoRef.current;
         if (!video) return;
         video.srcObject = stream;
@@ -127,12 +156,17 @@ export default function ScanLabelModal({
 
   /**
    * Grab the current video frame into a canvas, OCR it, and stash the
-   * extracted fields. Used for expiry (and weight, when product lookup
-   * didn't return one).
+   * extracted fields. Used both after a barcode hit (for expiry / weight)
+   * and from the manual "Capture label" button before any barcode match —
+   * useful for Costco-style private-label items that aren't in OFF.
    */
   async function captureForOcr() {
     const video = videoRef.current;
     if (!video) return;
+    // Stop the barcode polling if it's still running (manual capture path).
+    stopBarcodeRef.current?.();
+    stopBarcodeRef.current = null;
+
     const product = stage.kind === "product" ? stage.product : null;
     setStage({ kind: "ocr-running", product });
 
@@ -172,7 +206,7 @@ export default function ScanLabelModal({
     setStage({
       kind: "review",
       product,
-      ocr: { expiry: "", weightGrams: 0, rawText: "" },
+      ocr: { expiry: "", weightGrams: 0, name: "", rawText: "" },
     });
   }
 
@@ -211,6 +245,23 @@ export default function ScanLabelModal({
             </div>
           ) : null}
         </div>
+
+        {stage.kind === "scanning" ? (
+          <div className="scan-section">
+            <p className="scan-hint" style={{ marginBottom: 4 }}>
+              No barcode? Frame the product name (biggest text on the
+              label) and tap below. We&apos;ll read it plus weight + expiry
+              if visible.
+            </p>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={captureForOcr}
+            >
+              📸 Capture label (skip barcode)
+            </button>
+          </div>
+        ) : null}
 
         {stage.kind === "error" ? (
           <div className="scan-section">
@@ -309,20 +360,26 @@ function ReviewPanel({
   onConfirm,
 }: {
   product: ProductScan | null;
-  ocr: { expiry: string; weightGrams: number; rawText: string };
+  ocr: { expiry: string; weightGrams: number; name: string; rawText: string };
   withExpiry: boolean;
   onConfirm: (result: ScanResult) => void;
 }) {
-  // Pre-fill from product info; let the user edit anything before commit.
-  const initialName = product
+  // Prefer product-lookup data; fall back to whatever OCR pulled off the
+  // label (this is the manual-capture path for items not in the database).
+  const lookupName = product
     ? [product.brand, product.name].filter(Boolean).join(" ").trim()
     : "";
+  const initialName = lookupName || ocr.name || "";
   const [name, setName] = useState(initialName);
   const [quantity, setQuantity] = useState<string>(
     String(product?.quantityGrams || ocr.weightGrams || 0)
   );
   const [expiry, setExpiry] = useState(ocr.expiry);
   const [category, setCategory] = useState(product?.category || "");
+
+  const ocrFoundSomething =
+    Boolean(ocr.name) || Boolean(ocr.weightGrams) || Boolean(ocr.expiry);
+  const ocrFoundNothing = Boolean(ocr.rawText) && !ocrFoundSomething;
 
   return (
     <div className="scan-section">
@@ -360,10 +417,13 @@ function ReviewPanel({
           </div>
         ) : null}
       </div>
-      {ocr.rawText && !ocr.expiry && withExpiry ? (
+      {ocrFoundNothing ? (
         <p className="scan-hint">
-          Couldn&apos;t make out a date from the label — set one manually if
-          needed.
+          Couldn&apos;t read much off the label — fill these in manually.
+        </p>
+      ) : ocr.rawText && !ocr.expiry && withExpiry && !lookupName ? (
+        <p className="scan-hint">
+          Date wasn&apos;t legible — set the expiry manually if needed.
         </p>
       ) : null}
       <button

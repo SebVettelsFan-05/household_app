@@ -1,7 +1,7 @@
 {
-  "name": "My Fridge",
-  "short_name": "Fridge",
-  "description": "Track what's in the household fridge.",
+  "name": "Household",
+  "short_name": "Household",
+  "description": "Inventory, groceries, recipes, and expenses for the household.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FAF6EE",
@@ -12,7 +12,7 @@
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ]
 }

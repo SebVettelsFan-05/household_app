@@ -39,31 +39,94 @@ export type ExtractedFields = {
   expiry: string;
   // Grams. 0 when nothing convincing was found.
   weightGrams: number;
+  // Best-guess product name from the largest legible line on the label.
+  // "" when no convincing line was found.
+  name: string;
   // Raw text Tesseract returned, useful for debugging when extraction fails.
   rawText: string;
 };
 
+// Tesseract.js's data shape varies slightly across versions; defensive casts
+// let us read lines/bboxes without pulling in the library's type surface.
+type OcrLine = {
+  text?: string;
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+};
+
 /**
  * Lazily imports tesseract.js, OCRs the supplied image, and runs the
- * extractors. Returns immediately with `{ expiry: "", weightGrams: 0 }`
- * when nothing parseable is found.
+ * extractors. Returns immediately with empty fields when nothing parseable
+ * is found — the UI shows whatever did match and leaves the rest editable.
  */
 export async function recognizeLabel(
   source: HTMLCanvasElement | HTMLImageElement | Blob
 ): Promise<ExtractedFields> {
-  // Dynamic import keeps Tesseract out of the initial bundle.
   const { recognize } = await import("tesseract.js");
-
   const recognizeArg =
     source instanceof Blob ? (source as Blob) : (source as HTMLCanvasElement);
-  const { data } = await recognize(recognizeArg, "eng");
+  const result = await recognize(recognizeArg, "eng");
+  const data = result.data as { text?: string; lines?: OcrLine[] } | undefined;
   const text = data?.text || "";
+  const lines = Array.isArray(data?.lines) ? (data!.lines as OcrLine[]) : [];
 
   return {
     expiry: extractExpiry(text) || "",
     weightGrams: extractWeight(text) || 0,
+    name: extractProductName(lines, text),
     rawText: text,
   };
+}
+
+/* ---------- Product name extraction ---------- */
+
+// Lines that almost certainly aren't a product name. Keeps nutrition facts,
+// ingredient lists, codes, and boilerplate out of the running.
+const SKIP_LINE_RE =
+  /^(ingredients?|nutrition|net wt|net weight|distributed|made in|product of|best before|exp|use by|sell by|keep|store at|barcode|warning|contains|caution|see (back|side)|allergen|allergens|do not|refrigerate|http|www\.|©|®)\b/i;
+
+/**
+ * Picks the line most likely to be the product name from Tesseract's
+ * per-line output. Heuristic: largest font (tallest bbox), after filtering
+ * out obvious non-name lines.
+ *
+ * Falls back to the first plausible-looking line in `rawText` when the
+ * lines array isn't populated.
+ */
+export function extractProductName(lines: OcrLine[], rawText = ""): string {
+  const ranked = lines
+    .map((l) => ({
+      text: collapseWhitespace(l.text || ""),
+      height: bboxHeight(l.bbox),
+    }))
+    .filter(({ text }) => isPlausibleName(text))
+    .sort((a, b) => b.height - a.height);
+
+  if (ranked.length > 0) return ranked[0].text;
+
+  for (const candidate of rawText.split(/\r?\n/)) {
+    const cleaned = collapseWhitespace(candidate);
+    if (isPlausibleName(cleaned)) return cleaned;
+  }
+  return "";
+}
+
+function bboxHeight(b: OcrLine["bbox"]): number {
+  if (!b) return 0;
+  return Math.max(0, (b.y1 ?? 0) - (b.y0 ?? 0));
+}
+
+function isPlausibleName(text: string): boolean {
+  if (!text) return false;
+  if (text.length < 3 || text.length > 60) return false;
+  if (SKIP_LINE_RE.test(text)) return false;
+  if (!/[A-Za-z]/.test(text)) return false;
+  const digitCount = (text.match(/\d/g) || []).length;
+  if (digitCount / text.length > 0.4) return false;
+  return true;
+}
+
+function collapseWhitespace(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
 }
 
 /* ---------- Date extraction ---------- */
