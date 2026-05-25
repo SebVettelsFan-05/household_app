@@ -1,4 +1,16 @@
 /**
+ * Drive's `file.getUrl()` returns a viewer HTML page (`drive.google.com/file/d/.../view`),
+ * which can't be used as `<img src>`. The `lh3.googleusercontent.com` host
+ * serves the file as raw bytes and works in img/iframe tags for files that
+ * are shared "anyone with the link can view" (which is how the GAS handler
+ * configures them).
+ */
+export function driveImageUrl(fileId: string, sizePx = 1600): string {
+  if (!fileId) return "";
+  return `https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=w${sizePx}`;
+}
+
+/**
  * Client-side receipt prep.
  *
  * Phone-camera shots can be 4–6 MB easily, which blows past Vercel's

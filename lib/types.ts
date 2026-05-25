@@ -31,7 +31,6 @@ export type GroceryItem = {
 };
 
 export type SortMode = "newest" | "name" | "quantity" | "expiry";
-export type FilterCat = "all" | Category;
 
 export type ApiOk<T = unknown> = { ok: true } & T;
 export type ApiErr = { ok: false; error: string };
@@ -90,6 +89,10 @@ export type ListRecipesResponse = ApiOk<{ recipes: Recipe[] }>;
 export type RecipeMutateResponse = ApiOk<{ recipes: Recipe[] }>;
 export type ListFavoritesResponse = ApiOk<{ favorites: FavoriteRecipe[] }>;
 export type FavoritesMutateResponse = ApiOk<{ favorites: FavoriteRecipe[] }>;
+export type AddFavoriteResponse = ApiOk<{
+  favorites: FavoriteRecipe[];
+  existed?: boolean;
+}>;
 
 export type Expense = {
   id: string;

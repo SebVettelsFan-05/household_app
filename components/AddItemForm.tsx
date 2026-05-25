@@ -1,7 +1,11 @@
 "use client";
 
-import { KeyboardEvent, useEffect, useState } from "react";
+import { KeyboardEvent, useEffect, useMemo, useState } from "react";
+import ScanLabelModal, {
+  type ScanResult,
+} from "@/components/ScanLabelModal";
 import { addItem } from "@/lib/client";
+import { guessCategory } from "@/lib/guessCategory";
 import {
   FALLBACK_CATEGORY,
   type Category,
@@ -12,6 +16,7 @@ import CategoryPills from "./CategoryPills";
 
 type Props = {
   categories: CategoryDef[];
+  items: Item[];
   onResult: (items: Item[], toast: string) => void;
   onError: (message: string) => void;
   onManageCategories: () => void;
@@ -19,6 +24,7 @@ type Props = {
 
 export default function AddItemForm({
   categories,
+  items,
   onResult,
   onError,
   onManageCategories,
@@ -28,6 +34,20 @@ export default function AddItemForm({
   const [exp, setExp] = useState("");
   const [cat, setCat] = useState<Category>(FALLBACK_CATEGORY);
   const [busy, setBusy] = useState(false);
+  // Same idea as the grocery form — once you tap a pill, we stop overriding
+  // your choice until the form submits.
+  const [userPickedCat, setUserPickedCat] = useState(false);
+  const [scanning, setScanning] = useState(false);
+
+  function applyScan(r: ScanResult) {
+    if (r.name) setName(r.name);
+    if (r.quantityGrams > 0) setQty(String(r.quantityGrams));
+    if (r.expiry) setExp(r.expiry);
+    if (r.category && categories.some((c) => c.name === r.category)) {
+      setCat(r.category);
+      setUserPickedCat(true);
+    }
+  }
 
   // If the currently selected category disappears (deleted in manage modal),
   // fall back to Other so we never submit a phantom category.
@@ -37,6 +57,21 @@ export default function AddItemForm({
       setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
     }
   }, [categories, cat]);
+
+  const guessHistory = useMemo(
+    () => items.map((i) => ({ name: i.name, category: i.category })),
+    [items]
+  );
+  const validCategoryNames = useMemo(
+    () => categories.map((c) => c.name),
+    [categories]
+  );
+
+  useEffect(() => {
+    if (userPickedCat) return;
+    const guess = guessCategory(name, guessHistory, validCategoryNames);
+    if (guess && guess !== cat) setCat(guess);
+  }, [name, guessHistory, validCategoryNames, userPickedCat, cat]);
 
   async function submit() {
     const trimmed = name.trim();
@@ -65,6 +100,7 @@ export default function AddItemForm({
       setQty("");
       setExp("");
       setCat(FALLBACK_CATEGORY);
+      setUserPickedCat(false);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -78,7 +114,17 @@ export default function AddItemForm({
 
   return (
     <section className="add-card">
-      <h2>Add item</h2>
+      <div className="add-card-head">
+        <h2>Add item</h2>
+        <button
+          type="button"
+          className="scan-trigger"
+          onClick={() => setScanning(true)}
+          title="Scan a barcode / label with your camera"
+        >
+          📷 Scan
+        </button>
+      </div>
       <div className="field">
         <label htmlFor="name">Name</label>
         <input
@@ -102,7 +148,14 @@ export default function AddItemForm({
             Manage
           </button>
         </div>
-        <CategoryPills categories={categories} value={cat} onChange={setCat} />
+        <CategoryPills
+          categories={categories}
+          value={cat}
+          onChange={(c) => {
+            setCat(c);
+            setUserPickedCat(true);
+          }}
+        />
       </div>
       <div className="field-row">
         <div className="field">
@@ -135,8 +188,15 @@ export default function AddItemForm({
         disabled={busy}
         type="button"
       >
-        {busy ? "Adding…" : "Add to fridge"}
+        {busy ? "Adding…" : "Add to inventory"}
       </button>
+      {scanning ? (
+        <ScanLabelModal
+          withExpiry
+          onConfirm={applyScan}
+          onClose={() => setScanning(false)}
+        />
+      ) : null}
     </section>
   );
 }

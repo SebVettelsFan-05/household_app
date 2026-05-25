@@ -2,13 +2,13 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "My Fridge",
-  description: "Track what's in the household fridge.",
+  title: "Household",
+  description: "Track what's in the household — inventory, groceries, recipes, expenses.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Fridge",
+    title: "Household",
   },
 };
 

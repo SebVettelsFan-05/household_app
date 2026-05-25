@@ -45,6 +45,24 @@ export function sortCategories<T extends { name: string }>(cats: T[]): T[] {
   return [...userAdded, ...mainstays, ...(fallback ? [fallback] : [])];
 }
 
+/**
+ * Combines existing and incoming "addedBy" values for a merged grocery row.
+ * Both can be comma-separated already (after prior merges). Result is
+ * deduped (case-insensitive) and sorted A→Z so the UI stays predictable.
+ */
+export function mergeAddedBy(existing: string, incoming: string): string {
+  const seen = new Map<string, string>(); // lowercase → original casing
+  for (const raw of `${existing},${incoming}`.split(",")) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (!seen.has(key)) seen.set(key, trimmed);
+  }
+  return Array.from(seen.values())
+    .sort((a, b) => a.localeCompare(b))
+    .join(", ");
+}
+
 export function isProtectedCategory(name: string): boolean {
   const lc = name.toLowerCase();
   if (lc === FALLBACK_CATEGORY.toLowerCase()) return true;

@@ -156,7 +156,7 @@ export default function AddRecipeToGroceryModal({
                         {fmtQty(match.quantity).num}
                         {fmtQty(match.quantity).unit}
                       </strong>{" "}
-                      in the fridge
+                      in inventory
                     </div>
                   ) : null}
                 </div>

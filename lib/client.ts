@@ -1,6 +1,7 @@
 import type {
   AddCategoryResponse,
   AddExpenseCategoryResponse,
+  AddFavoriteResponse,
   AddResponse,
   ApiResponse,
   CategoryDef,
@@ -181,6 +182,32 @@ export async function clearGrocery() {
   return unwrap(await parse<GroceryMutateResponse>(res));
 }
 
+type MoveDoneResponse = {
+  ok: true;
+  items: Item[];
+  grocery: GroceryItem[];
+  moved: number;
+};
+
+export async function moveDoneGroceryToInventory(): Promise<{
+  items: Item[];
+  grocery: GroceryItem[];
+  moved: number;
+}> {
+  const res = await fetch("/api/grocery/move-done", { method: "POST" });
+  const body = (await res.json().catch(() => null)) as
+    | MoveDoneResponse
+    | { ok: false; error: string }
+    | null;
+  if (!body || !body.ok) {
+    throw new Error(
+      (body && !body.ok && body.error) ||
+        `Failed to move items (HTTP ${res.status})`
+    );
+  }
+  return { items: body.items, grocery: body.grocery, moved: body.moved };
+}
+
 export type BulkGroceryInput = {
   items: Array<{
     name: string;
@@ -229,6 +256,60 @@ export async function listRecipes(): Promise<Recipe[]> {
 export async function listArchivedRecipes(): Promise<Recipe[]> {
   const res = await fetch("/api/recipes/archive", { cache: "no-store" });
   return unwrap(await parse<ListRecipesResponse>(res)).recipes;
+}
+
+export type ProductScan = {
+  name: string;
+  brand: string;
+  quantityGrams: number;
+  category: string;
+  barcode: string;
+};
+
+/**
+ * Hits the Open Food Facts proxy. Returns null when the product isn't in
+ * the database — caller falls back to plain manual entry.
+ */
+export async function lookupProductByBarcode(
+  barcode: string
+): Promise<ProductScan | null> {
+  const res = await fetch(
+    `/api/products/lookup?barcode=${encodeURIComponent(barcode)}`,
+    { cache: "no-store" }
+  );
+  const body = (await res.json().catch(() => null)) as
+    | { ok: true; product: ProductScan | null }
+    | { ok: false; error: string }
+    | null;
+  if (!body || !body.ok) return null;
+  return body.product;
+}
+
+export type ScrapeRecipeResponse = {
+  name: string;
+  description: string;
+  ingredients: RecipeIngredient[];
+  hasApproximate: boolean;
+};
+
+export async function scrapeRecipeFromUrl(
+  url: string
+): Promise<ScrapeRecipeResponse> {
+  const res = await fetch("/api/recipes/scrape", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const body = (await res.json().catch(() => null)) as
+    | (ScrapeRecipeResponse & { ok: true })
+    | { ok: false; error: string }
+    | null;
+  if (!body || !body.ok) {
+    throw new Error(
+      (body && !body.ok && body.error) || `Failed to fetch recipe (HTTP ${res.status})`
+    );
+  }
+  return body;
 }
 
 export type AddRecipeInput = {
@@ -284,7 +365,7 @@ export async function addFavorite(input: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-  return unwrap(await parse<FavoritesMutateResponse>(res));
+  return unwrap(await parse<AddFavoriteResponse>(res));
 }
 
 export async function deleteFavorite(id: string) {

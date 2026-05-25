@@ -2,43 +2,51 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fmtMoney, parseCents } from "@/lib/money";
+import { titleCaseName } from "@/lib/normalize";
 import type { Expense } from "@/lib/types";
 
-// LocalStorage shapes — kept simple so the data is easy to inspect/clear.
-// `fixed` is a household-wide list of recurring bills with stable amounts
-// (rent, internet, etc.). `variable` is the per-month dollar amounts for
-// utilities that change each cycle (gas, water, electricity). Amounts in both
-// shapes are integer cents.
+/**
+ * Recurring bills have history now.
+ *
+ * Each bill carries:
+ *   - `schedule`: ordered list of `{ from: "YYYY-MM", cents }` markers. The
+ *     amount for a month is whatever the most recent marker said. Edits made
+ *     while viewing the *current* month append/replace at the current month
+ *     and trim future markers — that's the "write forward" rule.
+ *   - `overrides`: per-month one-shot amounts. Edits to any month *other*
+ *     than the current month land here, so past months never propagate.
+ *
+ * Resolution order for a month M: override[M] wins, otherwise the most recent
+ * schedule marker with `from <= M`. Missing on both = 0.
+ *
+ * Variable bills (gas/water/electricity) are always per-month and live in a
+ * simple map.
+ */
+type ScheduleEntry = { from: string; cents: number };
 type FixedRecurring = {
   id: string;
   name: string;
-  amountCents: number;
-  // Protected entries (Rent / Internet / Rental insurance) — amount stays
-  // editable, but the row can't be deleted or renamed.
   protected?: boolean;
+  schedule: ScheduleEntry[];
+  overrides: Record<string, number>;
 };
 type VariableMap = Record<string, Record<string, number>>;
 
-const LS_FIXED = "monthly_recurring_fixed_v1";
-const LS_VARIABLE = "monthly_recurring_variable_v1";
+// Bumped to v3 / v2 to wipe out stale test values from earlier development
+// — protected mainstays start at $0 again, variable utilities start blank,
+// and the old keys are removed on load so they don't linger.
+const LS_FIXED_V3 = "monthly_recurring_fixed_v3";
+const LEGACY_FIXED_KEYS = [
+  "monthly_recurring_fixed_v2",
+  "monthly_recurring_fixed_v1",
+];
+const LS_VARIABLE_V2 = "monthly_recurring_variable_v2";
+const LEGACY_VARIABLE_KEYS = ["monthly_recurring_variable_v1"];
 
-// Mainstay bills — seeded once on first load and pinned to the top of the
-// fixed list. The `id` is deterministic so we can find them across reloads
-// even if the user rearranges things.
-const PROTECTED_FIXED: FixedRecurring[] = [
-  { id: "fixed-mainstay-rent", name: "Rent", amountCents: 0, protected: true },
-  {
-    id: "fixed-mainstay-internet",
-    name: "Internet",
-    amountCents: 0,
-    protected: true,
-  },
-  {
-    id: "fixed-mainstay-rental-insurance",
-    name: "Rental insurance",
-    amountCents: 0,
-    protected: true,
-  },
+const PROTECTED_FIXED: Pick<FixedRecurring, "id" | "name">[] = [
+  { id: "fixed-mainstay-rent", name: "Rent" },
+  { id: "fixed-mainstay-internet", name: "Internet" },
+  { id: "fixed-mainstay-rental-insurance", name: "Rental insurance" },
 ];
 
 const VARIABLE_KEYS = ["Gas", "Water", "Electricity"] as const;
@@ -63,41 +71,104 @@ function shiftMonth(key: string, delta: number): string {
   return ym(d);
 }
 
-function loadFixed(): FixedRecurring[] {
-  if (typeof window === "undefined") return PROTECTED_FIXED.slice();
-  try {
-    const raw = window.localStorage.getItem(LS_FIXED);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    const arr = Array.isArray(parsed)
-      ? parsed.filter(
-          (x): x is FixedRecurring =>
-            !!x &&
-            typeof x === "object" &&
-            typeof (x as FixedRecurring).id === "string" &&
-            typeof (x as FixedRecurring).name === "string" &&
-            typeof (x as FixedRecurring).amountCents === "number"
+function emptyProtected(): FixedRecurring[] {
+  return PROTECTED_FIXED.map((p) => ({
+    id: p.id,
+    name: p.name,
+    protected: true,
+    schedule: [],
+    overrides: {},
+  }));
+}
+
+function parseFixedEntry(raw: unknown): FixedRecurring | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as {
+    id?: unknown;
+    name?: unknown;
+    protected?: unknown;
+    schedule?: unknown;
+    overrides?: unknown;
+  };
+  if (typeof r.id !== "string" || typeof r.name !== "string") return null;
+  return {
+    id: r.id,
+    name: r.name,
+    protected: Boolean(r.protected),
+    schedule: Array.isArray(r.schedule)
+      ? (r.schedule as ScheduleEntry[]).filter(
+          (s) =>
+            s && typeof s.from === "string" && typeof s.cents === "number"
         )
-      : [];
-    // Ensure all protected mainstays are present (re-add any that were
-    // deleted from older state). Preserve their stored amount if present.
-    for (const p of PROTECTED_FIXED) {
-      const existing = arr.find((r) => r.id === p.id);
-      if (!existing) arr.push({ ...p });
-      else {
-        existing.protected = true;
-        existing.name = p.name; // canonical name
-      }
+      : [],
+    overrides:
+      r.overrides && typeof r.overrides === "object"
+        ? (r.overrides as Record<string, number>)
+        : {},
+  };
+}
+
+function loadFixed(): FixedRecurring[] {
+  if (typeof window === "undefined") return emptyProtected();
+  // Drop legacy keys on read so old test data doesn't keep coming back if
+  // someone uses both old and new builds.
+  for (const key of LEGACY_FIXED_KEYS) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
     }
-    return arr;
-  } catch {
-    return PROTECTED_FIXED.slice();
   }
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(LS_FIXED_V3);
+  } catch {
+    return emptyProtected();
+  }
+  let arr: FixedRecurring[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        arr = parsed
+          .map(parseFixedEntry)
+          .filter((x): x is FixedRecurring => x !== null);
+      }
+    } catch {
+      arr = [];
+    }
+  }
+  for (const p of PROTECTED_FIXED) {
+    const existing = arr.find((r) => r.id === p.id);
+    if (!existing) {
+      arr.push({
+        id: p.id,
+        name: p.name,
+        protected: true,
+        schedule: [],
+        overrides: {},
+      });
+    } else {
+      existing.protected = true;
+      existing.name = p.name;
+      existing.schedule = existing.schedule ?? [];
+      existing.overrides = existing.overrides ?? {};
+    }
+  }
+  return arr;
 }
 
 function loadVariable(): VariableMap {
   if (typeof window === "undefined") return {};
+  for (const key of LEGACY_VARIABLE_KEYS) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
   try {
-    const raw = window.localStorage.getItem(LS_VARIABLE);
+    const raw = window.localStorage.getItem(LS_VARIABLE_V2);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") return {};
@@ -107,8 +178,6 @@ function loadVariable(): VariableMap {
   }
 }
 
-// Sorts fixed recurring bills so protected mainstays appear first, in their
-// canonical order, with user-added rows after them in insertion order.
 function sortFixed(rows: FixedRecurring[]): FixedRecurring[] {
   const order = PROTECTED_FIXED.map((p) => p.id);
   const protectedRows = order
@@ -118,9 +187,64 @@ function sortFixed(rows: FixedRecurring[]): FixedRecurring[] {
   return [...protectedRows, ...others];
 }
 
-// Free-form amount input. Keeps a local draft string so the user can type,
-// backspace, and re-type without the controlled value snapping back to a
-// formatted form on every keystroke. Commits on blur (or Enter).
+/** Resolves `bill`'s amount for the given month. Returns 0 if nothing matches. */
+function amountForMonth(bill: FixedRecurring, month: string): number {
+  if (Object.prototype.hasOwnProperty.call(bill.overrides, month)) {
+    return bill.overrides[month];
+  }
+  // Walk schedule (ascending) and keep the latest entry whose `from <= month`.
+  let result = 0;
+  for (const entry of [...bill.schedule].sort((a, b) =>
+    a.from.localeCompare(b.from)
+  )) {
+    if (entry.from <= month) result = entry.cents;
+    else break;
+  }
+  return result;
+}
+
+function hasOverride(bill: FixedRecurring, month: string): boolean {
+  return Object.prototype.hasOwnProperty.call(bill.overrides, month);
+}
+
+/**
+ * Applies an edit.
+ *
+ *   - Editing the *current month or any future month* writes forward: trims
+ *     schedule markers >= the edit month and appends a new marker at the
+ *     edit month. Every subsequent month (until another forward-write or a
+ *     per-month override) picks up the new amount.
+ *   - Editing a *past month* only sets a per-month override. The schedule
+ *     is left untouched, so accidentally typing in last August's rent
+ *     doesn't repaint everything since.
+ */
+function setBillAmount(
+  bill: FixedRecurring,
+  month: string,
+  currentMonth: string,
+  cents: number
+): FixedRecurring {
+  if (month >= currentMonth) {
+    const trimmed = bill.schedule.filter((s) => s.from < month);
+    trimmed.push({ from: month, cents });
+    return { ...bill, schedule: trimmed };
+  }
+  return {
+    ...bill,
+    overrides: { ...bill.overrides, [month]: cents },
+  };
+}
+
+/** Drops a month-level override and falls back to the schedule. */
+function clearBillOverride(bill: FixedRecurring, month: string): FixedRecurring {
+  if (!hasOverride(bill, month)) return bill;
+  const next = { ...bill.overrides };
+  delete next[month];
+  return { ...bill, overrides: next };
+}
+
+/* ---- Free-form amount input (commits on blur/Enter, never on keystroke) ---- */
+
 function AmountInput({
   cents,
   onCommit,
@@ -135,8 +259,6 @@ function AmountInput({
   const formatted = cents !== undefined ? (cents / 100).toFixed(2) : "";
   const [draft, setDraft] = useState<string>(formatted);
 
-  // Re-sync the draft when the underlying value changes from the outside
-  // (e.g. the user navigated to a different month).
   useEffect(() => {
     setDraft(formatted);
   }, [formatted]);
@@ -150,7 +272,6 @@ function AmountInput({
     }
     const c = parseCents(trimmed);
     if (c === null) {
-      // Unparseable — revert to the last known good value.
       setDraft(formatted);
       return;
     }
@@ -184,6 +305,11 @@ type Props = {
 
 export default function MonthlyBreakdown({ expenses, onToast }: Props) {
   const [month, setMonth] = useState<string>(() => ym(new Date()));
+  // Recomputed each render so a tab left open overnight rolls into the new
+  // month without the user noticing.
+  const currentMonth = ym(new Date());
+  const isCurrentMonth = month === currentMonth;
+
   const [fixed, setFixed] = useState<FixedRecurring[]>([]);
   const [variable, setVariable] = useState<VariableMap>({});
   const [newName, setNewName] = useState("");
@@ -193,10 +319,8 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     const loaded = sortFixed(loadFixed());
     setFixed(loaded);
     setVariable(loadVariable());
-    // Persist immediately if loading injected any missing protected rows so
-    // they stick across sessions.
     try {
-      window.localStorage.setItem(LS_FIXED, JSON.stringify(loaded));
+      window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(loaded));
     } catch {
       /* ignore */
     }
@@ -206,7 +330,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     const sorted = sortFixed(next);
     setFixed(sorted);
     try {
-      window.localStorage.setItem(LS_FIXED, JSON.stringify(sorted));
+      window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(sorted));
     } catch {
       onToast("Couldn't save recurring bills");
     }
@@ -215,17 +339,14 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
   function persistVariable(next: VariableMap) {
     setVariable(next);
     try {
-      window.localStorage.setItem(LS_VARIABLE, JSON.stringify(next));
+      window.localStorage.setItem(LS_VARIABLE_V2, JSON.stringify(next));
     } catch {
       onToast("Couldn't save utility amounts");
     }
   }
 
-  // ---- One-time: pull from the logged expenses for the selected month ----
-  // Grouped by store + description. "Costco" with no description and
-  // "Costco (Gas)" tally as separate rows; "Costco (Pizza)" and another
-  // "Costco (Pizza)" merge. Filter by the user-picked occurrence date so
-  // editing a row's date moves it to the right month.
+  /* ---- One-time: group by store+description, title-case for display ---- */
+
   const oneTime = useMemo(() => {
     const inMonth = expenses.filter((e) => {
       const when = e.occurredOn || e.added || "";
@@ -240,9 +361,10 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     const buckets = new Map<string, Bucket>();
     let total = 0;
     for (const e of inMonth) {
-      const store = (e.store || "").trim() || "Unspecified";
+      const rawStore = (e.store || "").trim();
+      const store = rawStore ? titleCaseName(rawStore) : "Unspecified";
       const description = (e.description || "").trim();
-      const key = `${store.toLowerCase()}${description.toLowerCase()}`;
+      const key = `${store.toLowerCase()}${description.toLowerCase()}`;
       const existing = buckets.get(key);
       if (existing) {
         existing.amount += e.amountCents;
@@ -263,10 +385,11 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     return { rows, total, count: inMonth.length };
   }, [expenses, month]);
 
-  // ---- Fixed recurring: same amount every month ----
+  /* ---- Fixed recurring: resolved per displayed month ---- */
+
   const fixedTotal = useMemo(
-    () => fixed.reduce((s, r) => s + r.amountCents, 0),
-    [fixed]
+    () => fixed.reduce((s, r) => s + amountForMonth(r, month), 0),
+    [fixed, month]
   );
 
   function addFixed() {
@@ -280,20 +403,37 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
       onToast("Amount must be greater than zero");
       return;
     }
+    // New bills start from the current month forward, so they don't
+    // accidentally repaint past months with amounts the user never paid.
     persistFixed([
       ...fixed,
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         name: trimmed,
-        amountCents: cents,
+        schedule: [{ from: currentMonth, cents }],
+        overrides: {},
       },
     ]);
     setNewName("");
     setNewAmount("");
   }
 
-  function updateFixed(id: string, patch: Partial<FixedRecurring>) {
-    persistFixed(fixed.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  function renameFixed(id: string, name: string) {
+    persistFixed(fixed.map((r) => (r.id === id ? { ...r, name } : r)));
+  }
+
+  function commitAmount(id: string, cents: number | null) {
+    persistFixed(
+      fixed.map((r) =>
+        r.id === id ? setBillAmount(r, month, currentMonth, cents ?? 0) : r
+      )
+    );
+  }
+
+  function clearOverride(id: string) {
+    persistFixed(
+      fixed.map((r) => (r.id === id ? clearBillOverride(r, month) : r))
+    );
   }
 
   function removeFixed(id: string) {
@@ -303,7 +443,8 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     persistFixed(fixed.filter((r) => r.id !== id));
   }
 
-  // ---- Variable recurring: per-month amounts for gas/water/electricity ----
+  /* ---- Variable recurring: per-month amounts for gas/water/electricity ---- */
+
   const monthVariable = variable[month] ?? {};
   const variableTotal = VARIABLE_KEYS.reduce(
     (s, k) => s + (monthVariable[k] ?? 0),
@@ -368,7 +509,8 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                   {r.store}
                   {r.description ? (
                     <span className="monthly-row-desc">
-                      {" "}({r.description})
+                      {" "}
+                      ({r.description})
                     </span>
                   ) : null}
                   {r.receiptUrls.length === 1 ? (
@@ -392,7 +534,9 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                     </span>
                   ) : null}
                 </span>
-                <span className="monthly-row-amount">{fmtMoney(r.amount)}</span>
+                <span className="monthly-row-amount">
+                  {fmtMoney(r.amount)}
+                </span>
               </div>
             ))}
           </div>
@@ -403,47 +547,67 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         <div className="monthly-section-head">
           <h3>Recurring (fixed)</h3>
           <span className="monthly-sub">
-            <strong>{fmtMoney(fixedTotal)}</strong> / month
+            <strong>{fmtMoney(fixedTotal)}</strong> this month
           </span>
         </div>
         <div className="monthly-list">
-          {fixed.map((r) => (
-            <div
-              className={`monthly-row${r.protected ? " is-protected" : " editable"}`}
-              key={r.id}
-            >
-              {r.protected ? (
-                <span className="monthly-row-name">{r.name}</span>
-              ) : (
-                <input
-                  className="monthly-input-name"
-                  type="text"
-                  value={r.name}
-                  onChange={(e) =>
-                    updateFixed(r.id, { name: e.target.value })
-                  }
-                  maxLength={32}
+          {fixed.map((r) => {
+            const monthCents = amountForMonth(r, month);
+            const overridden = hasOverride(r, month);
+            return (
+              <div
+                className={`monthly-row${r.protected ? " is-protected" : " editable"}`}
+                key={r.id}
+              >
+                {r.protected ? (
+                  <span className="monthly-row-name">
+                    {r.name}
+                    {overridden ? (
+                      <span
+                        className="monthly-row-desc"
+                        title="A custom amount is set just for this month"
+                      >
+                        {" "}(override)
+                      </span>
+                    ) : null}
+                  </span>
+                ) : (
+                  <input
+                    className="monthly-input-name"
+                    type="text"
+                    value={r.name}
+                    onChange={(e) => renameFixed(r.id, e.target.value)}
+                    maxLength={32}
+                  />
+                )}
+                <AmountInput
+                  cents={monthCents || undefined}
+                  onCommit={(cents) => commitAmount(r.id, cents)}
+                  ariaLabel={`${r.name} amount`}
                 />
-              )}
-              <AmountInput
-                cents={r.amountCents || undefined}
-                onCommit={(cents) =>
-                  updateFixed(r.id, { amountCents: cents ?? 0 })
-                }
-                ariaLabel={`${r.name} amount`}
-              />
-              {r.protected ? null : (
-                <button
-                  type="button"
-                  className="monthly-remove"
-                  onClick={() => removeFixed(r.id)}
-                  aria-label={`Remove ${r.name}`}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          ))}
+                {overridden && !isCurrentMonth ? (
+                  <button
+                    type="button"
+                    className="monthly-remove"
+                    onClick={() => clearOverride(r.id)}
+                    title="Clear this month's override and fall back to the default"
+                    aria-label={`Clear ${r.name} override for this month`}
+                  >
+                    ↺
+                  </button>
+                ) : r.protected ? null : (
+                  <button
+                    type="button"
+                    className="monthly-remove"
+                    onClick={() => removeFixed(r.id)}
+                    aria-label={`Remove ${r.name}`}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
         <div className="monthly-add">
           <input

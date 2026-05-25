@@ -18,6 +18,7 @@ import {
   nextWeekStart,
   thisWeekStart,
 } from "@/lib/dates";
+import { findFavoriteMatch, isFavoriteMatch } from "@/lib/favoriteMatch";
 import type {
   CategoryDef,
   FavoriteRecipe,
@@ -109,23 +110,15 @@ export default function RecipesView({
     };
   }, [favsLoaded]);
 
-  // Recipe matches a favorite when names compare equal case-insensitively.
-  const favoriteNames = useMemo(() => {
-    const set = new Set<string>();
-    for (const f of favorites) set.add(f.name.trim().toLowerCase());
-    return set;
-  }, [favorites]);
-
-  function isFavorited(name: string): boolean {
-    return favoriteNames.has(name.trim().toLowerCase());
-  }
-
   async function toggleFavorite(recipe: Recipe) {
     if (favBusy) return;
     setFavBusy(true);
     try {
-      const match = favorites.find(
-        (f) => f.name.trim().toLowerCase() === recipe.name.trim().toLowerCase()
+      // Match by name OR link, identical rule to the in-modal check, so the
+      // card star and the modal button never disagree about the state.
+      const match = findFavoriteMatch(
+        { name: recipe.name, link: recipe.link },
+        favorites
       );
       if (match) {
         const res = await deleteFavorite(match.id);
@@ -213,6 +206,19 @@ export default function RecipesView({
     }
   }
 
+  // Walk this week and next, return the first empty (weekStart, day) — so
+  // when the user picks a favorite, we drop it into the next free slot
+  // instead of forcing them to overwrite Sunday.
+  function findFirstEmptySlot(): { weekStart: string; day: number } {
+    for (const weekStart of [week1, week2]) {
+      const slots = recipesByWeek.get(weekStart);
+      for (const d of COOKING_DAYS) {
+        if (!slots?.has(d)) return { weekStart, day: d };
+      }
+    }
+    return { weekStart: week1, day: 0 };
+  }
+
   function useFavoriteAsTemplate(template: {
     name: string;
     link: string;
@@ -220,11 +226,12 @@ export default function RecipesView({
     ingredients: FavoriteRecipe["ingredients"];
   }) {
     setFavoritesOpen(false);
+    const slot = findFirstEmptySlot();
     setEditing({
       mode: "new",
       initial: {
-        weekStart: week1,
-        day: 0,
+        weekStart: slot.weekStart,
+        day: slot.day,
         assignedTo: "",
         name: template.name,
         link: template.link,
@@ -278,7 +285,14 @@ export default function RecipesView({
                       weekStart={weekStart}
                       day={d}
                       recipe={recipe}
-                      favorited={recipe ? isFavorited(recipe.name) : false}
+                      favorited={
+                        recipe
+                          ? isFavoriteMatch(
+                              { name: recipe.name, link: recipe.link },
+                              favorites
+                            )
+                          : false
+                      }
                       favBusy={favBusy}
                       onToggleFavorite={
                         recipe ? () => toggleFavorite(recipe) : undefined
@@ -311,6 +325,12 @@ export default function RecipesView({
           initial={editing.initial}
           categories={categories}
           fridgeItems={fridgeItems}
+          weekOptions={[
+            { weekStart: week1, label: "This week" },
+            { weekStart: week2, label: "Next week" },
+          ]}
+          favorites={favorites}
+          onFavoritesChange={setFavorites}
           onClose={() => setEditing(null)}
           onResult={(next, msg) => {
             if (next.length > 0) onRecipesChange(next);

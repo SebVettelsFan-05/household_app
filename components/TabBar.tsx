@@ -10,7 +10,8 @@ type Props = {
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "home", label: "Home" },
-  { id: "fridge", label: "Fridge" },
+  // Internal id is still "fridge" so saved tab state survives the rename.
+  { id: "fridge", label: "Inventory" },
   { id: "grocery", label: "Grocery" },
   { id: "recipes", label: "Recipes" },
   { id: "expenses", label: "Expenses" },

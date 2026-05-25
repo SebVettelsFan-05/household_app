@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { ReceiptPicker } from "@/components/AddExpenseForm";
+import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { deleteExpense, updateExpense } from "@/lib/client";
-import { prepareReceipt } from "@/lib/imageResize";
+import { driveImageUrl, prepareReceipt } from "@/lib/imageResize";
 import { fmtMoney, parseCents } from "@/lib/money";
 import { BUYERS, type Expense } from "@/lib/types";
 
@@ -29,6 +30,7 @@ export default function EditExpenseModal({
   const [description, setDescription] = useState(item.description || "");
   const [receipt, setReceipt] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [expandedExisting, setExpandedExisting] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const hasExistingReceipt = Boolean(item.receiptUrl);
@@ -36,6 +38,12 @@ export default function EditExpenseModal({
     hasExistingReceipt &&
     !!item.receiptMime &&
     item.receiptMime.startsWith("image/");
+  // Drive's getUrl() points to a viewer HTML page that can't be used as <img>.
+  // The lh3.googleusercontent.com host serves the raw bytes for files shared
+  // "anyone with the link can view", which is how the GAS handler sets them.
+  const existingImgSrc = existingIsImage && item.receiptFileId
+    ? driveImageUrl(item.receiptFileId, 1600)
+    : "";
 
   useEffect(() => {
     if (!receipt) {
@@ -182,12 +190,14 @@ export default function EditExpenseModal({
           <label>Receipt</label>
           {hasExistingReceipt && !receipt ? (
             <div className="receipt-existing">
-              {existingIsImage ? (
+              {existingImgSrc ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={item.receiptUrl}
+                  src={existingImgSrc}
                   alt="Current receipt"
                   className="receipt-existing-thumb"
+                  onClick={() => setExpandedExisting(true)}
+                  title="Click to expand"
                 />
               ) : (
                 <span className="receipt-existing-icon">📄</span>
@@ -219,6 +229,14 @@ export default function EditExpenseModal({
             onChange={setReceipt}
           />
         </div>
+
+        {expandedExisting && existingImgSrc ? (
+          <ReceiptLightbox
+            src={existingImgSrc}
+            alt="Current receipt"
+            onClose={() => setExpandedExisting(false)}
+          />
+        ) : null}
 
         <div className="modal-actions">
           <button

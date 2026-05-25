@@ -1,8 +1,12 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
+import ScanLabelModal, {
+  type ScanResult,
+} from "@/components/ScanLabelModal";
 import { addGrocery } from "@/lib/client";
 import { fmtQty } from "@/lib/format";
+import { guessCategory } from "@/lib/guessCategory";
 import { normalizeName } from "@/lib/normalize";
 import {
   BUYERS,
@@ -17,6 +21,7 @@ import CategoryPills from "./CategoryPills";
 type Props = {
   categories: CategoryDef[];
   fridgeItems: Item[];
+  grocery: GroceryItem[];
   onResult: (grocery: GroceryItem[], toast: string) => void;
   onError: (message: string) => void;
   onManageCategories: () => void;
@@ -25,6 +30,7 @@ type Props = {
 export default function AddGroceryForm({
   categories,
   fridgeItems,
+  grocery,
   onResult,
   onError,
   onManageCategories,
@@ -35,6 +41,20 @@ export default function AddGroceryForm({
   const [store, setStore] = useState("");
   const [addedBy, setAddedBy] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  // Once the user taps a category pill, we stop overriding their choice as
+  // they keep typing. Reset on submit so the next entry auto-suggests again.
+  const [userPickedCat, setUserPickedCat] = useState(false);
+  const [scanning, setScanning] = useState(false);
+
+  function applyScan(r: ScanResult) {
+    if (r.name) setName(r.name);
+    if (r.quantityGrams > 0) setQty(String(r.quantityGrams));
+    if (r.category && categories.some((c) => c.name === r.category)) {
+      setCat(r.category);
+      setUserPickedCat(true);
+    }
+    // Grocery items don't carry expiry, so r.expiry is ignored here.
+  }
 
   useEffect(() => {
     if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
@@ -42,6 +62,29 @@ export default function AddGroceryForm({
       setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
     }
   }, [categories, cat]);
+
+  // History fed to the category guesser. Putting grocery before fridge means
+  // recent grocery tagging carries more weight than older fridge items, which
+  // matches "what did I just type for this kind of thing".
+  const guessHistory = useMemo(
+    () => [
+      ...grocery.map((g) => ({ name: g.name, category: g.category })),
+      ...fridgeItems.map((i) => ({ name: i.name, category: i.category })),
+    ],
+    [grocery, fridgeItems]
+  );
+  const validCategoryNames = useMemo(
+    () => categories.map((c) => c.name),
+    [categories]
+  );
+
+  // Re-run the guesser whenever the name changes (and the user hasn't taken
+  // control of the picker). Cheap — synchronous, runs on each keystroke.
+  useEffect(() => {
+    if (userPickedCat) return;
+    const guess = guessCategory(name, guessHistory, validCategoryNames);
+    if (guess && guess !== cat) setCat(guess);
+  }, [name, guessHistory, validCategoryNames, userPickedCat, cat]);
 
   // Soft warning: if the typed name matches something already in the fridge.
   const fridgeMatch = useMemo(() => {
@@ -79,7 +122,10 @@ export default function AddGroceryForm({
       setName("");
       setQty("");
       setStore("");
-      // Keep addedBy + category so repeated entries are fast.
+      // Reset auto-suggest control so the next entry's name drives the
+      // category again. Keep addedBy + cat for fast repeated entries — the
+      // suggester will overwrite cat as soon as the user starts typing.
+      setUserPickedCat(false);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -95,7 +141,17 @@ export default function AddGroceryForm({
 
   return (
     <section className="add-card">
-      <h2>Add to list</h2>
+      <div className="add-card-head">
+        <h2>Add to list</h2>
+        <button
+          type="button"
+          className="scan-trigger"
+          onClick={() => setScanning(true)}
+          title="Scan a barcode / label with your camera"
+        >
+          📷 Scan
+        </button>
+      </div>
       <div className="field">
         <label htmlFor="g-name">Name</label>
         <input
@@ -112,7 +168,7 @@ export default function AddGroceryForm({
             <span className="fridge-hint-dot" />
             <span>
               You already have <strong>{matchQty.num}{matchQty.unit}</strong> of{" "}
-              <strong>{fridgeMatch.name}</strong> in the fridge.
+              <strong>{fridgeMatch.name}</strong> in inventory.
             </span>
           </div>
         ) : null}
@@ -129,7 +185,14 @@ export default function AddGroceryForm({
             Manage
           </button>
         </div>
-        <CategoryPills categories={categories} value={cat} onChange={setCat} />
+        <CategoryPills
+          categories={categories}
+          value={cat}
+          onChange={(c) => {
+            setCat(c);
+            setUserPickedCat(true);
+          }}
+        />
       </div>
 
       <div className="field-row">
@@ -187,6 +250,13 @@ export default function AddGroceryForm({
       >
         {busy ? "Adding…" : "Add to list"}
       </button>
+      {scanning ? (
+        <ScanLabelModal
+          withExpiry={false}
+          onConfirm={applyScan}
+          onClose={() => setScanning(false)}
+        />
+      ) : null}
     </section>
   );
 }

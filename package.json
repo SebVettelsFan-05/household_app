@@ -13,10 +13,13 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
+    "@zxing/browser": "^0.2.0",
     "drizzle-orm": "^0.45.2",
     "next": "^15.1.6",
+    "parse-ingredient": "^2.2.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",

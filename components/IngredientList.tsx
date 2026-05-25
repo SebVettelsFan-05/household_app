@@ -100,7 +100,6 @@ export default function IngredientList({
                     updateIngredient(i, { quantity: Number(e.target.value) })
                   }
                 />
-                <span className="ingredient-unit">g</span>
                 <select
                   className="ingredient-cat"
                   value={ing.category}
@@ -125,7 +124,7 @@ export default function IngredientList({
               </div>
               {match ? (
                 <div className="ingredient-fridge-hint">
-                  In fridge:{" "}
+                  In inventory:{" "}
                   <strong>
                     {fmtQty(match.quantity).num}
                     {fmtQty(match.quantity).unit}
@@ -190,7 +189,7 @@ export default function IngredientList({
         </div>
         {draftMatch ? (
           <div className="ingredient-fridge-hint">
-            In fridge:{" "}
+            In inventory:{" "}
             <strong>
               {fmtQty(draftMatch.quantity).num}
               {fmtQty(draftMatch.quantity).unit}

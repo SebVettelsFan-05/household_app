@@ -13,15 +13,15 @@ const SECTIONS: {
 }[] = [
   {
     id: "fridge",
-    title: "Fridge",
+    title: "Inventory",
     blurb:
-      "Track what's in the household fridge — quantities, expiry dates, and what's about to go bad.",
+      "Everything we've got on hand — fridge, pantry, household supplies. Quantities, expiry dates, and what's about to go bad.",
   },
   {
     id: "grocery",
     title: "Grocery",
     blurb:
-      "Shared shopping list. Adding something already in the fridge will warn you so we don't double-buy.",
+      "Shared shopping list. Adding something already in inventory will warn you so we don't double-buy.",
   },
   {
     id: "recipes",

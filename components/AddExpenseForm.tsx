@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useState } from "react";
+import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { addExpense } from "@/lib/client";
 import { prepareReceipt } from "@/lib/imageResize";
 import { parseCents } from "@/lib/money";
@@ -200,6 +201,7 @@ export function ReceiptPicker({
   previewUrl: string | null;
   onChange: (file: File | null) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="receipt-picker">
       <label htmlFor={inputId} className="receipt-picker-cta">
@@ -220,9 +222,13 @@ export function ReceiptPicker({
       {file ? (
         <div className="receipt-preview">
           {previewUrl ? (
-            // Local preview — never sent anywhere until submit.
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={previewUrl} alt="Receipt preview" />
+            <img
+              src={previewUrl}
+              alt="Receipt preview"
+              onClick={() => setExpanded(true)}
+              title="Click to expand"
+            />
           ) : (
             <div className="receipt-preview-file">
               <span className="receipt-file-icon">📄</span>
@@ -241,6 +247,13 @@ export function ReceiptPicker({
       ) : (
         <p className="receipt-hint">JPEG, PNG, HEIC, or PDF. Max 4 MB.</p>
       )}
+      {expanded && previewUrl ? (
+        <ReceiptLightbox
+          src={previewUrl}
+          alt="Receipt preview"
+          onClose={() => setExpanded(false)}
+        />
+      ) : null}
     </div>
   );
 }

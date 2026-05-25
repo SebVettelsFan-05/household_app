@@ -160,7 +160,7 @@ export default function Page() {
     tab === "home"
       ? "Household"
       : tab === "fridge"
-        ? "Fridge"
+        ? "Inventory"
         : tab === "grocery"
           ? "Grocery"
           : tab === "recipes"
@@ -196,6 +196,7 @@ export default function Page() {
           loading={groceryLoading}
           loadError={groceryError}
           onGroceryChange={setGrocery}
+          onItemsChange={setItems}
           onToast={showToast}
           onManageCategories={() => setManagingCats(true)}
         />

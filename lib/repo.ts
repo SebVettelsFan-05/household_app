@@ -28,6 +28,7 @@ import {
   MAINSTAY_CATEGORIES,
   formatDate,
   isProtectedCategory,
+  mergeAddedBy,
   normalizeName,
   pickCategory,
   sortCategories,
@@ -309,7 +310,13 @@ export async function addGroceryRepo(
   if (existing) {
     await db
       .update(groceryTable)
-      .set({ quantity: existing.quantity + qty, name: canonicalName })
+      .set({
+        quantity: existing.quantity + qty,
+        name: canonicalName,
+        // Track every requester so "For Arthur" + "For Eli" becomes
+        // "For Arthur, Eli" instead of silently dropping the new person.
+        addedBy: mergeAddedBy(existing.addedBy, addedBy),
+      })
       .where(eq(groceryTable.id, existing.id));
     return listGroceryRepo();
   }
@@ -383,6 +390,83 @@ export async function clearGroceryRepo(): Promise<GroceryItem[]> {
   return [];
 }
 
+/**
+ * Moves every checked-off grocery row into the inventory (items table) and
+ * deletes those grocery rows. Returns the post-move state for both tables
+ * plus a count, so the UI can pop a "moved N items" toast and refresh.
+ *
+ * Merge behavior matches the regular add-to-inventory path: if a matching
+ * item already exists, quantities add. Category is preserved; expiry is
+ * left empty (the user can fill it in after).
+ */
+export async function moveDoneGroceryToItemsRepo(): Promise<{
+  items: Item[];
+  grocery: GroceryItem[];
+  moved: number;
+}> {
+  const allGrocery = await db.select().from(groceryTable);
+  const done = allGrocery.filter((g) => g.done);
+  if (done.length === 0) {
+    return {
+      items: await listItemsRepo(),
+      grocery: await listGroceryRepo(),
+      moved: 0,
+    };
+  }
+
+  const validCats = (await listCategoriesRepo()).map((c) => c.name);
+  const inventoryRows = await db.select().from(itemsTable);
+
+  // Cache existing inventory by normalized name so consecutive moves merge
+  // into the same row instead of inserting duplicates.
+  const byNorm = new Map<string, typeof itemsTable.$inferSelect>();
+  for (const r of inventoryRows) byNorm.set(normalizeName(r.name), r);
+
+  for (const g of done) {
+    const name = String(g.name ?? "").trim();
+    if (!name) continue;
+    const category = pickCategory(g.category, validCats);
+    const norm = normalizeName(name);
+    const existing = byNorm.get(norm);
+    if (existing) {
+      const nextQty = existing.quantity + (g.quantity || 0);
+      await db
+        .update(itemsTable)
+        .set({ quantity: nextQty })
+        .where(eq(itemsTable.id, existing.id));
+      existing.quantity = nextQty;
+    } else {
+      const [inserted] = await db
+        .insert(itemsTable)
+        .values({
+          name,
+          quantity: g.quantity || 0,
+          // Inventory items don't currently carry store/addedBy.
+          category,
+        })
+        .returning();
+      if (inserted) byNorm.set(norm, inserted);
+    }
+  }
+
+  // Drop the moved grocery rows after inventory writes succeed, so a
+  // partial failure leaves the user with both lists rather than nothing.
+  await db
+    .delete(groceryTable)
+    .where(
+      inArray(
+        groceryTable.id,
+        done.map((d) => d.id)
+      )
+    );
+
+  return {
+    items: await listItemsRepo(),
+    grocery: await listGroceryRepo(),
+    moved: done.length,
+  };
+}
+
 export async function bulkAddGroceryRepo(
   inputs: Array<{
     name: string;
@@ -419,12 +503,18 @@ export async function bulkAddGroceryRepo(
 
     if (existing) {
       const nextQty = existing.quantity + qty;
+      const nextAddedBy = mergeAddedBy(existing.addedBy, addedBy);
       await db
         .update(groceryTable)
-        .set({ quantity: nextQty, name: canonicalName })
+        .set({
+          quantity: nextQty,
+          name: canonicalName,
+          addedBy: nextAddedBy,
+        })
         .where(eq(groceryTable.id, existing.id));
       existing.quantity = nextQty;
       existing.name = canonicalName;
+      existing.addedBy = nextAddedBy;
     } else {
       const row = {
         name: canonicalName,
@@ -634,19 +724,37 @@ export async function addFavoriteRepo(input: {
   link?: string;
   description?: string;
   ingredients?: unknown;
-}): Promise<FavoriteRecipe[]> {
+}): Promise<{ favorites: FavoriteRecipe[]; existed: boolean }> {
   const name = String(input.name ?? "").trim();
   if (!name) throw new Error("Name required");
+  const link = input.link ? String(input.link).trim() : "";
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
+
+  // Dedupe: a favorite already exists if its name matches case-insensitively,
+  // OR if both have a link and the links match case-insensitively. Same
+  // recipe pasted twice (or favorited from the modal twice) is treated as a
+  // no-op rather than a duplicate row.
+  const nameKey = name.toLowerCase();
+  const linkKey = link.toLowerCase();
+  const existing = await listFavoritesRepo();
+  const dup = existing.find((f) => {
+    if (f.name.trim().toLowerCase() === nameKey) return true;
+    if (linkKey && (f.link || "").trim().toLowerCase() === linkKey) return true;
+    return false;
+  });
+  if (dup) {
+    return { favorites: existing, existed: true };
+  }
+
   await db.insert(favoritesTable).values({
     name,
-    link: input.link ? String(input.link).trim() || null : null,
+    link: link || null,
     description: input.description
       ? String(input.description).trim() || null
       : null,
     ingredients: sanitizeIngredients(input.ingredients, validCats),
   });
-  return listFavoritesRepo();
+  return { favorites: await listFavoritesRepo(), existed: false };
 }
 
 export async function deleteFavoriteRepo(id: string): Promise<FavoriteRecipe[]> {
