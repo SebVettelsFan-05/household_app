@@ -89,16 +89,48 @@ function preprocess(text: string): string {
 }
 
 /**
- * Splits dictation into one chunk per item. Phone dictation punctuation is
- * unreliable, so we anchor on weight tokens instead: each detected weight
- * marks the end of a chunk. Trailing expiry information (keyword + date OR a
- * standalone date pattern within a short window) is absorbed into the same
- * chunk so it stays with its item.
+ * Splits dictation into one chunk per item. Phone dictation is messy on both
+ * axes — punctuation gets dropped, item boundaries get blurred — so we use a
+ * two-pass split:
  *
- * Fallback to punctuation/connector splitting only when no weights are
- * found at all — better than handing the whole blob to the chunk parser.
+ *   1. Primary split on punctuation + connector words ("and", "then", etc.).
+ *      This catches the cases where the user did pause / the OS did insert a
+ *      comma. "and a half" / "and a quarter" are protected so weight phrases
+ *      don't get torn in half.
+ *
+ *   2. Within each primary chunk, anchor on weight tokens so a chunk with
+ *      multiple weights gets one item per weight. The name attaches to
+ *      whichever side of the weight has content: "chicken 500g" → name on
+ *      the left; "500g chicken" → name on the right. This avoids the bug
+ *      where weight-first dictation ("500g chicken, 1kg onions") attributed
+ *      "chicken" to the wrong weight.
  */
 function splitIntoChunks(text: string): string[] {
+  const primary = primarySplit(text);
+  const chunks: string[] = [];
+  for (const p of primary) {
+    for (const c of weightSplit(p)) chunks.push(c);
+  }
+  return chunks;
+}
+
+function primarySplit(text: string): string[] {
+  const protectedText = text.replace(
+    /\band\s+(a\s+half|a\s+quarter|half|quarter)\b/gi,
+    "_and_$1"
+  );
+  return protectedText
+    .split(/[,.;\n]|\s+(?:and|then|next|also|plus)\s+/i)
+    .map((s) => s.replace(/_and_/g, "and ").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Splits a single primary chunk into one item per detected weight. With no
+ * weight we keep the chunk intact (the user gets a "no weight detected"
+ * warning and can fix it in the modal).
+ */
+function weightSplit(text: string): string[] {
   const weights: { start: number; end: number }[] = [];
   const re = new RegExp(WEIGHT_RE.source, "gi");
   let m: RegExpExecArray | null;
@@ -106,22 +138,39 @@ function splitIntoChunks(text: string): string[] {
     weights.push({ start: m.index, end: m.index + m[0].length });
   }
   if (weights.length === 0) {
-    // No weights — fall back to old punctuation/connector splitting so the
-    // user still gets per-row warnings for missing weight.
-    return punctuationFallbackSplit(text);
+    const t = text.trim();
+    return t ? [t] : [];
   }
 
   const chunks: string[] = [];
-  let start = 0;
-  for (const w of weights) {
-    const end = absorbTrailingExpiry(text, w.end);
-    const chunk = text.slice(start, end).trim();
+  let cursor = 0;
+  for (let i = 0; i < weights.length; i++) {
+    const w = weights[i];
+    const leftRaw = text.slice(cursor, w.start);
+    let chunkEnd: number;
+    if (hasMeaningfulText(leftRaw)) {
+      // Name comes before the weight — close the chunk after the weight,
+      // pulling in any trailing expiry that belongs with this item.
+      chunkEnd = absorbTrailingExpiry(text, w.end);
+    } else {
+      // No name on the left (start of text, or only stopwords like "of"/"a").
+      // The name is whatever sits between this weight and the next one.
+      chunkEnd = i + 1 < weights.length ? weights[i + 1].start : text.length;
+    }
+    const chunk = text.slice(cursor, chunkEnd).trim();
     if (chunk) chunks.push(chunk);
-    start = end;
+    cursor = chunkEnd;
   }
-  const trailing = text.slice(start).trim();
+  const trailing = text.slice(cursor).trim();
   if (trailing) chunks.push(trailing);
   return chunks;
+}
+
+const NAME_STOPWORDS_RE = /\b(?:and|then|next|also|plus|with|of|for|a|an|the)\b/gi;
+
+/** True when `text` contains any token that isn't just connector/stopword fluff. */
+function hasMeaningfulText(text: string): boolean {
+  return text.replace(NAME_STOPWORDS_RE, "").replace(/\s+/g, "").length > 0;
 }
 
 /**
@@ -157,17 +206,6 @@ function absorbTrailingExpiry(text: string, weightEnd: number): number {
     return weightEnd + ws + dateMatch.matched.length;
   }
   return weightEnd;
-}
-
-function punctuationFallbackSplit(text: string): string[] {
-  const protectedText = text.replace(
-    /\band\s+(a\s+half|a\s+quarter|half|quarter)\b/gi,
-    "_and_$1"
-  );
-  return protectedText
-    .split(/[,.;\n]|\s+(?:and|then|next|also|plus)\s+/i)
-    .map((s) => s.replace(/_and_/g, "and ").trim())
-    .filter(Boolean);
 }
 
 /* ---------- per-chunk parsing ---------- */
@@ -214,10 +252,11 @@ function cleanName(text: string): string {
     .replace(/^\s*[-:•]\s*/, "")
     .replace(/[-:•]\s*$/, "")
     .trim();
-  // Strip leading connectors that came from cross-item splits, e.g.
-  // "and onions" / "then yogurt" / "plus tomatoes" / "also milk".
+  // Strip leading connectors / articles that survive cross-item splits and
+  // weight extraction, e.g. "and onions" → "onions", "of beef" → "beef",
+  // "a chicken" → "chicken".
   cleaned = cleaned.replace(
-    /^(?:and|then|next|also|plus|with|of|for)\s+/i,
+    /^(?:and|then|next|also|plus|with|of|for|an?|the)\s+/i,
     ""
   );
   // Drop trailing prep tails that crept in past chunk splitting
@@ -331,18 +370,21 @@ function fmt(y: number, m: number, d: number): string {
 
 const WEIGHT_RE = new RegExp(
   // Numeric quantity: digits with optional fraction/decimal/word fragments,
-  // OR a word number. The whole quantity group can chain with "and a half",
-  // "and a quarter".
+  // OR a word number (optionally prefixed by "a"/"an" — "a half pound"),
+  // OR the bare indefinite article (so "a kilo" parses as 1 kilo).
   String.raw`((?:\d+(?:[.,]\d+)?(?:\s*(?:and|&)\s*(?:a\s+)?(?:half|quarter))?` +
-    String.raw`|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|` +
+    String.raw`|\b(?:an?\s+)?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|` +
     String.raw`thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|` +
     String.raw`thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|half|quarter)` +
-    String.raw`(?:\s+(?:and\s+)?(?:a\s+)?(?:half|quarter|hundred|thousand))?))` +
-    // Optional "of" between the quantity and the unit ("a half of a kilo")
-    String.raw`\s*(?:of\s+)?` +
-    // Unit:
+    String.raw`(?:\s+(?:and\s+)?(?:a\s+)?(?:half|quarter|hundred|thousand))?` +
+    String.raw`|\ban?\b))` +
+    // Optional "of" and/or "a" between the quantity and the unit
+    // ("half a kilo", "a quarter of a pound", "two of pounds").
+    String.raw`\s*(?:of\s+)?(?:a\s+)?` +
+    // Unit. Trailing \b guards single-letter "g"/"l" from matching inside
+    // words like "all" or "egg".
     String.raw`(grams?|gm|kgs?|kilo(?:gram)?s?|ounces?|oz|pounds?|lbs?|` +
-    String.raw`mls?|milli(?:liters?|litres?)|liters?|litres?|l\b)`,
+    String.raw`mls?|milli(?:liter|litre)s?|liters?|litres?|l|g)\b`,
   "i"
 );
 
@@ -375,6 +417,11 @@ function parseQuantity(raw: string): number {
   const text = raw.toLowerCase().trim();
   if (!text) return 0;
 
+  // "a" / "an" → 1. Handled here (rather than in WORD_NUMBERS) so the token
+  // is treated as "1" in isolation but still ignored as filler inside
+  // compound phrases like "one and a half".
+  if (text === "a" || text === "an") return 1;
+
   // Pure numeric (with optional fraction-ish bits like "1 1/2").
   const numericMatch = text.match(/^(\d+(?:[.,]\d+)?)(?:\s+(\d+)\/(\d+))?$/);
   if (numericMatch) {
@@ -402,7 +449,7 @@ function parseQuantity(raw: string): number {
   let fraction = 0;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    if (t === "and" || t === "of" || t === "a" || t === "&") continue;
+    if (t === "and" || t === "of" || t === "a" || t === "an" || t === "&") continue;
     const n = WORD_NUMBERS[t];
     if (n === undefined) return 0;
     if (n === 0.5 || n === 0.25) {

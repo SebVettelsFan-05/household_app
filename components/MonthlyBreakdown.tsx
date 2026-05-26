@@ -93,6 +93,17 @@ function shiftMonth(key: string, delta: number): string {
   return ym(d);
 }
 
+/** "2026-06-12" → "Jun 12". Empty string when the input isn't a valid date. */
+function fmtTripDate(iso: string): string {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return new Date(y, m - 1, d).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 /* ---------- Fixed-bill load + persist ---------- */
 
 function emptyProtected(): FixedRecurring[] {
@@ -453,43 +464,61 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     }
   }
 
-  /* ---- One-time: group by store+description, title-case for display ---- */
+  /* ---- One-time: group by store, list each trip underneath ---- */
 
   const oneTime = useMemo(() => {
     const inMonth = expenses.filter((e) => {
       const when = e.occurredOn || e.added || "";
       return when.startsWith(month);
     });
-    type Bucket = {
-      store: string;
+    type Trip = {
+      id: string;
+      occurredOn: string;
       description: string;
       amount: number;
-      receiptUrls: string[];
+      receiptUrl: string;
     };
-    const buckets = new Map<string, Bucket>();
+    type StoreGroup = {
+      store: string;
+      total: number;
+      trips: Trip[];
+    };
+    const buckets = new Map<string, StoreGroup>();
     let total = 0;
     for (const e of inMonth) {
       const rawStore = (e.store || "").trim();
       const store = rawStore ? titleCaseName(rawStore) : "Unspecified";
-      const description = (e.description || "").trim();
-      const key = `${store.toLowerCase()}${description.toLowerCase()}`;
+      const key = store.toLowerCase();
+      const trip: Trip = {
+        id: e.id,
+        occurredOn: e.occurredOn || e.added || "",
+        description: (e.description || "").trim(),
+        amount: e.amountCents,
+        receiptUrl: e.receiptUrl || "",
+      };
       const existing = buckets.get(key);
       if (existing) {
-        existing.amount += e.amountCents;
-        if (e.receiptUrl) existing.receiptUrls.push(e.receiptUrl);
+        existing.total += e.amountCents;
+        existing.trips.push(trip);
       } else {
         buckets.set(key, {
           store,
-          description,
-          amount: e.amountCents,
-          receiptUrls: e.receiptUrl ? [e.receiptUrl] : [],
+          total: e.amountCents,
+          trips: [trip],
         });
       }
       total += e.amountCents;
     }
-    const rows = Array.from(buckets.values()).sort(
-      (a, b) => b.amount - a.amount
-    );
+    for (const g of buckets.values()) {
+      // Most recent trip first — date desc, then larger amount as tiebreaker.
+      g.trips.sort((a, b) => {
+        if (a.occurredOn !== b.occurredOn) {
+          return a.occurredOn < b.occurredOn ? 1 : -1;
+        }
+        return b.amount - a.amount;
+      });
+    }
+    const rows = Array.from(buckets.values()).sort((a, b) => b.total - a.total);
     return { rows, total, count: inMonth.length, inMonth };
   }, [expenses, month]);
 
@@ -654,43 +683,58 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         ) : (
           <div className="monthly-list">
             {oneTime.rows.map((r) => (
-              <div
-                className="monthly-row"
-                key={`${r.store}|${r.description}`}
-              >
-                <span className="monthly-row-name">
-                  {r.store}
-                  {r.description ? (
+              <details className="monthly-store-row" key={r.store}>
+                <summary className="monthly-store-summary">
+                  <span className="monthly-row-name">
+                    {r.store}
                     <span className="monthly-row-desc">
                       {" "}
-                      ({r.description})
+                      · {r.trips.length} trip{r.trips.length === 1 ? "" : "s"}
                     </span>
-                  ) : null}
-                  {r.receiptUrls.length === 1 ? (
-                    <a
-                      href={r.receiptUrls[0]}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="receipt-pill"
-                      title="Open receipt"
-                      style={{ marginLeft: 6 }}
-                    >
-                      📎
-                    </a>
-                  ) : r.receiptUrls.length > 1 ? (
-                    <span
-                      className="monthly-row-desc"
-                      style={{ marginLeft: 6 }}
-                      title={`${r.receiptUrls.length} receipts grouped`}
-                    >
-                      📎×{r.receiptUrls.length}
-                    </span>
-                  ) : null}
-                </span>
-                <span className="monthly-row-amount">
-                  {fmtMoney(r.amount)}
-                </span>
-              </div>
+                  </span>
+                  <span className="monthly-row-amount">
+                    {fmtMoney(r.total)}
+                  </span>
+                </summary>
+                <div className="monthly-store-trips">
+                  {r.trips.map((t) => {
+                    const date = fmtTripDate(t.occurredOn);
+                    return (
+                      <div className="monthly-trip-row" key={t.id}>
+                        <span className="monthly-trip-label">
+                          {date ? (
+                            <span className="monthly-trip-date">{date}</span>
+                          ) : null}
+                          {t.description ? (
+                            <span className="monthly-trip-desc">
+                              {date ? " · " : ""}
+                              {t.description}
+                            </span>
+                          ) : null}
+                          {!date && !t.description ? (
+                            <span className="monthly-trip-desc">Untitled</span>
+                          ) : null}
+                          {t.receiptUrl ? (
+                            <a
+                              href={t.receiptUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="receipt-pill"
+                              title="Open receipt"
+                              style={{ marginLeft: 6 }}
+                            >
+                              📎
+                            </a>
+                          ) : null}
+                        </span>
+                        <span className="monthly-trip-amount">
+                          {fmtMoney(t.amount)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
             ))}
           </div>
         )}
