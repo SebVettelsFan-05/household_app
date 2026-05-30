@@ -29,16 +29,9 @@ export type SplitLine = {
 type Props = {
   title?: string;
   lines: SplitLine[];
-  // Set when total ÷ N doesn't divide cleanly. Shown as a footer note so
-  // users know the rounding remainder hasn't been quietly absorbed.
-  roundingRemainder?: number;
 };
 
-export default function SplitCard({
-  title = "Split",
-  lines,
-  roundingRemainder = 0,
-}: Props) {
+export default function SplitCard({ title = "Split", lines }: Props) {
   const senders = lines
     .filter((l) => l.paid - l.share < 0)
     .map((l) => ({
@@ -105,14 +98,6 @@ export default function SplitCard({
 
       {evens.length > 0 ? (
         <p className="split-note">Already even: {evens.join(", ")}</p>
-      ) : null}
-
-      {roundingRemainder !== 0 ? (
-        <p className="split-note">
-          Rounding leaves {fmtMoney(Math.abs(roundingRemainder))}{" "}
-          {roundingRemainder > 0 ? "short of" : "over"} the total — one
-          person can absorb it.
-        </p>
       ) : null}
     </section>
   );

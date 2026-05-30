@@ -780,12 +780,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
       return { name, paid, share };
     });
 
-    // Compute the rounding remainder so the total ÷ N share notes still
-    // line up. For mixed pools the cleanest representation is the sum of
-    // shares vs the grand total.
-    const sumOfShares = lines.reduce((s, l) => s + l.share, 0);
-    const roundingRemainder = grand - sumOfShares;
-    return { lines, grand, roundingRemainder };
+    return { lines, grand };
   }, [oneTime, fixed, month, monthVariable, rentTotal, monthRent]);
 
   const grandTotal = settlement.grand;
@@ -1003,7 +998,6 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         <SplitCard
           title={`Settlement for ${ymLabel(month)}`}
           lines={settlement.lines}
-          roundingRemainder={settlement.roundingRemainder}
         />
       ) : null}
     </section>
