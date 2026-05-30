@@ -6,9 +6,11 @@ import {
   expenses as expensesTable,
   favoriteRecipes as favoritesTable,
   groceryItems as groceryTable,
+  householdSettings as settingsTable,
   items as itemsTable,
   recipes as recipesTable,
 } from "@/db/schema";
+import { sql } from "drizzle-orm";
 import { thisWeekStart, nextWeekStart } from "./dates";
 import type {
   CategoryDef,
@@ -1094,4 +1096,32 @@ export async function clearExpensesRepo(): Promise<{
     .filter((id): id is string => Boolean(id));
   await db.delete(expensesTable);
   return { expenses: [], removedReceiptFileIds };
+}
+
+/* ---------- Household settings (shared monthly state) ---------- */
+
+export async function getSettingRepo(key: string): Promise<unknown | null> {
+  const rows = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, key))
+    .limit(1);
+  if (rows.length === 0) return null;
+  return rows[0].value;
+}
+
+export async function putSettingRepo(
+  key: string,
+  value: unknown
+): Promise<void> {
+  // Last-write-wins. Concurrent edits from two housemates aren't expected
+  // to overlap here (rent/utility numbers change rarely), so no need for
+  // optimistic concurrency yet.
+  await db
+    .insert(settingsTable)
+    .values({ key, value: value as object })
+    .onConflictDoUpdate({
+      target: settingsTable.key,
+      set: { value: value as object, updatedAt: sql`NOW()` },
+    });
 }

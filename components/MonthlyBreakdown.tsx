@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import SplitCard, { type SplitLine } from "@/components/SplitCard";
+import { getSetting, putSetting } from "@/lib/client";
 import { fmtMoney, parseCents } from "@/lib/money";
 import { titleCaseName } from "@/lib/normalize";
 import { BUYERS, type Expense } from "@/lib/types";
@@ -46,6 +47,9 @@ type RentState = {
 
 /* ---------- Storage keys ---------- */
 
+// localStorage keys — kept around as a write-through cache so the first
+// paint is instant. Backend (household_settings table) is the source of
+// truth so all housemates and fresh devices see the same numbers.
 const LS_FIXED_V3 = "monthly_recurring_fixed_v3";
 const LEGACY_FIXED_KEYS = [
   "monthly_recurring_fixed_v2",
@@ -54,6 +58,11 @@ const LEGACY_FIXED_KEYS = [
 const LS_VARIABLE_V2 = "monthly_recurring_variable_v2";
 const LEGACY_VARIABLE_KEYS = ["monthly_recurring_variable_v1"];
 const LS_RENT_V1 = "monthly_rent_alloc_v1";
+
+// Backend keys (household_settings.key). Must match the server allowlist.
+const BE_FIXED = "recurring_fixed";
+const BE_VARIABLE = "recurring_variable";
+const BE_RENT = "rent_alloc";
 
 // Rent used to be a regular protected entry in the fixed list. It's been
 // promoted to its own per-person allocation block — filter the legacy id out
@@ -146,6 +155,57 @@ function parseFixedEntry(raw: unknown): FixedRecurring | null {
   };
 }
 
+/** True when the recurring-fixed list has no user-entered amounts in it. */
+function isFixedTrivial(arr: FixedRecurring[]): boolean {
+  return arr.every(
+    (r) => r.schedule.length === 0 && Object.keys(r.overrides).length === 0
+  );
+}
+
+/** True when the variable utility map has no recorded amounts. */
+function isVariableTrivial(v: VariableMap): boolean {
+  for (const month of Object.values(v)) {
+    for (const cents of Object.values(month)) {
+      if (cents && cents > 0) return false;
+    }
+  }
+  return true;
+}
+
+/** True when the rent state has no allocation schedule or overrides. */
+function isRentTrivial(r: RentState): boolean {
+  return r.schedule.length === 0 && Object.keys(r.overrides).length === 0;
+}
+
+/**
+ * Drops the legacy rent entry (moved to its own per-person block) and
+ * ensures every protected mainstay (Internet, Rental insurance) is present
+ * with the correct flags. Pure — safe to call on backend payloads too.
+ */
+function mergeProtected(arr: FixedRecurring[]): FixedRecurring[] {
+  const next = arr.filter((r) => r.id !== LEGACY_RENT_ID);
+  for (const p of PROTECTED_FIXED) {
+    const existing = next.find((r) => r.id === p.id);
+    if (!existing) {
+      next.push({
+        id: p.id,
+        name: p.name,
+        protected: true,
+        paidBy: p.paidBy,
+        schedule: [],
+        overrides: {},
+      });
+    } else {
+      existing.protected = true;
+      existing.name = p.name;
+      existing.paidBy = p.paidBy;
+      existing.schedule = existing.schedule ?? [];
+      existing.overrides = existing.overrides ?? {};
+    }
+  }
+  return next;
+}
+
 function loadFixed(): FixedRecurring[] {
   if (typeof window === "undefined") return emptyProtected();
   for (const key of LEGACY_FIXED_KEYS) {
@@ -174,30 +234,7 @@ function loadFixed(): FixedRecurring[] {
       arr = [];
     }
   }
-  // Rent migrated out of the fixed list — drop any stale entry so we don't
-  // double-count it against the per-person allocation.
-  arr = arr.filter((r) => r.id !== LEGACY_RENT_ID);
-
-  for (const p of PROTECTED_FIXED) {
-    const existing = arr.find((r) => r.id === p.id);
-    if (!existing) {
-      arr.push({
-        id: p.id,
-        name: p.name,
-        protected: true,
-        paidBy: p.paidBy,
-        schedule: [],
-        overrides: {},
-      });
-    } else {
-      existing.protected = true;
-      existing.name = p.name;
-      existing.paidBy = p.paidBy;
-      existing.schedule = existing.schedule ?? [];
-      existing.overrides = existing.overrides ?? {};
-    }
-  }
-  return arr;
+  return mergeProtected(arr);
 }
 
 function loadVariable(): VariableMap {
@@ -423,18 +460,120 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
   const [fixed, setFixed] = useState<FixedRecurring[]>([]);
   const [variable, setVariable] = useState<VariableMap>({});
   const [rent, setRent] = useState<RentState>({ schedule: [], overrides: {} });
+  // Suppress backend pushes triggered by the mount-time hydration. Without
+  // this, hydrating from the backend would echo the same value back as a PUT.
+  const hydratedRef = useRef(false);
 
   useEffect(() => {
-    const loadedFixed = sortFixed(loadFixed());
-    setFixed(loadedFixed);
-    setVariable(loadVariable());
-    setRent(loadRent());
+    let cancelled = false;
+
+    // 1. Fast first paint from localStorage so the user sees their last
+    //    known numbers instantly while the backend round-trip runs.
+    const lsFixed = sortFixed(loadFixed());
+    const lsVariable = loadVariable();
+    const lsRent = loadRent();
+    setFixed(lsFixed);
+    setVariable(lsVariable);
+    setRent(lsRent);
     try {
-      window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(loadedFixed));
+      window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(lsFixed));
     } catch {
       /* ignore */
     }
+
+    // 2. Hydrate from backend (the shared source of truth). When the
+    //    backend has real data, adopt it. When backend is empty/missing
+    //    but localStorage has data, push localStorage up as a one-time
+    //    migration so a fresh device sees the same numbers next load.
+    //    "Trivial" = no user data beyond the protected mainstay scaffold
+    //    — used both ways so an empty backend row doesn't clobber an
+    //    existing device's saved bills.
+    Promise.all([
+      getSetting<FixedRecurring[]>(BE_FIXED).catch(() => null),
+      getSetting<VariableMap>(BE_VARIABLE).catch(() => null),
+      getSetting<RentState>(BE_RENT).catch(() => null),
+    ]).then(([beFixed, beVariable, beRent]) => {
+      if (cancelled) return;
+
+      if (Array.isArray(beFixed)) {
+        const parsed = beFixed
+          .map(parseFixedEntry)
+          .filter((x): x is FixedRecurring => x !== null);
+        if (!isFixedTrivial(parsed)) {
+          const merged = sortFixed(mergeProtected(parsed));
+          setFixed(merged);
+          try {
+            window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(merged));
+          } catch {
+            /* ignore */
+          }
+        } else if (!isFixedTrivial(lsFixed)) {
+          putSetting(BE_FIXED, lsFixed).catch((err) => {
+            console.warn("[settings] migrate recurring_fixed failed", err);
+          });
+        }
+      } else if (!isFixedTrivial(lsFixed)) {
+        putSetting(BE_FIXED, lsFixed).catch((err) => {
+          console.warn("[settings] migrate recurring_fixed failed", err);
+        });
+      }
+
+      if (beVariable && typeof beVariable === "object") {
+        const v = beVariable as VariableMap;
+        if (!isVariableTrivial(v)) {
+          setVariable(v);
+          try {
+            window.localStorage.setItem(LS_VARIABLE_V2, JSON.stringify(v));
+          } catch {
+            /* ignore */
+          }
+        } else if (!isVariableTrivial(lsVariable)) {
+          putSetting(BE_VARIABLE, lsVariable).catch((err) => {
+            console.warn("[settings] migrate recurring_variable failed", err);
+          });
+        }
+      } else if (!isVariableTrivial(lsVariable)) {
+        putSetting(BE_VARIABLE, lsVariable).catch((err) => {
+          console.warn("[settings] migrate recurring_variable failed", err);
+        });
+      }
+
+      if (beRent && typeof beRent === "object") {
+        const r = beRent as RentState;
+        if (!isRentTrivial(r)) {
+          setRent(r);
+          try {
+            window.localStorage.setItem(LS_RENT_V1, JSON.stringify(r));
+          } catch {
+            /* ignore */
+          }
+        } else if (!isRentTrivial(lsRent)) {
+          putSetting(BE_RENT, lsRent).catch((err) => {
+            console.warn("[settings] migrate rent_alloc failed", err);
+          });
+        }
+      } else if (!isRentTrivial(lsRent)) {
+        putSetting(BE_RENT, lsRent).catch((err) => {
+          console.warn("[settings] migrate rent_alloc failed", err);
+        });
+      }
+
+      hydratedRef.current = true;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function pushBackend(key: string, value: unknown, label: string) {
+    if (!hydratedRef.current) return; // mount-time setState, not a real edit
+    putSetting(key, value).catch((err) => {
+      console.warn(`[settings] push ${key} failed`, err);
+      onToast(`Couldn't sync ${label} — saved locally only`);
+    });
+  }
 
   function persistFixed(next: FixedRecurring[]) {
     const sorted = sortFixed(next);
@@ -444,6 +583,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     } catch {
       onToast("Couldn't save recurring bills");
     }
+    pushBackend(BE_FIXED, sorted, "recurring bills");
   }
 
   function persistVariable(next: VariableMap) {
@@ -453,6 +593,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     } catch {
       onToast("Couldn't save utility amounts");
     }
+    pushBackend(BE_VARIABLE, next, "utility amounts");
   }
 
   function persistRent(next: RentState) {
@@ -462,6 +603,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     } catch {
       onToast("Couldn't save rent allocations");
     }
+    pushBackend(BE_RENT, next, "rent allocations");
   }
 
   /* ---- One-time: group by store, list each trip underneath ---- */

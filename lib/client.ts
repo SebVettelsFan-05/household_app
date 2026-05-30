@@ -227,25 +227,6 @@ export async function bulkAddGrocery(input: BulkGroceryInput) {
   return unwrap(await parse<GroceryMutateResponse>(res));
 }
 
-// Hits the testing-only seed endpoint. Server refuses if the table already
-// has rows, so this is safe to call defensively.
-export async function seedSampleGrocery(): Promise<{
-  ok: boolean;
-  inserted?: number;
-}> {
-  try {
-    const res = await fetch("/api/seed/grocery", { method: "POST" });
-    const body = (await res.json().catch(() => null)) as
-      | { ok: true; inserted: number }
-      | { ok: false; error: string }
-      | null;
-    if (body && body.ok) return { ok: true, inserted: body.inserted };
-    return { ok: false };
-  } catch {
-    return { ok: false };
-  }
-}
-
 /* ----- recipes ----- */
 
 export async function listRecipes(): Promise<Recipe[]> {
@@ -483,4 +464,36 @@ export async function deleteExpenseCategory(name: string) {
     { method: "DELETE" }
   );
   return unwrap(await parse<DeleteExpenseCategoryResponse>(res));
+}
+
+/* ----- household settings (shared monthly state) ----- */
+
+// Shared rent + recurring bill state. Kept generic so adding another shared
+// blob later is just an ALLOWED_KEYS append on the server.
+export async function getSetting<T>(key: string): Promise<T | null> {
+  const res = await fetch(`/api/settings/${encodeURIComponent(key)}`, {
+    cache: "no-store",
+  });
+  const body = (await res.json().catch(() => null)) as
+    | { ok: true; value: T | null }
+    | { ok: false; error: string }
+    | null;
+  if (!body || !body.ok) {
+    throw new Error(body && "error" in body ? body.error : "Failed to load setting");
+  }
+  return body.value;
+}
+
+export async function putSetting<T>(key: string, value: T): Promise<void> {
+  const res = await fetch(`/api/settings/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(body?.error || `HTTP ${res.status}`);
+  }
 }

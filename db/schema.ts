@@ -106,6 +106,18 @@ export const expenseCategories = pgTable("expense_categories", {
   color: text("color"),
 });
 
+// Shared household state that's NOT per-row — currently rent allocations and
+// recurring (fixed + variable) bills. Previously these lived in each user's
+// localStorage which meant a new device or a second housemate saw a blank
+// monthly breakdown. Single row per key, value is opaque JSON to the server.
+export const householdSettings = pgTable("household_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: false })
+    .notNull()
+    .defaultNow(),
+});
+
 export type ItemRow = typeof items.$inferSelect;
 export type NewItemRow = typeof items.$inferInsert;
 export type CategoryRow = typeof categories.$inferSelect;

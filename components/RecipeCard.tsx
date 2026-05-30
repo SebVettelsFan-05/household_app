@@ -35,7 +35,21 @@ export default function RecipeCard({
 
   return (
     <div className="recipe-card-wrap">
-      <button type="button" className="recipe-card" onClick={onClick}>
+      {/* div+role instead of <button> so the inner <a> stays valid HTML and
+          actually navigates — nesting <a> in <button> silently blocks the
+          click in most browsers. */}
+      <div
+        className="recipe-card"
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        }}
+      >
         <div className="recipe-card-head">
           <span className="recipe-day-label">{label}</span>
           <span className="recipe-cook">{recipe.assignedTo}</span>
@@ -57,7 +71,7 @@ export default function RecipeCard({
             {recipe.ingredients.length === 1 ? "" : "s"}
           </div>
         ) : null}
-      </button>
+      </div>
       {onToggleFavorite ? (
         <button
           type="button"

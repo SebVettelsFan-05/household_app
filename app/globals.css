@@ -1262,17 +1262,21 @@ button:active { transform: scale(0.98); }
   background: var(--surface-soft); border-radius: 8px;
 }
 .monthly-store-summary {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center;
   gap: 10px; padding: 8px 10px;
   cursor: pointer; list-style: none;
+  text-align: left;
 }
 .monthly-store-summary::-webkit-details-marker { display: none; }
-.monthly-store-summary::before {
+.monthly-store-summary .monthly-row-name {
+  flex: 1; min-width: 0; text-align: left;
+}
+.monthly-store-summary::after {
   content: "▸"; color: var(--ink-soft); font-size: 11px;
-  margin-right: 4px; display: inline-block;
+  margin-left: 4px; display: inline-block;
   transition: transform 0.15s;
 }
-.monthly-store-row[open] > .monthly-store-summary::before {
+.monthly-store-row[open] > .monthly-store-summary::after {
   transform: rotate(90deg);
 }
 .monthly-store-trips {

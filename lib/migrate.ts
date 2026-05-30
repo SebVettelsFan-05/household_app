@@ -101,6 +101,13 @@ export function ensureTables(): Promise<void> {
     await db.execute(sql`
       ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt_mime TEXT
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS household_settings (
+        key TEXT PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
   })().catch((err) => {
     // If the bootstrap itself failed, clear the cache so the next request
     // gets to retry — otherwise we'd permanently 500 on a transient outage.

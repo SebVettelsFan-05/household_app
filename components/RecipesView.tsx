@@ -144,8 +144,10 @@ export default function RecipesView({
   }
 
   // Re-computed when `today` changes. A timer schedules itself for the next
-  // local midnight, so the week boundary advances live without a refresh —
-  // and on Sunday at 00:00 "next week" naturally becomes "this week".
+  // local midnight so the week boundary advances live without a refresh —
+  // on Sunday at 00:00 (i.e. the instant Saturday 11:59:59 PM ticks over)
+  // "next week" naturally becomes "this week" and last week's recipes drop
+  // into the archive on the next /api/recipes fetch.
   const [today, setToday] = useState<Date>(() => new Date());
   const week1 = useMemo(() => thisWeekStart(today), [today]);
   const week2 = useMemo(() => nextWeekStart(today), [today]);
@@ -155,6 +157,26 @@ export default function RecipesView({
     const t = window.setTimeout(() => setToday(new Date()), delay);
     return () => window.clearTimeout(t);
   }, [today]);
+
+  // Mobile and laptops aggressively suspend background tabs — the midnight
+  // setTimeout above silently fails to fire across a sleep. Re-read the
+  // clock whenever the tab regains visibility so a user opening the app
+  // Sunday morning sees the rolled-over week even if their phone had been
+  // asleep through the actual boundary.
+  useEffect(() => {
+    function refreshIfVisible() {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "visible") {
+        setToday(new Date());
+      }
+    }
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    window.addEventListener("focus", refreshIfVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      window.removeEventListener("focus", refreshIfVisible);
+    };
+  }, []);
 
   // When the week actually rolls over, refetch so the server-side window
   // (this/next week) returns the recipes for the new range. Skipped on the

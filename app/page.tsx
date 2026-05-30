@@ -16,7 +16,6 @@ import {
   listGrocery,
   listItems,
   listRecipes,
-  seedSampleGrocery,
 } from "@/lib/client";
 import { sortCategories } from "@/lib/normalize";
 import type {
@@ -26,8 +25,6 @@ import type {
   Item,
   Recipe,
 } from "@/lib/types";
-
-const GROCERY_SEED_FLAG = "grocery_sample_seeded_v1";
 
 export default function Page() {
   const [items, setItems] = useState<Item[]>([]);
@@ -63,30 +60,8 @@ export default function Page() {
       });
 
     listGrocery()
-      .then(async (d) => {
+      .then((d) => {
         if (cancelled) return;
-        // First-run testing seed: only when the table is genuinely empty AND
-        // we've never seeded before. The localStorage flag means clearing the
-        // list later won't trigger a re-seed.
-        if (
-          d.length === 0 &&
-          typeof window !== "undefined" &&
-          !window.localStorage.getItem(GROCERY_SEED_FLAG)
-        ) {
-          const result = await seedSampleGrocery();
-          if (result.ok) {
-            try {
-              window.localStorage.setItem(GROCERY_SEED_FLAG, "1");
-            } catch {
-              /* localStorage unavailable — flag-less, but still seeded once */
-            }
-            const seeded = await listGrocery().catch(() => d);
-            if (cancelled) return;
-            setGrocery(seeded);
-            setGroceryLoading(false);
-            return;
-          }
-        }
         setGrocery(d);
         setGroceryLoading(false);
       })
