@@ -18,6 +18,10 @@ export default function ItemRow({ item, color, onClick }: Props) {
       type="button"
       className={`item ${exp.cls}`}
       onClick={() => onClick(item.id)}
+      // Color the left-edge ribbon to match the item's category. CSS picks
+      // this up via var(--item-ribbon-color) and still hands off to the
+      // expiring/expired overrides when those classes are present.
+      style={{ "--item-ribbon-color": color } as React.CSSProperties}
     >
       <div className="item-main">
         <div className="item-name">{item.name}</div>

@@ -7,6 +7,7 @@ import GroceryView from "@/components/GroceryView";
 import HomeView from "@/components/HomeView";
 import ManageCategoriesModal from "@/components/ManageCategoriesModal";
 import RecipesView from "@/components/RecipesView";
+import RefreshButton from "@/components/RefreshButton";
 import TabBar, { type Tab } from "@/components/TabBar";
 import ThemeToggle from "@/components/ThemeToggle";
 import Toast, { type ToastMessage } from "@/components/Toast";
@@ -44,87 +45,130 @@ export default function Page() {
   const [managingCats, setManagingCats] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
+  // Reusable fetcher — used both at mount and by the header refresh button.
+  // `cancelled` short-circuits state writes if the caller bailed (StrictMode
+  // double-effect, unmount). Returns a list of "<label>: <message>" strings
+  // for any individual fetch that failed, so manual refresh can surface a
+  // toast instead of failing silently.
+  async function loadAll(opts?: {
+    cancelled?: () => boolean;
+  }): Promise<{ errors: string[] }> {
+    const isCancelled = opts?.cancelled ?? (() => false);
+    const errors: string[] = [];
+
+    const tasks: Promise<unknown>[] = [
+      listItems()
+        .then((d) => {
+          if (isCancelled()) return;
+          setItems(d);
+          setItemsLoading(false);
+          setItemsError(null);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`inventory: ${msg}`);
+          if (isCancelled()) return;
+          setItemsError(msg);
+          setItemsLoading(false);
+        }),
+
+      listGrocery()
+        .then((d) => {
+          if (isCancelled()) return;
+          setGrocery(d);
+          setGroceryLoading(false);
+          setGroceryError(null);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`grocery: ${msg}`);
+          if (isCancelled()) return;
+          setGroceryError(msg);
+          setGroceryLoading(false);
+        }),
+
+      listRecipes()
+        .then((d) => {
+          if (isCancelled()) return;
+          setRecipes(d);
+          setRecipesLoading(false);
+          setRecipesError(null);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`recipes: ${msg}`);
+          if (isCancelled()) return;
+          setRecipesError(msg);
+          setRecipesLoading(false);
+        }),
+
+      listExpenses()
+        .then((d) => {
+          if (isCancelled()) return;
+          setExpenses(d);
+          setExpensesLoading(false);
+          setExpensesError(null);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`expenses: ${msg}`);
+          if (isCancelled()) return;
+          setExpensesError(msg);
+          setExpensesLoading(false);
+        }),
+
+      listCategories()
+        .then((d) => {
+          if (isCancelled()) return;
+          setCategories(sortCategories(d));
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`categories: ${msg}`);
+          if (isCancelled()) return;
+          setCategories(
+            sortCategories(
+              [
+                "Meat",
+                "Veggies",
+                "Fruits",
+                "Dairy",
+                "Bakery",
+                "Pantry",
+                "Frozen",
+                "Snacks",
+                "Beverages",
+                "Condiments",
+                "Other",
+              ].map((name) => ({ name, color: null }))
+            )
+          );
+        }),
+    ];
+
+    await Promise.allSettled(tasks);
+    return { errors };
+  }
+
   useEffect(() => {
     let cancelled = false;
-
-    listItems()
-      .then((d) => {
-        if (cancelled) return;
-        setItems(d);
-        setItemsLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setItemsError(err instanceof Error ? err.message : String(err));
-        setItemsLoading(false);
-      });
-
-    listGrocery()
-      .then((d) => {
-        if (cancelled) return;
-        setGrocery(d);
-        setGroceryLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setGroceryError(err instanceof Error ? err.message : String(err));
-        setGroceryLoading(false);
-      });
-
-    listRecipes()
-      .then((d) => {
-        if (cancelled) return;
-        setRecipes(d);
-        setRecipesLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setRecipesError(err instanceof Error ? err.message : String(err));
-        setRecipesLoading(false);
-      });
-
-    listExpenses()
-      .then((d) => {
-        if (cancelled) return;
-        setExpenses(d);
-        setExpensesLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setExpensesError(err instanceof Error ? err.message : String(err));
-        setExpensesLoading(false);
-      });
-
-    listCategories()
-      .then((d) => {
-        if (cancelled) return;
-        setCategories(sortCategories(d));
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCategories(
-          sortCategories(
-            [
-              "Meat",
-              "Veggies",
-              "Fruits",
-              "Dairy",
-              "Bakery",
-              "Pantry",
-              "Frozen",
-              "Snacks",
-              "Beverages",
-              "Condiments",
-              "Other",
-            ].map((name) => ({ name, color: null }))
-          )
-        );
-      });
-
+    void loadAll({ cancelled: () => cancelled });
     return () => {
       cancelled = true;
     };
+    // loadAll closes over stable setState refs — re-running on every render
+    // would mean refetching forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function handleRefresh(): Promise<void> {
+    const { errors } = await loadAll();
+    if (errors.length > 0) {
+      const first = errors[0];
+      const extra = errors.length > 1 ? ` (+${errors.length - 1} more)` : "";
+      showToast(`Refresh failed — ${first}${extra}`);
+    }
+  }
 
   function showToast(text: string) {
     setToast({ id: Date.now(), text });
@@ -146,7 +190,10 @@ export default function Page() {
     <div className="wrap">
       <header className="app-header">
         <h1>{headerTitle}</h1>
-        <ThemeToggle />
+        <div className="header-actions">
+          <RefreshButton onRefresh={handleRefresh} onError={showToast} />
+          <ThemeToggle />
+        </div>
       </header>
 
       <TabBar value={tab} onChange={setTab} groceryCount={openGroceryCount} />

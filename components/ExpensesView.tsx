@@ -5,7 +5,6 @@ import AddExpenseForm from "@/components/AddExpenseForm";
 import EditExpenseModal from "@/components/EditExpenseModal";
 import ExpenseRow from "@/components/ExpenseRow";
 import MonthlyBreakdown from "@/components/MonthlyBreakdown";
-import { clearExpenses } from "@/lib/client";
 import { fmtMoney } from "@/lib/money";
 import { type Expense } from "@/lib/types";
 
@@ -25,7 +24,6 @@ export default function ExpensesView({
   onToast,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [subTab, setSubTab] = useState<"current" | "monthly">("current");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -51,26 +49,6 @@ export default function ExpensesView({
     () => expenses.reduce((s, e) => s + e.amountCents, 0),
     [expenses]
   );
-
-  async function clearAll() {
-    if (expenses.length === 0) return;
-    if (
-      !confirm(
-        `Clear all ${expenses.length} expense${expenses.length === 1 ? "" : "s"}?`
-      )
-    )
-      return;
-    setBusy(true);
-    try {
-      const res = await clearExpenses();
-      onExpensesChange(res.expenses);
-      onToast("Expenses cleared");
-    } catch (err) {
-      onToast("Error: " + (err instanceof Error ? err.message : String(err)));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <>
@@ -119,31 +97,18 @@ export default function ExpensesView({
 
           <div className="list-head">
             <h2>Expenses</h2>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <button
-                type="button"
-                className="sort-toggle"
-                onClick={() =>
-                  setSortDir((d) => (d === "asc" ? "desc" : "asc"))
-                }
-                title={
-                  sortDir === "asc"
-                    ? "Showing oldest first — click to flip"
-                    : "Showing newest first — click to flip"
-                }
-              >
-                Date {sortDir === "asc" ? "↑" : "↓"}
-              </button>
-              <button
-                type="button"
-                className="sort-toggle"
-                onClick={clearAll}
-                disabled={busy || expenses.length === 0}
-                style={{ color: "var(--danger)" }}
-              >
-                Clear expenses
-              </button>
-            </div>
+            <button
+              type="button"
+              className="sort-toggle"
+              onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+              title={
+                sortDir === "asc"
+                  ? "Showing oldest first — click to flip"
+                  : "Showing newest first — click to flip"
+              }
+            >
+              Date {sortDir === "asc" ? "↑" : "↓"}
+            </button>
           </div>
 
           <div className="list-hint">Tap any expense to edit or delete</div>

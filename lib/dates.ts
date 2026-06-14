@@ -5,6 +5,12 @@
  * Sunday. All dates are handled in the user's local timezone — we never use
  * UTC for week boundaries (cooking days don't shift across time zones for a
  * household).
+ *
+ * Week boundary: the active cooking week advances at Friday 00:00 local
+ * time. Before that (Sun–Thu) "this week" means the current calendar
+ * week's Sunday; on Fri–Sat it means the UPCOMING Sunday — i.e. once
+ * Thursday cooking ends, the view skips the dead weekend and points at
+ * next week's slots so adds land where the user expects.
  */
 
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu"] as const;
@@ -36,11 +42,22 @@ export function addDays(date: Date, n: number): Date {
   return d;
 }
 
-/** Sunday on or before `date`, at local midnight. */
+/**
+ * Sunday anchor for the "active" cooking week. On Sun–Thu this is the
+ * current calendar week's Sunday; on Fri/Sat it skips ahead to next
+ * Sunday so "this week" always has at least one cooking day still ahead.
+ */
 export function weekStartFor(date: Date): Date {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - d.getDay());
+  const dow = d.getDay();
+  if (dow >= 5) {
+    // Fri/Sat — current cooking week is done. Advance to next Sunday.
+    d.setDate(d.getDate() + (7 - dow));
+  } else {
+    // Sun–Thu — back up to this week's Sunday.
+    d.setDate(d.getDate() - dow);
+  }
   return d;
 }
 

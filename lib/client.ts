@@ -421,11 +421,6 @@ export async function deleteExpense(id: string) {
   return unwrap(await parse<ExpenseMutateResponse>(res));
 }
 
-export async function clearExpenses() {
-  const res = await fetch("/api/expenses/clear", { method: "POST" });
-  return unwrap(await parse<ExpenseMutateResponse>(res));
-}
-
 /* ----- expense categories ----- */
 
 export async function listExpenseCategories(): Promise<ExpenseCategoryDef[]> {
