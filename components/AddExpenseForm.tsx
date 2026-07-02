@@ -3,6 +3,11 @@
 import { KeyboardEvent, useEffect, useState } from "react";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { addExpense } from "@/lib/client";
+import {
+  currentExpenseMonth,
+  firstDayOfMonth,
+  isPastExpenseMonth,
+} from "@/lib/expenseMonths";
 import { prepareReceipt } from "@/lib/imageResize";
 import { parseCents } from "@/lib/money";
 import { BUYERS, type Expense } from "@/lib/types";
@@ -23,6 +28,7 @@ function todayYmd(): string {
 const ACCEPT = "image/*,application/pdf";
 
 export default function AddExpenseForm({ onResult, onError }: Props) {
+  const currentMonthStart = firstDayOfMonth(currentExpenseMonth());
   const [store, setStore] = useState("");
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState("");
@@ -59,6 +65,10 @@ export default function AddExpenseForm({ onResult, onError }: Props) {
     }
     if (!paidBy) {
       onError("Pick who paid");
+      return;
+    }
+    if (isPastExpenseMonth(occurredOn)) {
+      onError("Past months are locked");
       return;
     }
     if (!receipt) {
@@ -142,6 +152,7 @@ export default function AddExpenseForm({ onResult, onError }: Props) {
           <input
             id="e-date"
             type="date"
+            min={currentMonthStart}
             value={occurredOn}
             onChange={(e) => setOccurredOn(e.target.value)}
             onKeyDown={onEnter}

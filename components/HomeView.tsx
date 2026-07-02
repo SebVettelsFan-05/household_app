@@ -35,6 +35,12 @@ const SECTIONS: {
     blurb:
       "Log shared spending and split the total 5 ways at the end of the month. Everyone funds the joint account; whoever paid gets reimbursed from it.",
   },
+  {
+    id: "passwords",
+    title: "Passwords",
+    blurb:
+      "Shared account details grouped by place, with flexible fields for logins, numbers, images, and anything else the account needs.",
+  },
 ];
 
 export default function HomeView({ onNavigate }: Props) {

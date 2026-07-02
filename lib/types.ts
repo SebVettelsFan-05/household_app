@@ -120,6 +120,25 @@ export type ExpenseCategoryDef = {
   color: string | null;
 };
 
+export type SharedFieldKind = "text" | "password" | "image";
+
+export type SharedAccountField = {
+  id: string;
+  label: string;
+  kind: SharedFieldKind;
+  value: string;
+  filename?: string;
+  mimeType?: string;
+};
+
+export type SharedAccount = {
+  id: string;
+  name: string;
+  fields: SharedAccountField[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ListExpensesResponse = ApiOk<{ expenses: Expense[] }>;
 export type ExpenseMutateResponse = ApiOk<{ expenses: Expense[] }>;
 export type ListExpenseCategoriesResponse = ApiOk<{
@@ -136,4 +155,17 @@ export type DeleteExpenseCategoryResponse = ApiOk<{
   expenseCategories: ExpenseCategoryDef[];
   expenses: Expense[];
   reassigned: number;
+}>;
+export type ListSharedAccountsResponse = ApiOk<{
+  accounts: SharedAccount[];
+}>;
+export type AddSharedAccountResponse = ApiOk<{
+  accounts: SharedAccount[];
+  account: SharedAccount;
+}>;
+export type GetSharedAccountResponse = ApiOk<{
+  account: SharedAccount;
+}>;
+export type SharedAccountsMutateResponse = ApiOk<{
+  accounts: SharedAccount[];
 }>;

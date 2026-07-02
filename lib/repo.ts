@@ -1,3 +1,10 @@
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  randomUUID,
+} from "crypto";
 import { eq, inArray, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
@@ -9,6 +16,7 @@ import {
   householdSettings as settingsTable,
   items as itemsTable,
   recipes as recipesTable,
+  sharedAccounts as sharedAccountsTable,
 } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import { thisWeekStart, nextWeekStart } from "./dates";
@@ -21,6 +29,9 @@ import type {
   Item,
   Recipe,
   RecipeIngredient,
+  SharedAccount,
+  SharedAccountField,
+  SharedFieldKind,
 } from "./types";
 import {
   DEFAULT_CATEGORIES,
@@ -1124,4 +1135,310 @@ export async function putSettingRepo(
       target: settingsTable.key,
       set: { value: value as object, updatedAt: sql`NOW()` },
     });
+}
+
+/* ---------- Shared passwords / accounts ---------- */
+
+const VAULT_PREFIX = "vault:v1:";
+const MAX_SHARED_FIELDS = 80;
+const MAX_SHARED_NAME_LEN = 96;
+const MAX_SHARED_LABEL_LEN = 80;
+const MAX_SHARED_TEXT_VALUE_LEN = 20000;
+const MAX_SHARED_IMAGE_DATA_URL_LEN = 1500000;
+
+let vaultKeyCache: Buffer | null = null;
+
+function getVaultKey(): Buffer {
+  if (vaultKeyCache) return vaultKeyCache;
+  const secret = process.env.VAULT_SECRET || process.env.AUTH_SECRET;
+  if (!secret || secret.length < 16) {
+    throw new Error(
+      "VAULT_SECRET or AUTH_SECRET must be set to store shared passwords"
+    );
+  }
+  vaultKeyCache = createHash("sha256").update(secret).digest();
+  return vaultKeyCache;
+}
+
+function encryptVaultValue(value: string): string {
+  if (!value) return "";
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", getVaultKey(), iv);
+  const encrypted = Buffer.concat([
+    cipher.update(value, "utf8"),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  return `${VAULT_PREFIX}${iv.toString("base64url")}.${tag.toString(
+    "base64url"
+  )}.${encrypted.toString("base64url")}`;
+}
+
+function decryptVaultValue(value: string): string {
+  if (!value || !value.startsWith(VAULT_PREFIX)) return value || "";
+  const rest = value.slice(VAULT_PREFIX.length);
+  const [ivB64, tagB64, encryptedB64] = rest.split(".");
+  if (!ivB64 || !tagB64 || !encryptedB64) {
+    throw new Error("Shared account field is not a valid encrypted value");
+  }
+  try {
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      getVaultKey(),
+      Buffer.from(ivB64, "base64url")
+    );
+    decipher.setAuthTag(Buffer.from(tagB64, "base64url"));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(encryptedB64, "base64url")),
+      decipher.final(),
+    ]);
+    return decrypted.toString("utf8");
+  } catch {
+    throw new Error(
+      "Shared account field could not be decrypted. Check VAULT_SECRET/AUTH_SECRET."
+    );
+  }
+}
+
+function formatTimestamp(d: Date | string | null | undefined): string {
+  if (!d) return "";
+  if (d instanceof Date) return d.toISOString();
+  return String(d);
+}
+
+function cleanSharedKind(raw: unknown): SharedFieldKind {
+  return raw === "password" || raw === "image" ? raw : "text";
+}
+
+function cleanSharedFieldId(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (/^[a-zA-Z0-9_-]{6,80}$/.test(s)) return s;
+  return randomUUID();
+}
+
+function sanitizeSharedAccountName(raw: unknown): string {
+  const name = String(raw ?? "").trim();
+  if (!name) throw new Error("Place / account name required");
+  if (name.length > MAX_SHARED_NAME_LEN) {
+    throw new Error("Place / account name is too long");
+  }
+  return name;
+}
+
+function sanitizeSharedAccountFields(raw: unknown): SharedAccountField[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new Error("Fields must be an array");
+  if (raw.length > MAX_SHARED_FIELDS) {
+    throw new Error(`Shared account can have at most ${MAX_SHARED_FIELDS} fields`);
+  }
+
+  const out: SharedAccountField[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const kind = cleanSharedKind(o.kind);
+    const labelRaw = String(o.label ?? "").trim();
+    const label =
+      labelRaw.slice(0, MAX_SHARED_LABEL_LEN) ||
+      (kind === "image" ? "Image" : kind === "password" ? "Password" : "Field");
+    const value = String(o.value ?? "");
+
+    if (kind === "image") {
+      if (value.length > MAX_SHARED_IMAGE_DATA_URL_LEN) {
+        throw new Error("Image is too large. Use a smaller photo.");
+      }
+      if (value && !/^data:image\/[a-z0-9.+-]+;base64,/i.test(value)) {
+        throw new Error("Images must be stored as image data URLs");
+      }
+    } else if (value.length > MAX_SHARED_TEXT_VALUE_LEN) {
+      throw new Error("Field value is too long");
+    }
+
+    const field: SharedAccountField = {
+      id: cleanSharedFieldId(o.id),
+      label,
+      kind,
+      value,
+    };
+    const filename = String(o.filename ?? "").trim();
+    const mimeType = String(o.mimeType ?? "").trim();
+    if (kind === "image") {
+      if (filename) field.filename = filename.slice(0, 180);
+      if (mimeType && mimeType.startsWith("image/")) {
+        field.mimeType = mimeType.slice(0, 80);
+      }
+    }
+    out.push(field);
+  }
+  return out;
+}
+
+function toStoredSharedFields(
+  fields: SharedAccountField[]
+): SharedAccountField[] {
+  return fields.map((field) => ({
+    ...field,
+    value: encryptVaultValue(field.value),
+  }));
+}
+
+function fromStoredSharedFields(raw: unknown): SharedAccountField[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SharedAccountField[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const kind = cleanSharedKind(o.kind);
+    const field: SharedAccountField = {
+      id: cleanSharedFieldId(o.id),
+      label:
+        String(o.label ?? "").trim().slice(0, MAX_SHARED_LABEL_LEN) ||
+        (kind === "image" ? "Image" : kind === "password" ? "Password" : "Field"),
+      kind,
+      value: decryptVaultValue(String(o.value ?? "")),
+    };
+    const filename = String(o.filename ?? "").trim();
+    const mimeType = String(o.mimeType ?? "").trim();
+    if (kind === "image") {
+      if (filename) field.filename = filename;
+      if (mimeType) field.mimeType = mimeType;
+    }
+    out.push(field);
+  }
+  return out;
+}
+
+function fromStoredSharedFieldSummaries(raw: unknown): SharedAccountField[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SharedAccountField[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const kind = cleanSharedKind(o.kind);
+    const field: SharedAccountField = {
+      id: cleanSharedFieldId(o.id),
+      label:
+        String(o.label ?? "").trim().slice(0, MAX_SHARED_LABEL_LEN) ||
+        (kind === "image" ? "Image" : kind === "password" ? "Password" : "Field"),
+      kind,
+      value: "",
+    };
+    const filename = String(o.filename ?? "").trim();
+    const mimeType = String(o.mimeType ?? "").trim();
+    if (kind === "image") {
+      if (filename) field.filename = filename;
+      if (mimeType) field.mimeType = mimeType;
+    }
+    out.push(field);
+  }
+  return out;
+}
+
+function rowToSharedAccount(
+  r: typeof sharedAccountsTable.$inferSelect
+): SharedAccount {
+  return {
+    id: r.id,
+    name: r.name,
+    fields: fromStoredSharedFields(r.fields),
+    createdAt: formatTimestamp(r.createdAt),
+    updatedAt: formatTimestamp(r.updatedAt),
+  };
+}
+
+function rowToSharedAccountSummary(
+  r: typeof sharedAccountsTable.$inferSelect
+): SharedAccount {
+  return {
+    id: r.id,
+    name: r.name,
+    fields: fromStoredSharedFieldSummaries(r.fields),
+    createdAt: formatTimestamp(r.createdAt),
+    updatedAt: formatTimestamp(r.updatedAt),
+  };
+}
+
+export async function listSharedAccountsRepo(): Promise<SharedAccount[]> {
+  const rows = await db.select().from(sharedAccountsTable);
+  rows.sort((a, b) => {
+    const byName = a.name.localeCompare(b.name);
+    if (byName !== 0) return byName;
+    return b.updatedAt.getTime() - a.updatedAt.getTime();
+  });
+  return rows.map(rowToSharedAccountSummary);
+}
+
+export async function getSharedAccountRepo(id: string): Promise<SharedAccount> {
+  if (!id) throw new Error("id required");
+  const rows = await db
+    .select()
+    .from(sharedAccountsTable)
+    .where(eq(sharedAccountsTable.id, id))
+    .limit(1);
+  if (rows.length === 0) throw new Error("Shared account not found");
+  return rowToSharedAccount(rows[0]);
+}
+
+export type AddSharedAccountInput = {
+  name: string;
+  fields?: unknown;
+};
+
+export async function addSharedAccountRepo(
+  input: AddSharedAccountInput
+): Promise<{ accounts: SharedAccount[]; account: SharedAccount }> {
+  const name = sanitizeSharedAccountName(input.name);
+  const fields = sanitizeSharedAccountFields(input.fields);
+  const [inserted] = await db
+    .insert(sharedAccountsTable)
+    .values({
+      name,
+      fields: toStoredSharedFields(fields),
+    })
+    .returning();
+  if (!inserted) throw new Error("Shared account was not created");
+  return {
+    accounts: await listSharedAccountsRepo(),
+    account: rowToSharedAccount(inserted),
+  };
+}
+
+export type UpdateSharedAccountInput = {
+  id: string;
+  name?: string;
+  fields?: unknown;
+};
+
+export async function updateSharedAccountRepo(
+  input: UpdateSharedAccountInput
+): Promise<SharedAccount[]> {
+  if (!input.id) throw new Error("id required");
+  const patch: Partial<typeof sharedAccountsTable.$inferInsert> = {};
+  if (input.name !== undefined) {
+    patch.name = sanitizeSharedAccountName(input.name);
+  }
+  if (input.fields !== undefined) {
+    patch.fields = toStoredSharedFields(
+      sanitizeSharedAccountFields(input.fields)
+    );
+  }
+  const updated = await db
+    .update(sharedAccountsTable)
+    .set({ ...patch, updatedAt: sql`NOW()` })
+    .where(eq(sharedAccountsTable.id, input.id))
+    .returning({ id: sharedAccountsTable.id });
+  if (updated.length === 0) throw new Error("Shared account not found");
+  return listSharedAccountsRepo();
+}
+
+export async function deleteSharedAccountRepo(
+  id: string
+): Promise<SharedAccount[]> {
+  if (!id) throw new Error("id required");
+  const deleted = await db
+    .delete(sharedAccountsTable)
+    .where(eq(sharedAccountsTable.id, id))
+    .returning({ id: sharedAccountsTable.id });
+  if (deleted.length === 0) throw new Error("Shared account not found");
+  return listSharedAccountsRepo();
 }

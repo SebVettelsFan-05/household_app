@@ -5,6 +5,10 @@ import AddExpenseForm from "@/components/AddExpenseForm";
 import EditExpenseModal from "@/components/EditExpenseModal";
 import ExpenseRow from "@/components/ExpenseRow";
 import MonthlyBreakdown from "@/components/MonthlyBreakdown";
+import {
+  currentExpenseMonth,
+  expenseMonthOf,
+} from "@/lib/expenseMonths";
 import { fmtMoney } from "@/lib/money";
 import { type Expense } from "@/lib/types";
 
@@ -28,6 +32,7 @@ export default function ExpensesView({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const editing = editingId ? expenses.find((e) => e.id === editingId) : null;
+  const currentMonth = currentExpenseMonth();
 
   // Chronological by the user-picked date (May 1, May 2, May 3 …). `added`
   // is the row creation timestamp and reflects when you typed it in, which
@@ -49,6 +54,17 @@ export default function ExpensesView({
     () => expenses.reduce((s, e) => s + e.amountCents, 0),
     [expenses]
   );
+  function expenseIsLocked(e: Expense): boolean {
+    return expenseMonthOf(e.occurredOn || e.added) < currentMonth;
+  }
+
+  function openExpense(e: Expense) {
+    if (expenseIsLocked(e)) {
+      onToast("Past months are locked");
+      return;
+    }
+    setEditingId(e.id);
+  }
 
   return (
     <>
@@ -111,7 +127,9 @@ export default function ExpensesView({
             </button>
           </div>
 
-          <div className="list-hint">Tap any expense to edit or delete</div>
+          <div className="list-hint">
+            Current-month expenses can be edited; past months are locked
+          </div>
 
           {loading ? (
             <div className="loading">
@@ -132,7 +150,12 @@ export default function ExpensesView({
           ) : (
             <div className="items">
               {sorted.map((e) => (
-                <ExpenseRow key={e.id} item={e} onClick={setEditingId} />
+                <ExpenseRow
+                  key={e.id}
+                  item={e}
+                  locked={expenseIsLocked(e)}
+                  onClick={() => openExpense(e)}
+                />
               ))}
             </div>
           )}
@@ -153,4 +176,3 @@ export default function ExpensesView({
     </>
   );
 }
-

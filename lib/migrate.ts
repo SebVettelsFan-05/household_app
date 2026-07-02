@@ -108,6 +108,15 @@ export function ensureTables(): Promise<void> {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS shared_accounts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
   })().catch((err) => {
     // If the bootstrap itself failed, clear the cache so the next request
     // gets to retry — otherwise we'd permanently 500 on a transient outage.

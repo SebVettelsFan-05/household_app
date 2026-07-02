@@ -1,8 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReceiptLightbox from "@/components/ReceiptLightbox";
 import SplitCard, { type SplitLine } from "@/components/SplitCard";
 import { getSetting, putSetting } from "@/lib/client";
+import {
+  currentExpenseMonth,
+  FIRST_EXPENSE_MONTH,
+} from "@/lib/expenseMonths";
+import { driveImageUrl } from "@/lib/imageResize";
 import { fmtMoney, parseCents } from "@/lib/money";
 import { titleCaseName } from "@/lib/normalize";
 import { BUYERS, type Expense } from "@/lib/types";
@@ -30,6 +36,8 @@ type FixedRecurring = {
   id: string;
   name: string;
   protected?: boolean;
+  activeFrom?: string;
+  inactiveFrom?: string;
   // When set, the bill's full amount is treated as "paid" by this person
   // in the settlement math (the household's Internet convention).
   paidBy?: string;
@@ -37,6 +45,17 @@ type FixedRecurring = {
   overrides: Record<string, number>;
 };
 type VariableMap = Record<string, Record<string, number>>;
+type VariableRecurring = {
+  id: string;
+  name: string;
+  protected?: boolean;
+  activeFrom: string;
+  inactiveFrom?: string;
+};
+type VariableState = {
+  lines: VariableRecurring[];
+  amounts: VariableMap;
+};
 
 type RentAlloc = Record<string, number>; // name → cents
 type RentAllocSchedule = { from: string; alloc: RentAlloc };
@@ -55,8 +74,11 @@ const LEGACY_FIXED_KEYS = [
   "monthly_recurring_fixed_v2",
   "monthly_recurring_fixed_v1",
 ];
-const LS_VARIABLE_V2 = "monthly_recurring_variable_v2";
-const LEGACY_VARIABLE_KEYS = ["monthly_recurring_variable_v1"];
+const LS_VARIABLE_V3 = "monthly_recurring_variable_v3";
+const LEGACY_VARIABLE_KEYS = [
+  "monthly_recurring_variable_v2",
+  "monthly_recurring_variable_v1",
+];
 const LS_RENT_V1 = "monthly_rent_alloc_v1";
 
 // Backend keys (household_settings.key). Must match the server allowlist.
@@ -78,8 +100,8 @@ const PROTECTED_FIXED: ProtectedSeed[] = [
   { id: "fixed-mainstay-rental-insurance", name: "Rental insurance" },
 ];
 
-const VARIABLE_KEYS = ["Gas", "Water", "Electricity"] as const;
-type VariableKey = (typeof VARIABLE_KEYS)[number];
+const VARIABLE_SEEDS = ["Gas", "Water", "Electricity"] as const;
+type VariableKey = string;
 
 /* ---------- Month helpers ---------- */
 
@@ -102,7 +124,33 @@ function shiftMonth(key: string, delta: number): string {
   return ym(d);
 }
 
-/** "2026-06-12" → "Jun 12". Empty string when the input isn't a valid date. */
+/** Validates YYYY-MM keys used by recurring bill schedules. */
+function validMonthKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return /^\d{4}-\d{2}$/.test(value) ? value : undefined;
+}
+
+function activeForMonth(
+  entry: { activeFrom?: string; inactiveFrom?: string },
+  month: string
+): boolean {
+  const from = entry.activeFrom || FIRST_EXPENSE_MONTH;
+  if (month < from) return false;
+  if (entry.inactiveFrom && month >= entry.inactiveFrom) return false;
+  return true;
+}
+
+function makeRecurringId(kind: "fixed" | "variable", name: string): string {
+  const slug =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32) || "row";
+  return `${kind}-${Date.now().toString(36)}-${slug}`;
+}
+
+/** "2026-06-12" to "Jun 12". Empty string when the input isn't a valid date. */
 function fmtTripDate(iso: string): string {
   if (!iso) return "";
   const [y, m, d] = iso.split("-").map(Number);
@@ -121,6 +169,7 @@ function emptyProtected(): FixedRecurring[] {
     name: p.name,
     paidBy: p.paidBy,
     protected: true,
+    activeFrom: FIRST_EXPENSE_MONTH,
     schedule: [],
     overrides: {},
   }));
@@ -132,6 +181,8 @@ function parseFixedEntry(raw: unknown): FixedRecurring | null {
     id?: unknown;
     name?: unknown;
     protected?: unknown;
+    activeFrom?: unknown;
+    inactiveFrom?: unknown;
     paidBy?: unknown;
     schedule?: unknown;
     overrides?: unknown;
@@ -141,6 +192,8 @@ function parseFixedEntry(raw: unknown): FixedRecurring | null {
     id: r.id,
     name: r.name,
     protected: Boolean(r.protected),
+    activeFrom: validMonthKey(r.activeFrom) || FIRST_EXPENSE_MONTH,
+    inactiveFrom: validMonthKey(r.inactiveFrom),
     paidBy: typeof r.paidBy === "string" ? r.paidBy : undefined,
     schedule: Array.isArray(r.schedule)
       ? (r.schedule as ScheduleEntry[]).filter(
@@ -162,9 +215,10 @@ function isFixedTrivial(arr: FixedRecurring[]): boolean {
   );
 }
 
-/** True when the variable utility map has no recorded amounts. */
-function isVariableTrivial(v: VariableMap): boolean {
-  for (const month of Object.values(v)) {
+/** True when the variable utility state has no user rows or recorded amounts. */
+function isVariableTrivial(v: VariableState): boolean {
+  if (v.lines.some((line) => !line.protected)) return false;
+  for (const month of Object.values(v.amounts)) {
     for (const cents of Object.values(month)) {
       if (cents && cents > 0) return false;
     }
@@ -192,6 +246,7 @@ function mergeProtected(arr: FixedRecurring[]): FixedRecurring[] {
         name: p.name,
         protected: true,
         paidBy: p.paidBy,
+        activeFrom: FIRST_EXPENSE_MONTH,
         schedule: [],
         overrides: {},
       });
@@ -199,6 +254,8 @@ function mergeProtected(arr: FixedRecurring[]): FixedRecurring[] {
       existing.protected = true;
       existing.name = p.name;
       existing.paidBy = p.paidBy;
+      existing.activeFrom = existing.activeFrom || FIRST_EXPENSE_MONTH;
+      existing.inactiveFrom = undefined;
       existing.schedule = existing.schedule ?? [];
       existing.overrides = existing.overrides ?? {};
     }
@@ -237,23 +294,127 @@ function loadFixed(): FixedRecurring[] {
   return mergeProtected(arr);
 }
 
-function loadVariable(): VariableMap {
-  if (typeof window === "undefined") return {};
-  for (const key of LEGACY_VARIABLE_KEYS) {
-    try {
-      window.localStorage.removeItem(key);
-    } catch {
-      /* ignore */
+function seedVariableLines(): VariableRecurring[] {
+  return VARIABLE_SEEDS.map((name) => ({
+    id: `variable-mainstay-${name.toLowerCase()}`,
+    name,
+    protected: true,
+    activeFrom: FIRST_EXPENSE_MONTH,
+  }));
+}
+
+function emptyVariable(): VariableState {
+  return { lines: seedVariableLines(), amounts: {} };
+}
+
+function parseVariableLine(raw: unknown): VariableRecurring | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as {
+    id?: unknown;
+    name?: unknown;
+    protected?: unknown;
+    activeFrom?: unknown;
+    inactiveFrom?: unknown;
+  };
+  if (typeof r.id !== "string" || typeof r.name !== "string") return null;
+  const name = r.name.trim();
+  if (!name) return null;
+  return {
+    id: r.id,
+    name,
+    protected: Boolean(r.protected),
+    activeFrom: validMonthKey(r.activeFrom) || FIRST_EXPENSE_MONTH,
+    inactiveFrom: validMonthKey(r.inactiveFrom),
+  };
+}
+
+function parseVariableAmounts(raw: unknown): VariableMap {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: VariableMap = {};
+  for (const [month, bucket] of Object.entries(raw as Record<string, unknown>)) {
+    if (!validMonthKey(month) || !bucket || typeof bucket !== "object") continue;
+    const cleanBucket: Record<string, number> = {};
+    for (const [name, cents] of Object.entries(bucket as Record<string, unknown>)) {
+      if (typeof cents === "number" && Number.isFinite(cents)) {
+        cleanBucket[name] = cents;
+      }
+    }
+    if (Object.keys(cleanBucket).length > 0) out[month] = cleanBucket;
+  }
+  return out;
+}
+
+function normalizeVariableState(state: VariableState): VariableState {
+  const lines: VariableRecurring[] = [];
+  const seen = new Set<string>();
+
+  for (const seed of seedVariableLines()) {
+    const existing = state.lines.find(
+      (l) => l.name.toLowerCase() === seed.name.toLowerCase()
+    );
+    lines.push({
+      ...(existing ?? seed),
+      id: seed.id,
+      name: seed.name,
+      protected: true,
+      activeFrom: (existing && existing.activeFrom) || FIRST_EXPENSE_MONTH,
+      inactiveFrom: undefined,
+    });
+    seen.add(seed.name.toLowerCase());
+  }
+
+  for (const line of state.lines) {
+    const key = line.name.toLowerCase();
+    if (seen.has(key)) continue;
+    lines.push(line);
+    seen.add(key);
+  }
+
+  for (const bucket of Object.values(state.amounts)) {
+    for (const name of Object.keys(bucket)) {
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      lines.push({
+        id: makeRecurringId("variable", name),
+        name,
+        activeFrom: FIRST_EXPENSE_MONTH,
+      });
+      seen.add(key);
     }
   }
+
+  return { lines, amounts: state.amounts };
+}
+
+function parseVariableState(raw: unknown): VariableState {
+  if (!raw || typeof raw !== "object") return emptyVariable();
+  const maybe = raw as { lines?: unknown; amounts?: unknown };
+  if (Array.isArray(maybe.lines)) {
+    return normalizeVariableState({
+      lines: maybe.lines
+        .map(parseVariableLine)
+        .filter((x): x is VariableRecurring => x !== null),
+      amounts: parseVariableAmounts(maybe.amounts),
+    });
+  }
+  return normalizeVariableState({
+    lines: [],
+    amounts: parseVariableAmounts(raw),
+  });
+}
+
+function loadVariable(): VariableState {
+  if (typeof window === "undefined") return emptyVariable();
   try {
-    const raw = window.localStorage.getItem(LS_VARIABLE_V2);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return {};
-    return parsed as VariableMap;
+    const raw = window.localStorage.getItem(LS_VARIABLE_V3);
+    if (raw) return parseVariableState(JSON.parse(raw) as unknown);
+    for (const key of LEGACY_VARIABLE_KEYS) {
+      const legacy = window.localStorage.getItem(key);
+      if (legacy) return parseVariableState(JSON.parse(legacy) as unknown);
+    }
+    return emptyVariable();
   } catch {
-    return {};
+    return emptyVariable();
   }
 }
 
@@ -298,6 +459,7 @@ function sortFixed(rows: FixedRecurring[]): FixedRecurring[] {
 
 /** Resolves `bill`'s amount for the given month. Returns 0 if nothing matches. */
 function amountForMonth(bill: FixedRecurring, month: string): number {
+  if (!activeForMonth(bill, month)) return 0;
   if (Object.prototype.hasOwnProperty.call(bill.overrides, month)) {
     return bill.overrides[month];
   }
@@ -397,11 +559,13 @@ function AmountInput({
   onCommit,
   placeholder = "0.00",
   ariaLabel,
+  disabled = false,
 }: {
   cents: number | undefined;
   onCommit: (cents: number | null) => void;
   placeholder?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 }) {
   const formatted = cents !== undefined ? (cents / 100).toFixed(2) : "";
   const [draft, setDraft] = useState<string>(formatted);
@@ -411,6 +575,7 @@ function AmountInput({
   }, [formatted]);
 
   function commit() {
+    if (disabled) return;
     const trimmed = draft.trim();
     if (!trimmed) {
       onCommit(null);
@@ -433,6 +598,7 @@ function AmountInput({
       inputMode="decimal"
       placeholder={placeholder}
       aria-label={ariaLabel}
+      disabled={disabled}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
@@ -453,13 +619,24 @@ type Props = {
 };
 
 export default function MonthlyBreakdown({ expenses, onToast }: Props) {
-  const [month, setMonth] = useState<string>(() => ym(new Date()));
-  const currentMonth = ym(new Date());
+  const [month, setMonth] = useState<string>(() => currentExpenseMonth());
+  const currentMonth = currentExpenseMonth();
   const isCurrentMonth = month === currentMonth;
+  const monthLocked = month < currentMonth;
+  const canEditMonth = !monthLocked;
+  const canGoPrev = month > FIRST_EXPENSE_MONTH;
 
   const [fixed, setFixed] = useState<FixedRecurring[]>([]);
-  const [variable, setVariable] = useState<VariableMap>({});
+  const [variable, setVariable] = useState<VariableState>(() => emptyVariable());
   const [rent, setRent] = useState<RentState>({ schedule: [], overrides: {} });
+  const [newFixedName, setNewFixedName] = useState("");
+  const [newFixedAmount, setNewFixedAmount] = useState("");
+  const [newVariableName, setNewVariableName] = useState("");
+  const [newVariableAmount, setNewVariableAmount] = useState("");
+  const [receiptPreview, setReceiptPreview] = useState<{
+    src: string;
+    href: string;
+  } | null>(null);
   // Suppress backend pushes triggered by the mount-time hydration. Without
   // this, hydrating from the backend would echo the same value back as a PUT.
   const hydratedRef = useRef(false);
@@ -477,6 +654,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     setRent(lsRent);
     try {
       window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(lsFixed));
+      window.localStorage.setItem(LS_VARIABLE_V3, JSON.stringify(lsVariable));
     } catch {
       /* ignore */
     }
@@ -490,7 +668,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     //    existing device's saved bills.
     Promise.all([
       getSetting<FixedRecurring[]>(BE_FIXED).catch(() => null),
-      getSetting<VariableMap>(BE_VARIABLE).catch(() => null),
+      getSetting<unknown>(BE_VARIABLE).catch(() => null),
       getSetting<RentState>(BE_RENT).catch(() => null),
     ]).then(([beFixed, beVariable, beRent]) => {
       if (cancelled) return;
@@ -519,11 +697,11 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
       }
 
       if (beVariable && typeof beVariable === "object") {
-        const v = beVariable as VariableMap;
+        const v = parseVariableState(beVariable);
         if (!isVariableTrivial(v)) {
           setVariable(v);
           try {
-            window.localStorage.setItem(LS_VARIABLE_V2, JSON.stringify(v));
+            window.localStorage.setItem(LS_VARIABLE_V3, JSON.stringify(v));
           } catch {
             /* ignore */
           }
@@ -586,14 +764,15 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     pushBackend(BE_FIXED, sorted, "recurring bills");
   }
 
-  function persistVariable(next: VariableMap) {
-    setVariable(next);
+  function persistVariable(next: VariableState) {
+    const normalized = normalizeVariableState(next);
+    setVariable(normalized);
     try {
-      window.localStorage.setItem(LS_VARIABLE_V2, JSON.stringify(next));
+      window.localStorage.setItem(LS_VARIABLE_V3, JSON.stringify(normalized));
     } catch {
       onToast("Couldn't save utility amounts");
     }
-    pushBackend(BE_VARIABLE, next, "utility amounts");
+    pushBackend(BE_VARIABLE, normalized, "utility amounts");
   }
 
   function persistRent(next: RentState) {
@@ -619,6 +798,8 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
       description: string;
       amount: number;
       receiptUrl: string;
+      receiptFileId: string;
+      receiptMime: string;
     };
     type StoreGroup = {
       store: string;
@@ -637,6 +818,8 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         description: (e.description || "").trim(),
         amount: e.amountCents,
         receiptUrl: e.receiptUrl || "",
+        receiptFileId: e.receiptFileId || "",
+        receiptMime: e.receiptMime || "",
       };
       const existing = buckets.get(key);
       if (existing) {
@@ -674,6 +857,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
   const rentOverridden = hasRentOverride(rent, month);
 
   function commitRentForPerson(name: string, cents: number | null) {
+    if (monthLocked) return;
     const nextAlloc: RentAlloc = { ...monthRent };
     if (cents === null || cents <= 0) {
       delete nextAlloc[name];
@@ -684,6 +868,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
   }
 
   function clearRent() {
+    if (monthLocked) return;
     if (rentOverridden) {
       persistRent(clearRentOverride(rent, month));
     }
@@ -691,12 +876,17 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
 
   /* ---- Fixed recurring: resolved per displayed month ---- */
 
-  const fixedTotal = useMemo(
-    () => fixed.reduce((s, r) => s + amountForMonth(r, month), 0),
+  const fixedForMonth = useMemo(
+    () => fixed.filter((r) => activeForMonth(r, month)),
     [fixed, month]
+  );
+  const fixedTotal = useMemo(
+    () => fixedForMonth.reduce((s, r) => s + amountForMonth(r, month), 0),
+    [fixedForMonth, month]
   );
 
   function commitAmount(id: string, cents: number | null) {
+    if (monthLocked) return;
     persistFixed(
       fixed.map((r) =>
         r.id === id ? setBillAmount(r, month, currentMonth, cents ?? 0) : r
@@ -705,30 +895,146 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
   }
 
   function clearOverride(id: string) {
+    if (monthLocked) return;
     persistFixed(
       fixed.map((r) => (r.id === id ? clearBillOverride(r, month) : r))
     );
   }
 
+  function addFixedRecurring() {
+    if (!canEditMonth) return;
+    const name = titleCaseName(newFixedName);
+    const cents = parseCents(newFixedAmount);
+    if (!name) {
+      onToast("Name required");
+      return;
+    }
+    if (cents === null || cents <= 0) {
+      onToast("Amount must be greater than $0");
+      return;
+    }
+    const duplicate = fixedForMonth.some(
+      (r) => r.name.toLowerCase() === name.toLowerCase()
+    );
+    if (duplicate) {
+      onToast(`${name} is already active this month`);
+      return;
+    }
+    persistFixed([
+      ...fixed,
+      {
+        id: makeRecurringId("fixed", name),
+        name,
+        activeFrom: month,
+        schedule: [{ from: month, cents }],
+        overrides: {},
+      },
+    ]);
+    setNewFixedName("");
+    setNewFixedAmount("");
+  }
+
+  function removeFixedRecurring(id: string) {
+    if (!canEditMonth) return;
+    const row = fixed.find((r) => r.id === id);
+    if (!row || row.protected) return;
+    if ((row.activeFrom || FIRST_EXPENSE_MONTH) >= month) {
+      persistFixed(fixed.filter((r) => r.id !== id));
+      return;
+    }
+    persistFixed(
+      fixed.map((r) => (r.id === id ? { ...r, inactiveFrom: month } : r))
+    );
+  }
+
   /* ---- Variable recurring ---- */
 
-  const monthVariable = variable[month] ?? {};
-  const variableTotal = VARIABLE_KEYS.reduce(
-    (s, k) => s + (monthVariable[k] ?? 0),
+  const monthVariable = variable.amounts[month] ?? {};
+  const variableLines = useMemo(
+    () => variable.lines.filter((line) => activeForMonth(line, month)),
+    [variable.lines, month]
+  );
+  const variableTotal = variableLines.reduce(
+    (s, line) => s + (monthVariable[line.name] ?? 0),
     0
   );
 
   function setVariableAmount(key: VariableKey, cents: number | null) {
-    const next: VariableMap = { ...variable };
-    const bucket = { ...(next[month] ?? {}) };
+    if (monthLocked) return;
+    const nextAmounts: VariableMap = { ...variable.amounts };
+    const bucket = { ...(nextAmounts[month] ?? {}) };
     if (cents === null) {
       delete bucket[key];
     } else {
       bucket[key] = cents;
     }
-    if (Object.keys(bucket).length === 0) delete next[month];
-    else next[month] = bucket;
-    persistVariable(next);
+    if (Object.keys(bucket).length === 0) delete nextAmounts[month];
+    else nextAmounts[month] = bucket;
+    persistVariable({ ...variable, amounts: nextAmounts });
+  }
+
+  function addVariableRecurring() {
+    if (!canEditMonth) return;
+    const name = titleCaseName(newVariableName);
+    if (!name) {
+      onToast("Name required");
+      return;
+    }
+    const duplicate = variableLines.some(
+      (line) => line.name.toLowerCase() === name.toLowerCase()
+    );
+    if (duplicate) {
+      onToast(`${name} is already active this month`);
+      return;
+    }
+    let nextAmounts = variable.amounts;
+    const trimmedAmount = newVariableAmount.trim();
+    if (trimmedAmount) {
+      const cents = parseCents(trimmedAmount);
+      if (cents === null || cents <= 0) {
+        onToast("Amount must be greater than $0");
+        return;
+      }
+      nextAmounts = {
+        ...variable.amounts,
+        [month]: {
+          ...(variable.amounts[month] ?? {}),
+          [name]: cents,
+        },
+      };
+    }
+    persistVariable({
+      lines: [
+        ...variable.lines,
+        {
+          id: makeRecurringId("variable", name),
+          name,
+          activeFrom: month,
+        },
+      ],
+      amounts: nextAmounts,
+    });
+    setNewVariableName("");
+    setNewVariableAmount("");
+  }
+
+  function removeVariableRecurring(id: string) {
+    if (!canEditMonth) return;
+    const line = variable.lines.find((r) => r.id === id);
+    if (!line || line.protected) return;
+    if ((line.activeFrom || FIRST_EXPENSE_MONTH) >= month) {
+      persistVariable({
+        ...variable,
+        lines: variable.lines.filter((r) => r.id !== id),
+      });
+      return;
+    }
+    persistVariable({
+      ...variable,
+      lines: variable.lines.map((r) =>
+        r.id === id ? { ...r, inactiveFrom: month } : r
+      ),
+    });
   }
 
   /* ---- Settlement math ---- */
@@ -762,8 +1068,8 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         paidByExtra.set(r.paidBy, (paidByExtra.get(r.paidBy) ?? 0) + cents);
       }
     }
-    for (const k of VARIABLE_KEYS) {
-      const cents = monthVariable[k] ?? 0;
+    for (const line of variableLines) {
+      const cents = monthVariable[line.name] ?? 0;
       if (cents > 0) fiveWayPool += cents;
     }
     const fiveWayShare = Math.round(fiveWayPool / N);
@@ -781,7 +1087,15 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     });
 
     return { lines, grand };
-  }, [oneTime, fixed, month, monthVariable, rentTotal, monthRent]);
+  }, [
+    oneTime,
+    fixed,
+    month,
+    monthVariable,
+    variableLines,
+    rentTotal,
+    monthRent,
+  ]);
 
   const grandTotal = settlement.grand;
 
@@ -791,7 +1105,10 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         <button
           type="button"
           className="monthly-nav"
-          onClick={() => setMonth(shiftMonth(month, -1))}
+          onClick={() => {
+            if (canGoPrev) setMonth(shiftMonth(month, -1));
+          }}
+          disabled={!canGoPrev}
           aria-label="Previous month"
         >
           ‹
@@ -806,7 +1123,6 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
           ›
         </button>
       </div>
-
       <div className="monthly-section">
         <div className="monthly-section-head">
           <h3>One-time (by store)</h3>
@@ -836,6 +1152,12 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                 <div className="monthly-store-trips">
                   {r.trips.map((t) => {
                     const date = fmtTripDate(t.occurredOn);
+                    const canPreviewReceipt = Boolean(
+                      t.receiptUrl &&
+                        t.receiptFileId &&
+                        t.receiptMime &&
+                        t.receiptMime.startsWith("image/")
+                    );
                     return (
                       <div className="monthly-trip-row" key={t.id}>
                         <span className="monthly-trip-label">
@@ -857,8 +1179,20 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                               target="_blank"
                               rel="noopener noreferrer"
                               className="receipt-pill"
-                              title="Open receipt"
+                              title={
+                                canPreviewReceipt
+                                  ? "Preview receipt"
+                                  : "Open receipt"
+                              }
                               style={{ marginLeft: 6 }}
+                              onClick={(e) => {
+                                if (!canPreviewReceipt) return;
+                                e.preventDefault();
+                                setReceiptPreview({
+                                  src: driveImageUrl(t.receiptFileId, 1600),
+                                  href: t.receiptUrl,
+                                });
+                              }}
                             >
                               📎
                             </a>
@@ -896,16 +1230,20 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         </div>
         <div className="monthly-list">
           {BUYERS.map((name) => (
-            <div className="monthly-row is-protected" key={name}>
+            <div
+              className={`monthly-row is-protected${monthLocked ? " is-locked" : ""}`}
+              key={name}
+            >
               <span className="monthly-row-name">{name}</span>
               <AmountInput
                 cents={monthRent[name] || undefined}
                 onCommit={(cents) => commitRentForPerson(name, cents)}
                 ariaLabel={`${name}'s rent share`}
+                disabled={monthLocked}
               />
             </div>
           ))}
-          {rentOverridden && !isCurrentMonth ? (
+          {rentOverridden && !isCurrentMonth && !monthLocked ? (
             <button
               type="button"
               className="cat-mgr-link"
@@ -927,11 +1265,14 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
           </span>
         </div>
         <div className="monthly-list">
-          {fixed.map((r) => {
+          {fixedForMonth.map((r) => {
             const monthCents = amountForMonth(r, month);
             const overridden = hasOverride(r, month);
             return (
-              <div className="monthly-row is-protected" key={r.id}>
+              <div
+                className={`monthly-row${r.protected ? " is-protected" : ""}${monthLocked ? " is-locked" : ""}`}
+                key={r.id}
+              >
                 <span className="monthly-row-name">
                   {r.name}
                   {overridden ? (
@@ -943,12 +1284,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                     </span>
                   ) : null}
                 </span>
-                <AmountInput
-                  cents={monthCents || undefined}
-                  onCommit={(cents) => commitAmount(r.id, cents)}
-                  ariaLabel={`${r.name} amount`}
-                />
-                {overridden && !isCurrentMonth ? (
+                {overridden && !isCurrentMonth && !monthLocked ? (
                   <button
                     type="button"
                     className="monthly-remove"
@@ -959,9 +1295,56 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                     ↺
                   </button>
                 ) : null}
+                {!r.protected && !monthLocked ? (
+                  <button
+                    type="button"
+                    className="monthly-remove"
+                    onClick={() => removeFixedRecurring(r.id)}
+                    title={`Stop ${r.name} from ${ymLabel(month)} forward`}
+                    aria-label={`Stop ${r.name} from this month forward`}
+                  >
+                    x
+                  </button>
+                ) : null}
+                <AmountInput
+                  cents={monthCents || undefined}
+                  onCommit={(cents) => commitAmount(r.id, cents)}
+                  ariaLabel={`${r.name} amount`}
+                  disabled={monthLocked}
+                />
               </div>
             );
           })}
+          {canEditMonth ? (
+            <div className="monthly-add">
+              <input
+                type="text"
+                placeholder="New fixed bill"
+                value={newFixedName}
+                onChange={(e) => setNewFixedName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addFixedRecurring();
+                }}
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={newFixedAmount}
+                onChange={(e) => setNewFixedAmount(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addFixedRecurring();
+                }}
+              />
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={addFixedRecurring}
+              >
+                Add
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -973,19 +1356,64 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
           </span>
         </div>
         <div className="monthly-list">
-          {VARIABLE_KEYS.map((key) => {
-            const cents = monthVariable[key];
+          {variableLines.map((line) => {
+            const cents = monthVariable[line.name];
             return (
-              <div className="monthly-row" key={key}>
-                <span className="monthly-row-name">{key}</span>
+              <div
+                className={`monthly-row${line.protected ? " is-protected" : ""}${monthLocked ? " is-locked" : ""}`}
+                key={line.id}
+              >
+                <span className="monthly-row-name">{line.name}</span>
+                {!line.protected && !monthLocked ? (
+                  <button
+                    type="button"
+                    className="monthly-remove"
+                    onClick={() => removeVariableRecurring(line.id)}
+                    title={`Stop ${line.name} from ${ymLabel(month)} forward`}
+                    aria-label={`Stop ${line.name} from this month forward`}
+                  >
+                    x
+                  </button>
+                ) : null}
                 <AmountInput
                   cents={cents}
-                  onCommit={(c) => setVariableAmount(key, c)}
-                  ariaLabel={`${key} amount`}
+                  onCommit={(c) => setVariableAmount(line.name, c)}
+                  ariaLabel={`${line.name} amount`}
+                  disabled={monthLocked}
                 />
               </div>
             );
           })}
+          {canEditMonth ? (
+            <div className="monthly-add">
+              <input
+                type="text"
+                placeholder="New variable bill"
+                value={newVariableName}
+                onChange={(e) => setNewVariableName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addVariableRecurring();
+                }}
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="optional"
+                value={newVariableAmount}
+                onChange={(e) => setNewVariableAmount(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addVariableRecurring();
+                }}
+              />
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={addVariableRecurring}
+              >
+                Add
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -998,6 +1426,15 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         <SplitCard
           title={`Settlement for ${ymLabel(month)}`}
           lines={settlement.lines}
+        />
+      ) : null}
+
+      {receiptPreview ? (
+        <ReceiptLightbox
+          src={receiptPreview.src}
+          alt="Receipt"
+          originalHref={receiptPreview.href}
+          onClose={() => setReceiptPreview(null)}
         />
       ) : null}
     </section>

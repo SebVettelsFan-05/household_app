@@ -3,6 +3,7 @@ import type {
   AddExpenseCategoryResponse,
   AddFavoriteResponse,
   AddResponse,
+  AddSharedAccountResponse,
   ApiResponse,
   CategoryDef,
   DeleteCategoryResponse,
@@ -12,6 +13,7 @@ import type {
   ExpenseMutateResponse,
   FavoriteRecipe,
   FavoritesMutateResponse,
+  GetSharedAccountResponse,
   GroceryItem,
   GroceryMutateResponse,
   Item,
@@ -26,8 +28,12 @@ import type {
   Recipe,
   RecipeIngredient,
   RecipeMutateResponse,
+  SharedAccount,
+  SharedAccountField,
+  SharedAccountsMutateResponse,
   UpdateCategoryResponse,
   UpdateExpenseCategoryResponse,
+  ListSharedAccountsResponse,
 } from "./types";
 
 async function parse<T>(res: Response): Promise<ApiResponse<T>> {
@@ -459,6 +465,56 @@ export async function deleteExpenseCategory(name: string) {
     { method: "DELETE" }
   );
   return unwrap(await parse<DeleteExpenseCategoryResponse>(res));
+}
+
+/* ----- shared passwords / accounts ----- */
+
+export async function listSharedAccounts(): Promise<SharedAccount[]> {
+  const res = await fetch("/api/shared-accounts", { cache: "no-store" });
+  return unwrap(await parse<ListSharedAccountsResponse>(res)).accounts;
+}
+
+export async function getSharedAccount(id: string): Promise<SharedAccount> {
+  const res = await fetch(`/api/shared-accounts/${encodeURIComponent(id)}`, {
+    cache: "no-store",
+  });
+  return unwrap(await parse<GetSharedAccountResponse>(res)).account;
+}
+
+export type AddSharedAccountInput = {
+  name: string;
+  fields?: SharedAccountField[];
+};
+
+export async function addSharedAccount(input: AddSharedAccountInput) {
+  const res = await fetch("/api/shared-accounts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<AddSharedAccountResponse>(res));
+}
+
+export type UpdateSharedAccountInput = {
+  id: string;
+  name?: string;
+  fields?: SharedAccountField[];
+};
+
+export async function updateSharedAccount(input: UpdateSharedAccountInput) {
+  const res = await fetch("/api/shared-accounts", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return unwrap(await parse<SharedAccountsMutateResponse>(res));
+}
+
+export async function deleteSharedAccount(id: string) {
+  const res = await fetch(`/api/shared-accounts?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  return unwrap(await parse<SharedAccountsMutateResponse>(res));
 }
 
 /* ----- household settings (shared monthly state) ----- */

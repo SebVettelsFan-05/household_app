@@ -1,6 +1,12 @@
 "use client";
 
-export type Tab = "home" | "fridge" | "grocery" | "recipes" | "expenses";
+export type Tab =
+  | "home"
+  | "fridge"
+  | "grocery"
+  | "recipes"
+  | "expenses"
+  | "passwords";
 
 type Props = {
   value: Tab;
@@ -15,6 +21,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "grocery", label: "Grocery" },
   { id: "recipes", label: "Recipes" },
   { id: "expenses", label: "Expenses" },
+  { id: "passwords", label: "Passwords" },
 ];
 
 export default function TabBar({ value, onChange, groceryCount = 0 }: Props) {

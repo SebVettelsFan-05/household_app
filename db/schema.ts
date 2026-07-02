@@ -15,6 +15,15 @@ export type IngredientJson = {
   category: string;
 };
 
+export type SharedAccountFieldJson = {
+  id: string;
+  label: string;
+  kind: "text" | "password" | "image";
+  value: string;
+  filename?: string;
+  mimeType?: string;
+};
+
 export const items = pgTable("items", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -118,6 +127,18 @@ export const householdSettings = pgTable("household_settings", {
     .defaultNow(),
 });
 
+export const sharedAccounts = pgTable("shared_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  fields: jsonb("fields").$type<SharedAccountFieldJson[]>().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: false })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: false })
+    .notNull()
+    .defaultNow(),
+});
+
 export type ItemRow = typeof items.$inferSelect;
 export type NewItemRow = typeof items.$inferInsert;
 export type CategoryRow = typeof categories.$inferSelect;
@@ -129,3 +150,5 @@ export type FavoriteRow = typeof favoriteRecipes.$inferSelect;
 export type ExpenseRow = typeof expenses.$inferSelect;
 export type NewExpenseRow = typeof expenses.$inferInsert;
 export type ExpenseCategoryRow = typeof expenseCategories.$inferSelect;
+export type SharedAccountRow = typeof sharedAccounts.$inferSelect;
+export type NewSharedAccountRow = typeof sharedAccounts.$inferInsert;

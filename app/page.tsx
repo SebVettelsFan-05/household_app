@@ -6,6 +6,7 @@ import FridgeView from "@/components/FridgeView";
 import GroceryView from "@/components/GroceryView";
 import HomeView from "@/components/HomeView";
 import ManageCategoriesModal from "@/components/ManageCategoriesModal";
+import PasswordsView from "@/components/PasswordsView";
 import RecipesView from "@/components/RecipesView";
 import RefreshButton from "@/components/RefreshButton";
 import TabBar, { type Tab } from "@/components/TabBar";
@@ -17,6 +18,7 @@ import {
   listGrocery,
   listItems,
   listRecipes,
+  listSharedAccounts,
 } from "@/lib/client";
 import { sortCategories } from "@/lib/normalize";
 import type {
@@ -25,6 +27,7 @@ import type {
   GroceryItem,
   Item,
   Recipe,
+  SharedAccount,
 } from "@/lib/types";
 
 export default function Page() {
@@ -32,6 +35,7 @@ export default function Page() {
   const [grocery, setGrocery] = useState<GroceryItem[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [sharedAccounts, setSharedAccounts] = useState<SharedAccount[]>([]);
   const [categories, setCategories] = useState<CategoryDef[]>([]);
   const [itemsLoading, setItemsLoading] = useState(true);
   const [itemsError, setItemsError] = useState<string | null>(null);
@@ -41,6 +45,8 @@ export default function Page() {
   const [recipesError, setRecipesError] = useState<string | null>(null);
   const [expensesLoading, setExpensesLoading] = useState(true);
   const [expensesError, setExpensesError] = useState<string | null>(null);
+  const [sharedAccountsLoading, setSharedAccountsLoading] = useState(true);
+  const [sharedAccountsError, setSharedAccountsError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("home");
   const [managingCats, setManagingCats] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -117,6 +123,21 @@ export default function Page() {
           setExpensesLoading(false);
         }),
 
+      listSharedAccounts()
+        .then((d) => {
+          if (isCancelled()) return;
+          setSharedAccounts(d);
+          setSharedAccountsLoading(false);
+          setSharedAccountsError(null);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`passwords: ${msg}`);
+          if (isCancelled()) return;
+          setSharedAccountsError(msg);
+          setSharedAccountsLoading(false);
+        }),
+
       listCategories()
         .then((d) => {
           if (isCancelled()) return;
@@ -184,7 +205,9 @@ export default function Page() {
           ? "Grocery"
           : tab === "recipes"
             ? "Recipes"
-            : "Expenses";
+            : tab === "expenses"
+              ? "Expenses"
+              : "Passwords";
 
   return (
     <div className="wrap">
@@ -233,12 +256,20 @@ export default function Page() {
           onGroceryChange={setGrocery}
           onToast={showToast}
         />
-      ) : (
+      ) : tab === "expenses" ? (
         <ExpensesView
           expenses={expenses}
           loading={expensesLoading}
           loadError={expensesError}
           onExpensesChange={setExpenses}
+          onToast={showToast}
+        />
+      ) : (
+        <PasswordsView
+          accounts={sharedAccounts}
+          loading={sharedAccountsLoading}
+          loadError={sharedAccountsError}
+          onAccountsChange={setSharedAccounts}
           onToast={showToast}
         />
       )}

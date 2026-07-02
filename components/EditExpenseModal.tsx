@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import { ReceiptPicker } from "@/components/AddExpenseForm";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { deleteExpense, updateExpense } from "@/lib/client";
+import {
+  currentExpenseMonth,
+  firstDayOfMonth,
+  isPastExpenseMonth,
+} from "@/lib/expenseMonths";
 import { driveImageUrl, prepareReceipt } from "@/lib/imageResize";
 import { fmtMoney, parseCents } from "@/lib/money";
 import { BUYERS, type Expense } from "@/lib/types";
@@ -21,6 +26,7 @@ export default function EditExpenseModal({
   onResult,
   onError,
 }: Props) {
+  const currentMonthStart = firstDayOfMonth(currentExpenseMonth());
   const [store, setStore] = useState(item.store || "");
   const [amount, setAmount] = useState(
     fmtMoney(item.amountCents).replace("$", "")
@@ -79,6 +85,10 @@ export default function EditExpenseModal({
     }
     if (!paidBy) {
       onError("Pick who paid");
+      return;
+    }
+    if (isPastExpenseMonth(occurredOn)) {
+      onError("Past months are locked");
       return;
     }
     setBusy(true);
@@ -162,6 +172,7 @@ export default function EditExpenseModal({
             <input
               id="ee-date"
               type="date"
+              min={currentMonthStart}
               value={occurredOn}
               onChange={(e) => setOccurredOn(e.target.value)}
             />
@@ -234,6 +245,7 @@ export default function EditExpenseModal({
           <ReceiptLightbox
             src={existingImgSrc}
             alt="Current receipt"
+            originalHref={item.receiptUrl}
             onClose={() => setExpandedExisting(false)}
           />
         ) : null}
