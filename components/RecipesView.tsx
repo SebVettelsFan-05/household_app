@@ -144,10 +144,9 @@ export default function RecipesView({
   }
 
   // Re-computed when `today` changes. A timer schedules itself for the next
-  // local midnight so the week boundary advances live without a refresh —
-  // on Sunday at 00:00 (i.e. the instant Saturday 11:59:59 PM ticks over)
-  // "next week" naturally becomes "this week" and last week's recipes drop
-  // into the archive on the next /api/recipes fetch.
+  // household-timezone midnight so the week boundary advances live without a
+  // refresh. At Friday 00:00 Toronto time, the completed Sun-Thu cooking week
+  // drops into the archive and the upcoming Sunday becomes "this week".
   const [today, setToday] = useState<Date>(() => new Date());
   const week1 = useMemo(() => thisWeekStart(today), [today]);
   const week2 = useMemo(() => nextWeekStart(today), [today]);
@@ -158,7 +157,7 @@ export default function RecipesView({
     return () => window.clearTimeout(t);
   }, [today]);
 
-  // Mobile and laptops aggressively suspend background tabs — the midnight
+  // Mobile and laptops aggressively suspend background tabs - the midnight
   // setTimeout above silently fails to fire across a sleep. Re-read the
   // clock whenever the tab regains visibility so a user opening the app
   // Sunday morning sees the rolled-over week even if their phone had been
