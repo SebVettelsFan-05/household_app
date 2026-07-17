@@ -13,6 +13,7 @@ export type IngredientJson = {
   name: string;
   quantity: number;
   category: string;
+  categoryReviewed?: boolean;
 };
 
 export type SharedAccountFieldJson = {
@@ -33,6 +34,9 @@ export const items = pgTable("items", {
   // Timestamp (not date) so same-day inserts keep their relative order.
   added: timestamp("added", { withTimezone: false }).notNull().defaultNow(),
   category: text("category").notNull().default("Other"),
+  // True only after somebody explicitly confirms/changes the category. This
+  // lets auto-suggest learn corrections without treating old guesses as fact.
+  categoryReviewed: boolean("category_reviewed").notNull().default(false),
 });
 
 export const categories = pgTable("categories", {
@@ -46,6 +50,7 @@ export const groceryItems = pgTable("grocery_items", {
   name: text("name").notNull(),
   quantity: integer("quantity").notNull(),
   category: text("category").notNull().default("Other"),
+  categoryReviewed: boolean("category_reviewed").notNull().default(false),
   // Nullable — store is optional.
   store: text("store"),
   // Required — one of the household members.

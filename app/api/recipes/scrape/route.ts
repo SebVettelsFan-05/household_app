@@ -7,8 +7,14 @@ import {
   listItemsRepo,
   listRecipesRepo,
 } from "@/lib/repo";
-import { guessCategoryOrFallback } from "@/lib/guessCategory";
-import { parseRecipeIngredient } from "@/lib/parseIngredient";
+import {
+  guessCategoryOrFallback,
+  storedCategoryWeight,
+} from "@/lib/guessCategory";
+import {
+  parseRecipeIngredient,
+  type ParsedIngredient,
+} from "@/lib/parseIngredient";
 import { RecipeScrapeError, scrapeRecipe } from "@/lib/recipeScraper";
 import type { RecipeIngredient } from "@/lib/types";
 
@@ -17,18 +23,26 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 15;
 
 // Tiny in-process cache so repeated tries (or a household member opening the
-// same link twice in a few minutes) don't re-hit the recipe site. Per-instance
+// same link twice in a few minutes) don't re-hit the recipe site. The cache
+// intentionally excludes categories because they depend on mutable household
+// history and must be recomputed on every request. Per-instance
 // only — fine for our scale.
 //
 // The version prefix is bumped whenever the ingredient parser changes, so the
 // cache stops handing back results that were normalized under the old rules.
+type ParsedScrape = {
+  name: string;
+  description: string;
+  ingredients: ParsedIngredient[];
+  hasApproximate: boolean;
+};
 type CacheEntry = {
   expiresAt: number;
-  result: ScrapeResponse;
+  parsed: ParsedScrape;
 };
 const CACHE = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24h
-const PARSER_VERSION = "v2";
+const PARSER_VERSION = "v3";
 const cacheKey = (url: string) => `${PARSER_VERSION}:${url}`;
 
 // Same-instance rate cap. Generous because this is a household app, not a
@@ -85,27 +99,46 @@ export async function POST(req: NextRequest) {
 
     const cacheId = cacheKey(url);
     const cached = CACHE.get(cacheId);
+    let parsedScrape: ParsedScrape;
     if (cached && cached.expiresAt > Date.now()) {
-      return NextResponse.json(cached.result);
-    }
+      parsedScrape = cached.parsed;
+    } else {
+      // Pull HTML + parse JSON-LD only on a cache miss. Categorization happens
+      // below, after current household history has been loaded.
+      let scraped;
+      try {
+        scraped = await scrapeRecipe(url);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return NextResponse.json(
+          { ok: false, error: msg },
+          { status: err instanceof RecipeScrapeError ? 422 : 500 }
+        );
+      }
 
-    // Pull HTML + parse JSON-LD.
-    let scraped;
-    try {
-      scraped = await scrapeRecipe(url);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json(
-        { ok: false, error: msg },
-        { status: err instanceof RecipeScrapeError ? 422 : 500 }
-      );
+      const parsedIngredients = scraped.ingredients
+        .map((raw) => parseRecipeIngredient(raw))
+        .filter((ingredient) => Boolean(ingredient.name));
+      parsedScrape = {
+        name: scraped.name ?? "",
+        description: scraped.description ?? "",
+        ingredients: parsedIngredients,
+        hasApproximate: parsedIngredients.some(
+          (ingredient) => ingredient.approximate
+        ),
+      };
+      CACHE.set(cacheId, {
+        expiresAt: Date.now() + CACHE_TTL_MS,
+        parsed: parsedScrape,
+      });
     }
 
     await ensureTables();
 
-    // Build a category-guess history from everything the household has ever
-    // tagged. Recipe ingredients (saved + favorites) carry the most signal
-    // since they're labeled by the user, so we put them first.
+    // Build deterministic weighted history. Explicitly reviewed inventory and
+    // grocery labels carry the most trust; legacy/automatic stored labels are
+    // weaker, and saved recipe categories are weakest because they may have
+    // originated from this same auto-guesser.
     const [items, grocery, recipes, favorites, categoryDefs] =
       await Promise.all([
         listItemsRepo(),
@@ -114,27 +147,55 @@ export async function POST(req: NextRequest) {
         listFavoritesRepo(),
         listCategoriesRepo(),
       ]);
-    const history: Array<{ name: string; category: string }> = [];
+    const history: Array<{
+      name: string;
+      category: string;
+      weight: number;
+    }> = [];
+    for (const it of items) {
+      history.push({
+        name: it.name,
+        category: it.category,
+        weight: storedCategoryWeight(it.categoryReviewed),
+      });
+    }
+    for (const g of grocery) {
+      history.push({
+        name: g.name,
+        category: g.category,
+        weight: storedCategoryWeight(g.categoryReviewed),
+      });
+    }
     for (const r of recipes) {
       for (const ing of r.ingredients) {
-        history.push({ name: ing.name, category: ing.category });
+        history.push({
+          name: ing.name,
+          category: ing.category,
+          weight: ing.categoryReviewed ? 1.5 : 0.25,
+        });
       }
     }
     for (const f of favorites) {
       for (const ing of f.ingredients) {
-        history.push({ name: ing.name, category: ing.category });
+        history.push({
+          name: ing.name,
+          category: ing.category,
+          weight: ing.categoryReviewed ? 1.5 : 0.25,
+        });
       }
     }
-    for (const it of items) history.push({ name: it.name, category: it.category });
-    for (const g of grocery) history.push({ name: g.name, category: g.category });
+    history.sort(
+      (a, b) =>
+        b.weight - a.weight ||
+        a.name.localeCompare(b.name, "en", { sensitivity: "base" }) ||
+        a.category.localeCompare(b.category, "en", {
+          sensitivity: "base",
+        })
+    );
     const validCategories = categoryDefs.map((c) => c.name);
 
-    let hasApproximate = false;
-    const ingredients: RecipeIngredient[] = scraped.ingredients
-      .map((raw) => {
-        const parsed = parseRecipeIngredient(raw);
-        if (!parsed.name) return null;
-        if (parsed.approximate) hasApproximate = true;
+    const ingredients: RecipeIngredient[] = parsedScrape.ingredients.map(
+      (parsed) => {
         const category = guessCategoryOrFallback(
           parsed.name,
           history,
@@ -148,17 +209,16 @@ export async function POST(req: NextRequest) {
           quantity: parsed.quantity,
           category,
         };
-      })
-      .filter((x): x is RecipeIngredient => x !== null);
+      }
+    );
 
     const result: ScrapeResponse = {
       ok: true,
-      name: scraped.name ?? "",
-      description: scraped.description ?? "",
+      name: parsedScrape.name,
+      description: parsedScrape.description,
       ingredients,
-      hasApproximate,
+      hasApproximate: parsedScrape.hasApproximate,
     };
-    CACHE.set(cacheId, { expiresAt: Date.now() + CACHE_TTL_MS, result });
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(

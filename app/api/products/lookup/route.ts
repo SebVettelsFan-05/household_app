@@ -5,7 +5,11 @@ import {
   listItemsRepo,
   listCategoriesRepo,
 } from "@/lib/repo";
-import { guessCategoryOrFallback } from "@/lib/guessCategory";
+import {
+  guessCategoryFromExactHistory,
+  guessCategoryOrFallback,
+  storedCategoryWeight,
+} from "@/lib/guessCategory";
 import { lookupBarcode } from "@/lib/openFoodFacts";
 
 export const dynamic = "force-dynamic";
@@ -37,18 +41,41 @@ export async function GET(req: NextRequest) {
     // add forms, so a hit on "yogurts" maps to whatever category the
     // household calls dairy (case-insensitively, with synonyms).
     const history = [
-      ...items.map((i) => ({ name: i.name, category: i.category })),
-      ...grocery.map((g) => ({ name: g.name, category: g.category })),
+      ...items.map((i) => ({
+        name: i.name,
+        category: i.category,
+        weight: storedCategoryWeight(i.categoryReviewed),
+      })),
+      ...grocery.map((g) => ({
+        name: g.name,
+        category: g.category,
+        weight: storedCategoryWeight(g.categoryReviewed),
+      })),
     ];
     const validCategories = categoryDefs.map((c) => c.name);
-    const guessed = guessCategoryOrFallback(
-      // The category hint is the strongest signal, but the product name
-      // gives the dictionary something to bite into for items OFF didn't
-      // categorize well.
-      `${product.categoryHint} ${product.name}`.trim(),
-      history,
-      validCategories
-    );
+    // First let an exact household product name win. If it is new, append
+    // Open Food Facts' taxonomy tags so the same shared phrase rules can use
+    // richer signals such as dairy/frozen without polluting exact matching.
+    const displayName = [product.brand, product.name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const guessed =
+      guessCategoryFromExactHistory(
+        displayName,
+        history,
+        validCategories
+      ) ??
+      guessCategoryFromExactHistory(
+        product.name,
+        history,
+        validCategories
+      ) ??
+      guessCategoryOrFallback(
+        `${product.categoryHint} ${displayName}`.trim(),
+        history,
+        validCategories
+      );
 
     return NextResponse.json({
       ok: true,

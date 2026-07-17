@@ -1215,7 +1215,10 @@ button:active { transform: scale(0.98); }
   display: flex; gap: 10px; align-items: flex-start;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: 10px; padding: 10px 12px;
-  cursor: pointer;
+}
+.ing-add-choice {
+  display: flex; gap: 10px; align-items: flex-start;
+  flex: 1; min-width: 0; cursor: pointer;
 }
 .ing-add-row input[type="checkbox"] {
   margin-top: 2px; width: 18px; height: 18px;
@@ -1234,6 +1237,10 @@ button:active { transform: scale(0.98); }
 .ing-add-hint {
   font-size: 12px; color: var(--warn);
   margin-top: 2px;
+}
+.ing-add-category {
+  width: 120px; flex: 0 0 120px;
+  font-size: 13px;
 }
 
 /* Favorites */

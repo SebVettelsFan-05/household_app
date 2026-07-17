@@ -83,6 +83,7 @@ export default function RecipesView({
     recipeName: string;
     ingredients: RecipeIngredient[];
     defaultAddedBy: string;
+    onCategoriesReviewed: (ingredients: RecipeIngredient[]) => void;
   } | null>(null);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -358,6 +359,7 @@ export default function RecipesView({
             onToast(msg);
           }}
           onError={(msg) => onToast("Error: " + msg)}
+          escapeDisabled={Boolean(addingToGrocery)}
           onOpenAddToGrocery={setAddingToGrocery}
         />
       ) : null}
@@ -366,8 +368,10 @@ export default function RecipesView({
         <AddRecipeToGroceryModal
           recipeName={addingToGrocery.recipeName}
           ingredients={addingToGrocery.ingredients}
+          categories={categories}
           defaultAddedBy={addingToGrocery.defaultAddedBy}
           fridgeItems={fridgeItems}
+          onCategoriesReviewed={addingToGrocery.onCategoriesReviewed}
           onClose={() => setAddingToGrocery(null)}
           onAdded={(grocery, msg) => {
             onGroceryChange(grocery);

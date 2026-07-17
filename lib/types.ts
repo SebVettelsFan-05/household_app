@@ -14,6 +14,7 @@ export type Item = {
   expiry: string;
   added: string;
   category: Category;
+  categoryReviewed: boolean;
 };
 
 export const BUYERS = ["Arthur", "Daniel", "Eli", "Ibrahim", "Minh"] as const;
@@ -24,6 +25,7 @@ export type GroceryItem = {
   name: string;
   quantity: number;
   category: Category;
+  categoryReviewed: boolean;
   store: string;
   addedBy: string;
   done: boolean;
@@ -64,6 +66,7 @@ export type RecipeIngredient = {
   name: string;
   quantity: number;
   category: Category;
+  categoryReviewed?: boolean;
 };
 
 export type Recipe = {

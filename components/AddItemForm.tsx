@@ -6,7 +6,11 @@ import ScanLabelModal, {
   type ScanResult,
 } from "@/components/ScanLabelModal";
 import { addItem } from "@/lib/client";
-import { guessCategory } from "@/lib/guessCategory";
+import {
+  guessCategoryOrFallback,
+  storedCategoryWeight,
+} from "@/lib/guessCategory";
+import { normalizeName } from "@/lib/normalize";
 import {
   FALLBACK_CATEGORY,
   type Category,
@@ -38,30 +42,57 @@ export default function AddItemForm({
   // Same idea as the grocery form — once you tap a pill, we stop overriding
   // your choice until the form submits.
   const [userPickedCat, setUserPickedCat] = useState(false);
+  const [scanSuggestion, setScanSuggestion] = useState<{
+    name: string;
+    category: Category;
+  } | null>(null);
   const [scanning, setScanning] = useState(false);
   const [dictating, setDictating] = useState(false);
 
   function applyScan(r: ScanResult) {
+    if (!userPickedCat) setScanSuggestion(null);
     if (r.name) setName(r.name);
     if (r.quantityGrams > 0) setQty(String(r.quantityGrams));
     if (r.expiry) setExp(r.expiry);
-    if (r.category && categories.some((c) => c.name === r.category)) {
+    if (
+      !userPickedCat &&
+      r.category &&
+      r.category !== FALLBACK_CATEGORY &&
+      categories.some((c) => c.name === r.category)
+    ) {
+      // Barcode lookup is an automatic suggestion, not a manual override.
+      // Keep it editable by the name-driven guesser after the scan closes.
       setCat(r.category);
-      setUserPickedCat(true);
+      setScanSuggestion({
+        name: r.name || name,
+        category: r.category,
+      });
     }
   }
 
   // If the currently selected category disappears (deleted in manage modal),
   // fall back to Other so we never submit a phantom category.
   useEffect(() => {
+    if (
+      scanSuggestion &&
+      !categories.some((c) => c.name === scanSuggestion.category)
+    ) {
+      setScanSuggestion(null);
+    }
     if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
       const hasFallback = categories.some((c) => c.name === FALLBACK_CATEGORY);
       setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
+      setUserPickedCat(false);
     }
-  }, [categories, cat]);
+  }, [categories, cat, scanSuggestion]);
 
   const guessHistory = useMemo(
-    () => items.map((i) => ({ name: i.name, category: i.category })),
+    () =>
+      items.map((i) => ({
+        name: i.name,
+        category: i.category,
+        weight: storedCategoryWeight(i.categoryReviewed),
+      })),
     [items]
   );
   const validCategoryNames = useMemo(
@@ -71,9 +102,21 @@ export default function AddItemForm({
 
   useEffect(() => {
     if (userPickedCat) return;
-    const guess = guessCategory(name, guessHistory, validCategoryNames);
-    if (guess && guess !== cat) setCat(guess);
-  }, [name, guessHistory, validCategoryNames, userPickedCat, cat]);
+    const guess =
+      scanSuggestion &&
+      validCategoryNames.includes(scanSuggestion.category) &&
+      normalizeName(scanSuggestion.name) === normalizeName(name)
+        ? scanSuggestion.category
+        : guessCategoryOrFallback(name, guessHistory, validCategoryNames);
+    if (guess !== cat) setCat(guess);
+  }, [
+    name,
+    guessHistory,
+    validCategoryNames,
+    userPickedCat,
+    scanSuggestion,
+    cat,
+  ]);
 
   async function submit() {
     const trimmed = name.trim();
@@ -86,13 +129,27 @@ export default function AddItemForm({
       onError("Quantity must be > 0");
       return;
     }
+    // Recompute automatic suggestions at commit time so a quick paste + Enter
+    // cannot race the effect that updates the visible category pills.
+    const submitCategory = userPickedCat
+      ? cat
+      : scanSuggestion &&
+          validCategoryNames.includes(scanSuggestion.category) &&
+          normalizeName(scanSuggestion.name) === normalizeName(trimmed)
+        ? scanSuggestion.category
+        : guessCategoryOrFallback(
+            trimmed,
+            guessHistory,
+            validCategoryNames
+          );
     setBusy(true);
     try {
       const res = await addItem({
         name: trimmed,
         quantity: qtyNum,
         expiry: exp || undefined,
-        category: cat,
+        category: submitCategory,
+        categoryReviewed: userPickedCat,
       });
       const msg = res.merged
         ? `Added ${res.addedQty}g to existing "${res.mergedInto}"`
@@ -102,6 +159,7 @@ export default function AddItemForm({
       setQty("");
       setExp("");
       setCat(FALLBACK_CATEGORY);
+      setScanSuggestion(null);
       setUserPickedCat(false);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -145,7 +203,10 @@ export default function AddItemForm({
           placeholder="e.g. Chicken breast"
           autoComplete="off"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setScanSuggestion(null);
+          }}
           onKeyDown={onEnter}
         />
       </div>
@@ -166,6 +227,7 @@ export default function AddItemForm({
           onChange={(c) => {
             setCat(c);
             setUserPickedCat(true);
+            setScanSuggestion(null);
           }}
         />
       </div>

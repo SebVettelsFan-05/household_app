@@ -6,6 +6,7 @@ import {
   randomUUID,
 } from "crypto";
 import { eq, inArray, lt } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { db } from "@/db/client";
 import {
   categories as categoriesTable,
@@ -56,11 +57,64 @@ function rowToItem(r: typeof itemsTable.$inferSelect): Item {
     expiry: r.expiry || "",
     added: formatDate(r.added),
     category: r.category,
+    categoryReviewed: r.categoryReviewed,
   };
 }
 
 function rowToCategory(r: typeof categoriesTable.$inferSelect): CategoryDef {
   return { name: r.name, color: r.color ?? null };
+}
+
+function requireValidCategory(input: string | undefined, validCats: string[]) {
+  const requested = String(input ?? "").trim();
+  const match = validCats.find(
+    (category) => category.toLowerCase() === requested.toLowerCase()
+  );
+  if (!match) throw new Error("Choose a valid category");
+  return match;
+}
+
+const MAX_POSTGRES_INTEGER = 2_147_483_647;
+
+function requirePositiveIntegerQuantity(
+  input: number,
+  label = "Quantity"
+): number {
+  const quantity = Number(input);
+  if (
+    !Number.isFinite(quantity) ||
+    !Number.isInteger(quantity) ||
+    quantity <= 0 ||
+    quantity > MAX_POSTGRES_INTEGER
+  ) {
+    throw new Error(
+      `${label} must be a whole number between 1 and ${MAX_POSTGRES_INTEGER}`
+    );
+  }
+  return quantity;
+}
+
+function shouldReplaceStoredCategory(
+  existingCategory: string,
+  existingReviewed: boolean,
+  incomingCategory: string,
+  incomingReviewed: boolean,
+  validCats: string[]
+): boolean {
+  if (incomingReviewed) return true;
+  const existingIsValid = validCats.some(
+    (valid) => valid.toLowerCase() === existingCategory.toLowerCase()
+  );
+  if (!existingIsValid) return true;
+
+  // Automatic suggestions may upgrade an unreviewed fallback, but never
+  // erase a useful historical category or downgrade it to Other. Explicit
+  // review remains the correction path for legacy non-fallback rows.
+  return (
+    !existingReviewed &&
+    existingCategory.toLowerCase() === FALLBACK_CATEGORY.toLowerCase() &&
+    incomingCategory.toLowerCase() !== FALLBACK_CATEGORY.toLowerCase()
+  );
 }
 
 /* ---------- Categories ---------- */
@@ -157,7 +211,10 @@ export async function deleteCategoryRepo(
     for (const it of affected) {
       await db
         .update(itemsTable)
-        .set({ category: FALLBACK_CATEGORY })
+        .set({
+          category: FALLBACK_CATEGORY,
+          categoryReviewed: false,
+        })
         .where(eq(itemsTable.id, it.id));
     }
   }
@@ -183,6 +240,7 @@ export type AddItemInput = {
   quantity: number;
   expiry?: string;
   category?: string;
+  categoryReviewed?: boolean;
 };
 
 export async function addItemRepo(
@@ -195,11 +253,12 @@ export async function addItemRepo(
 }> {
   const trimmedName = String(input.name ?? "").trim();
   if (!trimmedName) throw new Error("Name required");
-  const qty = Number(input.quantity);
-  if (!qty || qty <= 0) throw new Error("Quantity must be greater than zero");
+  const qty = requirePositiveIntegerQuantity(input.quantity);
 
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
-  const category = pickCategory(input.category, validCats);
+  const category = input.categoryReviewed
+    ? requireValidCategory(input.category, validCats)
+    : pickCategory(input.category, validCats);
   const expiry = input.expiry ? input.expiry : null;
 
   const all = await db.select().from(itemsTable);
@@ -213,11 +272,24 @@ export async function addItemRepo(
         mergedExpiry = expiry;
       }
     }
+    const replaceCategory = shouldReplaceStoredCategory(
+      existing.category,
+      existing.categoryReviewed,
+      category,
+      input.categoryReviewed === true,
+      validCats
+    );
     await db
       .update(itemsTable)
       .set({
         quantity: existing.quantity + qty,
         expiry: mergedExpiry,
+        // Reviewed labels are durable corrections. Unreviewed/legacy rows can
+        // be refreshed by the current classifier when the item is added again.
+        ...(replaceCategory ? { category } : {}),
+        ...(replaceCategory
+          ? { categoryReviewed: input.categoryReviewed === true }
+          : {}),
       })
       .where(eq(itemsTable.id, existing.id));
 
@@ -234,6 +306,7 @@ export async function addItemRepo(
     quantity: qty,
     expiry,
     category,
+    categoryReviewed: input.categoryReviewed === true,
   });
   return { items: await listItemsRepo(), merged: false };
 }
@@ -247,7 +320,9 @@ export async function updateItemRepo(input: UpdateItemInput): Promise<Item[]> {
   const qty = Number(input.quantity);
 
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
-  const category = pickCategory(input.category, validCats);
+  const category = input.categoryReviewed
+    ? requireValidCategory(input.category, validCats)
+    : pickCategory(input.category, validCats);
 
   await db
     .update(itemsTable)
@@ -256,6 +331,9 @@ export async function updateItemRepo(input: UpdateItemInput): Promise<Item[]> {
       quantity: qty || 0,
       expiry: input.expiry ? input.expiry : null,
       category,
+      ...(input.categoryReviewed !== undefined
+        ? { categoryReviewed: input.categoryReviewed === true }
+        : {}),
     })
     .where(eq(itemsTable.id, input.id));
 
@@ -276,6 +354,7 @@ function rowToGrocery(r: typeof groceryTable.$inferSelect): GroceryItem {
     name: r.name,
     quantity: r.quantity,
     category: r.category,
+    categoryReviewed: r.categoryReviewed,
     store: r.store || "",
     addedBy: r.addedBy,
     done: r.done,
@@ -292,6 +371,7 @@ export type AddGroceryInput = {
   name: string;
   quantity: number;
   category?: string;
+  categoryReviewed?: boolean;
   store?: string;
   addedBy: string;
 };
@@ -301,13 +381,14 @@ export async function addGroceryRepo(
 ): Promise<GroceryItem[]> {
   const trimmedName = String(input.name ?? "").trim();
   if (!trimmedName) throw new Error("Name required");
-  const qty = Number(input.quantity);
-  if (!qty || qty <= 0) throw new Error("Quantity must be greater than zero");
+  const qty = requirePositiveIntegerQuantity(input.quantity);
   const addedBy = String(input.addedBy ?? "").trim();
   if (!addedBy) throw new Error("Added by required");
 
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
-  const category = pickCategory(input.category, validCats);
+  const category = input.categoryReviewed
+    ? requireValidCategory(input.category, validCats)
+    : pickCategory(input.category, validCats);
   const store = input.store ? String(input.store).trim() : null;
   const canonicalName = titleCaseName(trimmedName);
 
@@ -321,6 +402,13 @@ export async function addGroceryRepo(
   );
 
   if (existing) {
+    const replaceCategory = shouldReplaceStoredCategory(
+      existing.category,
+      existing.categoryReviewed,
+      category,
+      input.categoryReviewed === true,
+      validCats
+    );
     await db
       .update(groceryTable)
       .set({
@@ -329,6 +417,10 @@ export async function addGroceryRepo(
         // Track every requester so "For Arthur" + "For Eli" becomes
         // "For Arthur, Eli" instead of silently dropping the new person.
         addedBy: mergeAddedBy(existing.addedBy, addedBy),
+        ...(replaceCategory ? { category } : {}),
+        ...(replaceCategory
+          ? { categoryReviewed: input.categoryReviewed === true }
+          : {}),
       })
       .where(eq(groceryTable.id, existing.id));
     return listGroceryRepo();
@@ -338,6 +430,7 @@ export async function addGroceryRepo(
     name: canonicalName,
     quantity: qty,
     category,
+    categoryReviewed: input.categoryReviewed === true,
     store,
     addedBy,
   });
@@ -349,6 +442,7 @@ export type UpdateGroceryInput = {
   name?: string;
   quantity?: number;
   category?: string;
+  categoryReviewed?: boolean;
   store?: string;
   addedBy?: string;
   done?: boolean;
@@ -368,12 +462,14 @@ export async function updateGroceryRepo(
     patch.name = titleCaseName(trimmed);
   }
   if (input.quantity !== undefined) {
-    const qty = Number(input.quantity);
-    if (!qty || qty <= 0) throw new Error("Quantity must be greater than zero");
+    const qty = requirePositiveIntegerQuantity(input.quantity);
     patch.quantity = qty;
   }
   if (input.category !== undefined) {
     patch.category = pickCategory(input.category, validCats);
+    if (input.categoryReviewed !== undefined) {
+      patch.categoryReviewed = input.categoryReviewed === true;
+    }
   }
   if (input.store !== undefined) {
     const s = String(input.store).trim();
@@ -409,8 +505,9 @@ export async function clearGroceryRepo(): Promise<GroceryItem[]> {
  * plus a count, so the UI can pop a "moved N items" toast and refresh.
  *
  * Merge behavior matches the regular add-to-inventory path: if a matching
- * item already exists, quantities add. Category is preserved; expiry is
- * left empty (the user can fill it in after).
+ * item already exists, quantities add. Reviewed inventory categories are
+ * preserved; otherwise the grocery row carries its current category across.
+ * Expiry is left empty (the user can fill it in after).
  */
 export async function moveDoneGroceryToItemsRepo(): Promise<{
   items: Item[];
@@ -418,7 +515,12 @@ export async function moveDoneGroceryToItemsRepo(): Promise<{
   moved: number;
 }> {
   const allGrocery = await db.select().from(groceryTable);
-  const done = allGrocery.filter((g) => g.done);
+  const done = allGrocery
+    .filter((g) => g.done)
+    .sort(
+      (a, b) =>
+        a.added.getTime() - b.added.getTime() || a.id.localeCompare(b.id)
+    );
   if (done.length === 0) {
     return {
       items: await listItemsRepo(),
@@ -439,15 +541,33 @@ export async function moveDoneGroceryToItemsRepo(): Promise<{
     const name = String(g.name ?? "").trim();
     if (!name) continue;
     const category = pickCategory(g.category, validCats);
+    const groceryCategoryValid = validCats.some(
+      (valid) => valid.toLowerCase() === g.category.toLowerCase()
+    );
+    const categoryReviewed = g.categoryReviewed && groceryCategoryValid;
     const norm = normalizeName(name);
     const existing = byNorm.get(norm);
     if (existing) {
       const nextQty = existing.quantity + (g.quantity || 0);
+      const replaceCategory = shouldReplaceStoredCategory(
+        existing.category,
+        existing.categoryReviewed,
+        category,
+        categoryReviewed,
+        validCats
+      );
       await db
         .update(itemsTable)
-        .set({ quantity: nextQty })
+        .set({
+          quantity: nextQty,
+          ...(replaceCategory ? { category, categoryReviewed } : {}),
+        })
         .where(eq(itemsTable.id, existing.id));
       existing.quantity = nextQty;
+      if (replaceCategory) {
+        existing.category = category;
+        existing.categoryReviewed = categoryReviewed;
+      }
     } else {
       const [inserted] = await db
         .insert(itemsTable)
@@ -456,6 +576,7 @@ export async function moveDoneGroceryToItemsRepo(): Promise<{
           quantity: g.quantity || 0,
           // Inventory items don't currently carry store/addedBy.
           category,
+          categoryReviewed,
         })
         .returning();
       if (inserted) byNorm.set(norm, inserted);
@@ -485,6 +606,7 @@ export async function bulkAddGroceryRepo(
     name: string;
     quantity: number;
     category?: string;
+    categoryReviewed?: boolean;
     store?: string;
     addedBy: string;
   }>
@@ -492,65 +614,156 @@ export async function bulkAddGroceryRepo(
   if (inputs.length === 0) return listGroceryRepo();
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
 
+  // Validate and canonicalize the whole request before the first write. A
+  // recipe can contain count-based rows with quantity 0; previously an early
+  // merge could commit before a later invalid row threw, so retrying doubled
+  // the first item.
+  const preparedRows = inputs.map((input) => {
+    const rawName = String(input.name ?? "").trim();
+    const quantity = requirePositiveIntegerQuantity(
+      input.quantity,
+      `Quantity for "${rawName || "ingredient"}"`
+    );
+    const addedBy = String(input.addedBy ?? "").trim();
+    if (!rawName) throw new Error("Each ingredient needs a name");
+    if (!addedBy) throw new Error("Added by required");
+    const categoryReviewed = input.categoryReviewed === true;
+    const category = categoryReviewed
+      ? requireValidCategory(input.category, validCats)
+      : pickCategory(input.category, validCats);
+    const name = titleCaseName(rawName);
+    return {
+      name,
+      norm: normalizeName(name),
+      quantity,
+      category,
+      categoryReviewed,
+      store: input.store ? String(input.store).trim() || null : null,
+      addedBy,
+    };
+  });
+
+  // Coalesce repeated ingredient names before touching the database. Besides
+  // issuing fewer writes, this lets us validate the final summed quantity up
+  // front and keeps duplicate category review semantics deterministic.
+  const preparedByNorm = new Map<
+    string,
+    (typeof preparedRows)[number]
+  >();
+  for (const row of preparedRows) {
+    const existing = preparedByNorm.get(row.norm);
+    if (!existing) {
+      preparedByNorm.set(row.norm, { ...row });
+      continue;
+    }
+    existing.quantity = requirePositiveIntegerQuantity(
+      existing.quantity + row.quantity,
+      `Combined quantity for "${row.name}"`
+    );
+    existing.name = row.name;
+    existing.addedBy = mergeAddedBy(existing.addedBy, row.addedBy);
+    if (row.categoryReviewed || !existing.categoryReviewed) {
+      existing.category = row.category;
+      existing.categoryReviewed = row.categoryReviewed;
+    }
+  }
+  const prepared = [...preparedByNorm.values()];
+
   // Snapshot the current rows once so we can match against existing open
   // entries by normalized name (same merge rule as addGroceryRepo).
   const existingRows = await db.select().from(groceryTable);
-  const openByNorm = new Map<string, typeof groceryTable.$inferSelect>();
+  type MergeTarget = {
+    id: string;
+    name: string;
+    quantity: number;
+    category: string;
+    categoryReviewed: boolean;
+    addedBy: string;
+  };
+  const openByNorm = new Map<string, MergeTarget>();
   for (const r of existingRows) {
-    if (!r.done) openByNorm.set(normalizeName(r.name), r);
+    if (!r.done) {
+      openByNorm.set(normalizeName(r.name), {
+        id: r.id,
+        name: r.name,
+        quantity: r.quantity,
+        category: r.category,
+        categoryReviewed: r.categoryReviewed,
+        addedBy: r.addedBy,
+      });
+    }
+  }
+
+
+  // Validate every existing-row sum before the first update, so a late
+  // integer overflow cannot partially commit earlier recipe ingredients.
+  for (const input of prepared) {
+    const existing = openByNorm.get(input.norm);
+    if (existing) {
+      requirePositiveIntegerQuantity(
+        existing.quantity + input.quantity,
+        `Combined quantity for "${input.name}"`
+      );
+    }
   }
 
   const toInsert: Array<typeof groceryTable.$inferInsert> = [];
-  for (const input of inputs) {
-    const rawName = String(input.name ?? "").trim();
-    const qty = Number(input.quantity);
-    const addedBy = String(input.addedBy ?? "").trim();
-    if (!rawName) throw new Error("Each ingredient needs a name");
-    if (!qty || qty <= 0)
-      throw new Error(`Quantity for "${rawName}" must be > 0`);
-    if (!addedBy) throw new Error("Added by required");
-
-    const canonicalName = titleCaseName(rawName);
-    const norm = normalizeName(canonicalName);
-    const existing = openByNorm.get(norm);
+  const writes: BatchItem<"pg">[] = [];
+  for (const input of prepared) {
+    const existing = openByNorm.get(input.norm);
 
     if (existing) {
-      const nextQty = existing.quantity + qty;
-      const nextAddedBy = mergeAddedBy(existing.addedBy, addedBy);
-      await db
-        .update(groceryTable)
-        .set({
-          quantity: nextQty,
-          name: canonicalName,
-          addedBy: nextAddedBy,
-        })
-        .where(eq(groceryTable.id, existing.id));
-      existing.quantity = nextQty;
-      existing.name = canonicalName;
-      existing.addedBy = nextAddedBy;
+      const nextQty = existing.quantity + input.quantity;
+      const nextAddedBy = mergeAddedBy(existing.addedBy, input.addedBy);
+      const replaceCategory = shouldReplaceStoredCategory(
+        existing.category,
+        existing.categoryReviewed,
+        input.category,
+        input.categoryReviewed,
+        validCats
+      );
+      const nextCategory = replaceCategory
+        ? input.category
+        : existing.category;
+      const nextCategoryReviewed = replaceCategory
+        ? input.categoryReviewed
+        : existing.categoryReviewed;
+      writes.push(
+        db
+          .update(groceryTable)
+          .set({
+            quantity: nextQty,
+            name: input.name,
+            addedBy: nextAddedBy,
+            ...(replaceCategory
+              ? {
+                  category: nextCategory,
+                  categoryReviewed: nextCategoryReviewed,
+                }
+              : {}),
+          })
+          .where(eq(groceryTable.id, existing.id))
+      );
     } else {
       const row = {
-        name: canonicalName,
-        quantity: qty,
-        category: pickCategory(input.category, validCats),
-        store: input.store ? String(input.store).trim() || null : null,
-        addedBy,
+        name: input.name,
+        quantity: input.quantity,
+        category: input.category,
+        categoryReviewed: input.categoryReviewed,
+        store: input.store,
+        addedBy: input.addedBy,
       };
       toInsert.push(row);
-      // Mark as "open" so a later ingredient with the same name merges
-      // against this fresh row instead of inserting a duplicate.
-      openByNorm.set(norm, {
-        ...row,
-        id: "",
-        done: false,
-        added: new Date(),
-        store: row.store ?? null,
-      } as typeof groceryTable.$inferSelect);
     }
   }
 
   if (toInsert.length > 0) {
-    await db.insert(groceryTable).values(toInsert);
+    writes.push(db.insert(groceryTable).values(toInsert));
+  }
+  if (writes.length > 0) {
+    await db.batch(
+      writes as [BatchItem<"pg">, ...BatchItem<"pg">[]]
+    );
   }
   return listGroceryRepo();
 }
@@ -577,6 +790,7 @@ function sanitizeIngredients(
         typeof o.category === "string" ? o.category : undefined,
         validCats
       ),
+      categoryReviewed: o.categoryReviewed === true,
     });
   }
   return out;

@@ -10,6 +10,7 @@ type BulkBody = {
     name?: string;
     quantity?: number | string;
     category?: string;
+    categoryReviewed?: boolean;
     store?: string;
     addedBy?: string;
   }>;
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest) {
       name: i.name ?? "",
       quantity: Number(i.quantity),
       category: i.category,
+      categoryReviewed: i.categoryReviewed === true,
       store: i.store,
       addedBy: i.addedBy ?? "",
     }));

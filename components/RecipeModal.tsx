@@ -46,12 +46,14 @@ type Props = {
   onClose: () => void;
   onResult: (recipes: Recipe[], toast: string) => void;
   onError: (msg: string) => void;
+  escapeDisabled?: boolean;
   // Hands the in-memory ingredient state to the picker so it works for both
   // saved and draft recipes.
   onOpenAddToGrocery: (data: {
     recipeName: string;
     ingredients: RecipeIngredient[];
     defaultAddedBy: string;
+    onCategoriesReviewed: (ingredients: RecipeIngredient[]) => void;
   }) => void;
 };
 
@@ -67,6 +69,7 @@ export default function RecipeModal({
   onClose,
   onResult,
   onError,
+  escapeDisabled = false,
   onOpenAddToGrocery,
 }: Props) {
   const editing = mode === "edit";
@@ -129,12 +132,13 @@ export default function RecipeModal({
   }
 
   useEffect(() => {
+    if (escapeDisabled) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [escapeDisabled, onClose]);
 
   async function save() {
     const trimmed = name.trim();
@@ -245,6 +249,7 @@ export default function RecipeModal({
       recipeName: name.trim() || initial.name || "Recipe",
       ingredients,
       defaultAddedBy: assignedTo,
+      onCategoriesReviewed: setIngredients,
     });
   }
 

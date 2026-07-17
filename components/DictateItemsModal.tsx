@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { addGrocery, addItem } from "@/lib/client";
 import { parseDictation, type DictationItem } from "@/lib/dictationParse";
-import { guessCategoryOrFallback } from "@/lib/guessCategory";
+import {
+  guessCategoryOrFallback,
+  storedCategoryWeight,
+} from "@/lib/guessCategory";
 import {
   BUYERS,
   FALLBACK_CATEGORY,
@@ -15,6 +18,7 @@ import {
 type DraftRow = DictationItem & {
   id: string;
   category: string;
+  categoryReviewed: boolean;
 };
 
 type InventoryProps = {
@@ -78,13 +82,22 @@ export default function DictateItemsModal(props: Props) {
 
   const history = useMemo(() => {
     if (props.mode === "inventory") {
-      return props.items.map((i) => ({ name: i.name, category: i.category }));
+      return props.items.map((i) => ({
+        name: i.name,
+        category: i.category,
+        weight: storedCategoryWeight(i.categoryReviewed),
+      }));
     }
     return [
-      ...props.grocery.map((g) => ({ name: g.name, category: g.category })),
+      ...props.grocery.map((g) => ({
+        name: g.name,
+        category: g.category,
+        weight: storedCategoryWeight(g.categoryReviewed),
+      })),
       ...props.fridgeItems.map((i) => ({
         name: i.name,
         category: i.category,
+        weight: storedCategoryWeight(i.categoryReviewed),
       })),
     ];
   }, [props]);
@@ -105,13 +118,29 @@ export default function DictateItemsModal(props: Props) {
         history,
         validCategoryNames
       ),
+      categoryReviewed: false,
     }));
     setRows(drafts);
   }
 
   function updateRow(id: string, patch: Partial<DraftRow>) {
     setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, ...patch } : r))
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        const next = { ...r, ...patch };
+        if (
+          patch.name !== undefined &&
+          patch.category === undefined &&
+          !r.categoryReviewed
+        ) {
+          next.category = guessCategoryOrFallback(
+            patch.name,
+            history,
+            validCategoryNames
+          );
+        }
+        return next;
+      })
     );
   }
 
@@ -147,6 +176,7 @@ export default function DictateItemsModal(props: Props) {
                 row.category && validCategoryNames.includes(row.category)
                   ? row.category
                   : FALLBACK_CATEGORY,
+              categoryReviewed: row.categoryReviewed,
             });
             lastItems = res.items;
             added++;
@@ -172,6 +202,7 @@ export default function DictateItemsModal(props: Props) {
                 row.category && validCategoryNames.includes(row.category)
                   ? row.category
                   : FALLBACK_CATEGORY,
+              categoryReviewed: row.categoryReviewed,
               addedBy,
             });
             lastGrocery = res.grocery;
@@ -385,7 +416,12 @@ function DraftRowEditor({
         <select
           className="dictate-input-cat"
           value={row.category}
-          onChange={(e) => onChange({ category: e.target.value })}
+          onChange={(e) =>
+            onChange({
+              category: e.target.value,
+              categoryReviewed: true,
+            })
+          }
         >
           {categories.map((c) => (
             <option key={c.name} value={c.name}>

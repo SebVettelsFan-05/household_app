@@ -7,7 +7,10 @@ import ScanLabelModal, {
 } from "@/components/ScanLabelModal";
 import { addGrocery } from "@/lib/client";
 import { fmtQty } from "@/lib/format";
-import { guessCategory } from "@/lib/guessCategory";
+import {
+  guessCategoryOrFallback,
+  storedCategoryWeight,
+} from "@/lib/guessCategory";
 import { normalizeName } from "@/lib/normalize";
 import {
   BUYERS,
@@ -45,33 +48,64 @@ export default function AddGroceryForm({
   // Once the user taps a category pill, we stop overriding their choice as
   // they keep typing. Reset on submit so the next entry auto-suggests again.
   const [userPickedCat, setUserPickedCat] = useState(false);
+  const [scanSuggestion, setScanSuggestion] = useState<{
+    name: string;
+    category: Category;
+  } | null>(null);
   const [scanning, setScanning] = useState(false);
   const [dictating, setDictating] = useState(false);
 
   function applyScan(r: ScanResult) {
+    if (!userPickedCat) setScanSuggestion(null);
     if (r.name) setName(r.name);
     if (r.quantityGrams > 0) setQty(String(r.quantityGrams));
-    if (r.category && categories.some((c) => c.name === r.category)) {
+    if (
+      !userPickedCat &&
+      r.category &&
+      r.category !== FALLBACK_CATEGORY &&
+      categories.some((c) => c.name === r.category)
+    ) {
+      // A scan is still an automatic suggestion. Show its richer product-
+      // lookup category now, but leave the form free to recategorize if the
+      // user changes the scanned name afterward.
       setCat(r.category);
-      setUserPickedCat(true);
+      setScanSuggestion({
+        name: r.name || name,
+        category: r.category,
+      });
     }
     // Grocery items don't carry expiry, so r.expiry is ignored here.
   }
 
   useEffect(() => {
+    if (
+      scanSuggestion &&
+      !categories.some((c) => c.name === scanSuggestion.category)
+    ) {
+      setScanSuggestion(null);
+    }
     if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
       const hasFallback = categories.some((c) => c.name === FALLBACK_CATEGORY);
       setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
+      setUserPickedCat(false);
     }
-  }, [categories, cat]);
+  }, [categories, cat, scanSuggestion]);
 
-  // History fed to the category guesser. Putting grocery before fridge means
-  // recent grocery tagging carries more weight than older fridge items, which
-  // matches "what did I just type for this kind of thing".
+  // Both lists teach exact household labels and cautious similarity matches.
+  // The classifier aggregates evidence, so DB/array order cannot change the
+  // result.
   const guessHistory = useMemo(
     () => [
-      ...grocery.map((g) => ({ name: g.name, category: g.category })),
-      ...fridgeItems.map((i) => ({ name: i.name, category: i.category })),
+      ...grocery.map((g) => ({
+        name: g.name,
+        category: g.category,
+        weight: storedCategoryWeight(g.categoryReviewed),
+      })),
+      ...fridgeItems.map((i) => ({
+        name: i.name,
+        category: i.category,
+        weight: storedCategoryWeight(i.categoryReviewed),
+      })),
     ],
     [grocery, fridgeItems]
   );
@@ -84,9 +118,21 @@ export default function AddGroceryForm({
   // control of the picker). Cheap — synchronous, runs on each keystroke.
   useEffect(() => {
     if (userPickedCat) return;
-    const guess = guessCategory(name, guessHistory, validCategoryNames);
-    if (guess && guess !== cat) setCat(guess);
-  }, [name, guessHistory, validCategoryNames, userPickedCat, cat]);
+    const guess =
+      scanSuggestion &&
+      validCategoryNames.includes(scanSuggestion.category) &&
+      normalizeName(scanSuggestion.name) === normalizeName(name)
+        ? scanSuggestion.category
+        : guessCategoryOrFallback(name, guessHistory, validCategoryNames);
+    if (guess !== cat) setCat(guess);
+  }, [
+    name,
+    guessHistory,
+    validCategoryNames,
+    userPickedCat,
+    scanSuggestion,
+    cat,
+  ]);
 
   // Soft warning: if the typed name matches something already in the fridge.
   const fridgeMatch = useMemo(() => {
@@ -111,12 +157,27 @@ export default function AddGroceryForm({
       onError("Pick who's adding this");
       return;
     }
+    // Derive the automatic value again at commit time. React effects run
+    // after rendering, so this avoids submitting the previous item's category
+    // when somebody pastes a name and immediately presses Enter.
+    const submitCategory = userPickedCat
+      ? cat
+      : scanSuggestion &&
+          validCategoryNames.includes(scanSuggestion.category) &&
+          normalizeName(scanSuggestion.name) === normalizeName(trimmed)
+        ? scanSuggestion.category
+        : guessCategoryOrFallback(
+            trimmed,
+            guessHistory,
+            validCategoryNames
+          );
     setBusy(true);
     try {
       const res = await addGrocery({
         name: trimmed,
         quantity: qtyNum,
-        category: cat,
+        category: submitCategory,
+        categoryReviewed: userPickedCat,
         store: store.trim() || undefined,
         addedBy,
       });
@@ -124,9 +185,10 @@ export default function AddGroceryForm({
       setName("");
       setQty("");
       setStore("");
+      setCat(FALLBACK_CATEGORY);
+      setScanSuggestion(null);
       // Reset auto-suggest control so the next entry's name drives the
-      // category again. Keep addedBy + cat for fast repeated entries — the
-      // suggester will overwrite cat as soon as the user starts typing.
+      // category again. Keep only addedBy for fast repeated entries.
       setUserPickedCat(false);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -172,7 +234,10 @@ export default function AddGroceryForm({
           placeholder="e.g. Almond milk"
           autoComplete="off"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setScanSuggestion(null);
+          }}
           onKeyDown={onEnter}
         />
         {fridgeMatch && matchQty ? (
@@ -203,6 +268,7 @@ export default function AddGroceryForm({
           onChange={(c) => {
             setCat(c);
             setUserPickedCat(true);
+            setScanSuggestion(null);
           }}
         />
       </div>

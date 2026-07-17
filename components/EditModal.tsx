@@ -31,6 +31,9 @@ export default function EditModal({
   const [qty, setQty] = useState(String(item.quantity));
   const [exp, setExp] = useState(item.expiry || "");
   const [cat, setCat] = useState<Category>(item.category || FALLBACK_CATEGORY);
+  const [categoryReviewed, setCategoryReviewed] = useState(
+    item.categoryReviewed
+  );
   const [useAmt, setUseAmt] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -46,6 +49,7 @@ export default function EditModal({
     if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
       const hasFallback = categories.some((c) => c.name === FALLBACK_CATEGORY);
       setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
+      setCategoryReviewed(false);
     }
   }, [categories, cat]);
 
@@ -64,6 +68,7 @@ export default function EditModal({
         quantity: qtyNum,
         expiry: exp || undefined,
         category: cat,
+        categoryReviewed,
       });
       onResult(res.items, "Saved");
       onClose();
@@ -117,6 +122,7 @@ export default function EditModal({
         quantity: remaining,
         expiry: item.expiry || undefined,
         category: item.category,
+        categoryReviewed: item.categoryReviewed,
       });
       onResult(res.items, `Used ${used}g`);
       onClose();
@@ -156,7 +162,14 @@ export default function EditModal({
               Manage
             </button>
           </div>
-          <CategoryPills categories={categories} value={cat} onChange={setCat} />
+          <CategoryPills
+            categories={categories}
+            value={cat}
+            onChange={(category) => {
+              setCat(category);
+              setCategoryReviewed(true);
+            }}
+          />
         </div>
         <div className="field-row">
           <div className="field">

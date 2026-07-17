@@ -31,6 +31,9 @@ export default function EditGroceryModal({
   const [name, setName] = useState(item.name);
   const [qty, setQty] = useState(String(item.quantity));
   const [cat, setCat] = useState<Category>(item.category || FALLBACK_CATEGORY);
+  const [categoryReviewed, setCategoryReviewed] = useState(
+    item.categoryReviewed
+  );
   const [store, setStore] = useState(item.store || "");
   const [addedBy, setAddedBy] = useState(item.addedBy);
   const [busy, setBusy] = useState(false);
@@ -47,6 +50,7 @@ export default function EditGroceryModal({
     if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
       const hasFallback = categories.some((c) => c.name === FALLBACK_CATEGORY);
       setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
+      setCategoryReviewed(false);
     }
   }, [categories, cat]);
 
@@ -68,6 +72,7 @@ export default function EditGroceryModal({
         name: trimmed,
         quantity: qtyNum,
         category: cat,
+        categoryReviewed,
         store,
         addedBy,
       });
@@ -126,7 +131,10 @@ export default function EditGroceryModal({
           <CategoryPills
             categories={categories}
             value={cat}
-            onChange={setCat}
+            onChange={(category) => {
+              setCat(category);
+              setCategoryReviewed(true);
+            }}
           />
         </div>
         <div className="field-row">

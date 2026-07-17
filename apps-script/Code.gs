@@ -12,7 +12,7 @@
  */
 
 const SHEET_NAME = 'Inventory';
-const HEADERS = ['ID', 'Name', 'Quantity (g)', 'Expiry Date', 'Added', 'Category'];
+const HEADERS = ['ID', 'Name', 'Quantity (g)', 'Expiry Date', 'Added', 'Category', 'Category reviewed'];
 
 const CATEGORIES_SHEET = 'Categories';
 const CAT_HEADERS = ['Name', 'Color'];
@@ -20,7 +20,7 @@ const DEFAULT_CATEGORIES = ['Meat', 'Veggies', 'Other'];
 const FALLBACK_CATEGORY = 'Other';
 
 const GROCERY_SHEET = 'Grocery List';
-const GROCERY_HEADERS = ['ID', 'Name', 'Quantity (g)', 'Category', 'Store', 'Added by', 'Done', 'Added'];
+const GROCERY_HEADERS = ['ID', 'Name', 'Quantity (g)', 'Category', 'Category reviewed', 'Store', 'Added by', 'Done', 'Added'];
 
 const RECIPES_SHEET = 'Recipes';
 const RECIPES_HEADERS = ['ID', 'Week start', 'Day', 'Day name', 'Assigned to', 'Name', 'Link', 'Description', 'Ingredients'];
@@ -89,6 +89,7 @@ function mirrorAll_(items, categories, grocery, recipes, favorites, expenses, ex
         it.expiry ? new Date(it.expiry + 'T00:00:00') : '',
         it.added ? new Date(it.added + 'T00:00:00') : '',
         it.category || FALLBACK_CATEGORY,
+        it.categoryReviewed ? 'Yes' : '',
       ];
     });
     sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
@@ -124,6 +125,7 @@ function mirrorAll_(items, categories, grocery, recipes, favorites, expenses, ex
           g.name || '',
           Number(g.quantity) || 0,
           g.category || FALLBACK_CATEGORY,
+          g.categoryReviewed ? 'Yes' : '',
           g.store || '',
           g.addedBy || '',
           g.done ? 'Yes' : '',
@@ -464,6 +466,7 @@ function getItems_() {
         expiry: row[3] ? formatDate_(row[3]) : '',
         added: row[4] ? formatDate_(row[4]) : '',
         category: String(row[5] || FALLBACK_CATEGORY).trim() || FALLBACK_CATEGORY,
+        categoryReviewed: String(row[6] || '').toLowerCase() === 'yes',
       };
     })
     .filter(function (item) { return item.id; });

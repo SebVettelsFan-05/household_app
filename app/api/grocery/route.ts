@@ -28,6 +28,7 @@ type AddBody = {
   name?: string;
   quantity?: number | string;
   category?: string;
+  categoryReviewed?: boolean;
   store?: string;
   addedBy?: string;
 };
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
       name: body.name ?? "",
       quantity: Number(body.quantity),
       category: body.category,
+      categoryReviewed: body.categoryReviewed === true,
       store: body.store,
       addedBy: body.addedBy ?? "",
     });
@@ -61,6 +63,7 @@ export async function PATCH(req: NextRequest) {
       name: body.name,
       quantity: body.quantity !== undefined ? Number(body.quantity) : undefined,
       category: body.category,
+      categoryReviewed: body.categoryReviewed,
       store: body.store,
       addedBy: body.addedBy,
       done: body.done,

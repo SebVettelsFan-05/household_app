@@ -27,6 +27,7 @@ export default function IngredientList({
   const [draftName, setDraftName] = useState("");
   const [draftQty, setDraftQty] = useState("");
   const [draftCat, setDraftCat] = useState<string>(FALLBACK_CATEGORY);
+  const [draftCategoryReviewed, setDraftCategoryReviewed] = useState(false);
 
   const fridgeIndex = useMemo(() => {
     const map = new Map<string, Item>();
@@ -48,10 +49,16 @@ export default function IngredientList({
     if (!name || !qty || qty <= 0) return;
     onChange([
       ...value,
-      { name, quantity: qty, category: draftCat || FALLBACK_CATEGORY },
+      {
+        name,
+        quantity: qty,
+        category: draftCat || FALLBACK_CATEGORY,
+        categoryReviewed: draftCategoryReviewed,
+      },
     ]);
     setDraftName("");
     setDraftQty("");
+    setDraftCategoryReviewed(false);
   }
 
   function remove(idx: number) {
@@ -104,7 +111,10 @@ export default function IngredientList({
                   className="ingredient-cat"
                   value={ing.category}
                   onChange={(e) =>
-                    updateIngredient(i, { category: e.target.value })
+                    updateIngredient(i, {
+                      category: e.target.value,
+                      categoryReviewed: true,
+                    })
                   }
                 >
                   {categories.map((c) => (
@@ -170,7 +180,10 @@ export default function IngredientList({
           <select
             className="ingredient-cat"
             value={draftCat}
-            onChange={(e) => setDraftCat(e.target.value)}
+            onChange={(e) => {
+              setDraftCat(e.target.value);
+              setDraftCategoryReviewed(true);
+            }}
           >
             {categories.map((c) => (
               <option key={c.name} value={c.name}>

@@ -71,6 +71,7 @@ export type AddInput = {
   quantity: number;
   expiry?: string;
   category?: string;
+  categoryReviewed?: boolean;
 };
 
 export async function addItem(input: AddInput) {
@@ -144,6 +145,7 @@ export type AddGroceryInput = {
   name: string;
   quantity: number;
   category?: string;
+  categoryReviewed?: boolean;
   store?: string;
   addedBy: string;
 };
@@ -162,6 +164,7 @@ export type UpdateGroceryInput = {
   name?: string;
   quantity?: number;
   category?: string;
+  categoryReviewed?: boolean;
   store?: string;
   addedBy?: string;
   done?: boolean;
@@ -219,6 +222,7 @@ export type BulkGroceryInput = {
     name: string;
     quantity: number;
     category?: string;
+    categoryReviewed?: boolean;
     store?: string;
     addedBy: string;
   }>;

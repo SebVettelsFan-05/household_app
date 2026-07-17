@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { lookupProductByBarcode, type ProductScan } from "@/lib/client";
 import { getBarcodeReader } from "@/lib/scanBarcode";
 import { recognizeLabel } from "@/lib/scanExpiry";
+import { normalizeName } from "@/lib/normalize";
 
 export type ScanResult = {
   name: string;
@@ -432,7 +433,13 @@ function ReviewPanel({
         onClick={() =>
           onConfirm({
             name: name.trim(),
-            category,
+            // The lookup category belongs to the original product name. If
+            // the user corrected OCR/name text here, let the destination form
+            // classify that edited name instead of attaching stale evidence.
+            category:
+              normalizeName(name) === normalizeName(initialName)
+                ? category
+                : "",
             quantityGrams: Math.max(0, Math.round(Number(quantity) || 0)),
             expiry: withExpiry ? expiry : "",
           })

@@ -51,6 +51,7 @@ async function runSeed() {
           expiry: string;
           added: string;
           category: string;
+          categoryReviewed?: boolean;
         }[];
       }
     | { ok: false; error: string };
@@ -82,6 +83,7 @@ async function runSeed() {
       expiry: it.expiry || null,
       added: it.added ? new Date(it.added + "T00:00:00") : new Date(),
       category: it.category || "Other",
+      categoryReviewed: it.categoryReviewed === true,
     }));
     await db.insert(itemsTable).values(rows);
   }

@@ -23,8 +23,13 @@ export function ensureTables(): Promise<void> {
         quantity INTEGER NOT NULL,
         expiry DATE,
         added TIMESTAMP NOT NULL DEFAULT NOW(),
-        category TEXT NOT NULL DEFAULT 'Other'
+        category TEXT NOT NULL DEFAULT 'Other',
+        category_reviewed BOOLEAN NOT NULL DEFAULT FALSE
       )
+    `);
+    await db.execute(sql`
+      ALTER TABLE items
+      ADD COLUMN IF NOT EXISTS category_reviewed BOOLEAN NOT NULL DEFAULT FALSE
     `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS categories (
@@ -40,11 +45,16 @@ export function ensureTables(): Promise<void> {
         name TEXT NOT NULL,
         quantity INTEGER NOT NULL,
         category TEXT NOT NULL DEFAULT 'Other',
+        category_reviewed BOOLEAN NOT NULL DEFAULT FALSE,
         store TEXT,
         added_by TEXT NOT NULL,
         done BOOLEAN NOT NULL DEFAULT FALSE,
         added TIMESTAMP NOT NULL DEFAULT NOW()
       )
+    `);
+    await db.execute(sql`
+      ALTER TABLE grocery_items
+      ADD COLUMN IF NOT EXISTS category_reviewed BOOLEAN NOT NULL DEFAULT FALSE
     `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS recipes (

@@ -29,6 +29,7 @@ type ItemBody = {
   quantity?: number | string;
   expiry?: string;
   category?: string;
+  categoryReviewed?: boolean;
 };
 
 export async function POST(req: NextRequest) {
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
       quantity: Number(body.quantity),
       expiry: body.expiry,
       category: body.category,
+      categoryReviewed: body.categoryReviewed === true,
     });
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, ...res });
@@ -58,6 +60,7 @@ export async function PATCH(req: NextRequest) {
       quantity: Number(body.quantity),
       expiry: body.expiry,
       category: body.category,
+      categoryReviewed: body.categoryReviewed,
     });
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, items });
