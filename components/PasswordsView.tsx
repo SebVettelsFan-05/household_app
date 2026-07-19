@@ -588,7 +588,6 @@ function SharedAccountModal({
                         id={`password-image-${field.id}`}
                         type="file"
                         accept="image/*"
-                        capture="environment"
                         onChange={(e) => {
                           const file = e.target.files?.[0] ?? null;
                           void chooseImage(field.id, file);

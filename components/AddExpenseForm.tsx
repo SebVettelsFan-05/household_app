@@ -222,7 +222,6 @@ export function ReceiptPicker({
         id={inputId}
         type="file"
         accept={ACCEPT}
-        capture="environment"
         onChange={(e) => {
           const f = e.target.files?.[0] ?? null;
           onChange(f);
