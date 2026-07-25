@@ -281,6 +281,8 @@ export type ScrapeRecipeResponse = {
   description: string;
   ingredients: RecipeIngredient[];
   hasApproximate: boolean;
+  // Which extraction strategy found the recipe ("json-ld", "microdata", …).
+  source?: string;
 };
 
 export async function scrapeRecipeFromUrl(
@@ -298,6 +300,37 @@ export async function scrapeRecipeFromUrl(
   if (!body || !body.ok) {
     throw new Error(
       (body && !body.ok && body.error) || `Failed to fetch recipe (HTTP ${res.status})`
+    );
+  }
+  return body;
+}
+
+export type ParseIngredientsResponse = {
+  ingredients: RecipeIngredient[];
+  skipped: number;
+  hasApproximate: boolean;
+};
+
+/**
+ * Server-side parse + categorize for a pasted ingredient list — the manual
+ * fallback when a site blocks the URL scraper.
+ */
+export async function parseIngredientsFromText(
+  text: string
+): Promise<ParseIngredientsResponse> {
+  const res = await fetch("/api/recipes/parse-ingredients", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  const body = (await res.json().catch(() => null)) as
+    | (ParseIngredientsResponse & { ok: true })
+    | { ok: false; error: string }
+    | null;
+  if (!body || !body.ok) {
+    throw new Error(
+      (body && !body.ok && body.error) ||
+        `Failed to parse ingredients (HTTP ${res.status})`
     );
   }
   return body;

@@ -1,26 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
-import {
-  listCategoriesRepo,
-  listFavoritesRepo,
-  listGroceryRepo,
-  listItemsRepo,
-  listRecipesRepo,
-} from "@/lib/repo";
-import {
-  guessCategoryOrFallback,
-  storedCategoryWeight,
-} from "@/lib/guessCategory";
+import { loadCategoryContext } from "@/lib/categoryHistory";
+import { guessCategoryOrFallback } from "@/lib/guessCategory";
 import {
   parseRecipeIngredient,
   type ParsedIngredient,
 } from "@/lib/parseIngredient";
-import { RecipeScrapeError, scrapeRecipe } from "@/lib/recipeScraper";
+import {
+  RecipeScrapeError,
+  scrapeRecipe,
+  type RecipeSource,
+} from "@/lib/recipeScraper";
 import type { RecipeIngredient } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-// Outgoing fetch + HTML parse can take a few seconds — give it room.
-export const maxDuration = 15;
+// The layered fetch (direct → bot UA → Wayback) can legitimately take tens
+// of seconds on a hard-blocked site — give it room to finish.
+export const maxDuration = 60;
+
+// How long scrapeRecipe may spend across all its fetch layers. Kept under
+// maxDuration so parsing/categorization still fits.
+const SCRAPE_BUDGET_MS = 40_000;
 
 // Tiny in-process cache so repeated tries (or a household member opening the
 // same link twice in a few minutes) don't re-hit the recipe site. The cache
@@ -35,6 +35,7 @@ type ParsedScrape = {
   description: string;
   ingredients: ParsedIngredient[];
   hasApproximate: boolean;
+  source?: RecipeSource;
 };
 type CacheEntry = {
   expiresAt: number;
@@ -42,7 +43,7 @@ type CacheEntry = {
 };
 const CACHE = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24h
-const PARSER_VERSION = "v3";
+const PARSER_VERSION = "v4";
 const cacheKey = (url: string) => `${PARSER_VERSION}:${url}`;
 
 // Same-instance rate cap. Generous because this is a household app, not a
@@ -60,6 +61,30 @@ function rateLimited(key: string): boolean {
   return false;
 }
 
+/**
+ * Canonical form of the pasted URL: fragment dropped, well-known tracking
+ * params removed. Keeps the cache warm across "same link, different share
+ * button" pastes from different household members.
+ */
+function normalizeRecipeUrl(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (!/^https?:$/.test(u.protocol)) return null;
+  u.hash = "";
+  const drop: string[] = [];
+  for (const key of u.searchParams.keys()) {
+    if (/^utm_/i.test(key) || /^(fbclid|gclid|mc_cid|mc_eid|igshid)$/i.test(key)) {
+      drop.push(key);
+    }
+  }
+  for (const key of drop) u.searchParams.delete(key);
+  return u.toString();
+}
+
 type ScrapeResponse = {
   ok: true;
   name: string;
@@ -68,15 +93,24 @@ type ScrapeResponse = {
   // True when one or more rows had a unit we couldn't precisely convert
   // (volumes, mostly) — the UI surfaces this so the user double-checks.
   hasApproximate: boolean;
+  // Which extraction strategy produced the data (debugging/transparency).
+  source?: string;
 };
 
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => ({}))) as { url?: string };
-    const url = String(body.url ?? "").trim();
-    if (!url) {
+    const rawUrl = String(body.url ?? "").trim();
+    if (!rawUrl) {
       return NextResponse.json(
         { ok: false, error: "Missing url" },
+        { status: 400 }
+      );
+    }
+    const url = normalizeRecipeUrl(rawUrl);
+    if (!url) {
+      return NextResponse.json(
+        { ok: false, error: "That doesn't look like a valid http(s) URL." },
         { status: 400 }
       );
     }
@@ -103,11 +137,11 @@ export async function POST(req: NextRequest) {
     if (cached && cached.expiresAt > Date.now()) {
       parsedScrape = cached.parsed;
     } else {
-      // Pull HTML + parse JSON-LD only on a cache miss. Categorization happens
+      // Pull HTML + extract only on a cache miss. Categorization happens
       // below, after current household history has been loaded.
       let scraped;
       try {
-        scraped = await scrapeRecipe(url);
+        scraped = await scrapeRecipe(url, { totalBudgetMs: SCRAPE_BUDGET_MS });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return NextResponse.json(
@@ -118,6 +152,7 @@ export async function POST(req: NextRequest) {
 
       const parsedIngredients = scraped.ingredients
         .map((raw) => parseRecipeIngredient(raw))
+        // Drops section headers ("For the sauce:") too — they parse to "".
         .filter((ingredient) => Boolean(ingredient.name));
       parsedScrape = {
         name: scraped.name ?? "",
@@ -126,6 +161,7 @@ export async function POST(req: NextRequest) {
         hasApproximate: parsedIngredients.some(
           (ingredient) => ingredient.approximate
         ),
+        source: scraped.source,
       };
       CACHE.set(cacheId, {
         expiresAt: Date.now() + CACHE_TTL_MS,
@@ -135,64 +171,9 @@ export async function POST(req: NextRequest) {
 
     await ensureTables();
 
-    // Build deterministic weighted history. Explicitly reviewed inventory and
-    // grocery labels carry the most trust; legacy/automatic stored labels are
-    // weaker, and saved recipe categories are weakest because they may have
-    // originated from this same auto-guesser.
-    const [items, grocery, recipes, favorites, categoryDefs] =
-      await Promise.all([
-        listItemsRepo(),
-        listGroceryRepo(),
-        listRecipesRepo(),
-        listFavoritesRepo(),
-        listCategoriesRepo(),
-      ]);
-    const history: Array<{
-      name: string;
-      category: string;
-      weight: number;
-    }> = [];
-    for (const it of items) {
-      history.push({
-        name: it.name,
-        category: it.category,
-        weight: storedCategoryWeight(it.categoryReviewed),
-      });
-    }
-    for (const g of grocery) {
-      history.push({
-        name: g.name,
-        category: g.category,
-        weight: storedCategoryWeight(g.categoryReviewed),
-      });
-    }
-    for (const r of recipes) {
-      for (const ing of r.ingredients) {
-        history.push({
-          name: ing.name,
-          category: ing.category,
-          weight: ing.categoryReviewed ? 1.5 : 0.25,
-        });
-      }
-    }
-    for (const f of favorites) {
-      for (const ing of f.ingredients) {
-        history.push({
-          name: ing.name,
-          category: ing.category,
-          weight: ing.categoryReviewed ? 1.5 : 0.25,
-        });
-      }
-    }
-    history.sort(
-      (a, b) =>
-        b.weight - a.weight ||
-        a.name.localeCompare(b.name, "en", { sensitivity: "base" }) ||
-        a.category.localeCompare(b.category, "en", {
-          sensitivity: "base",
-        })
-    );
-    const validCategories = categoryDefs.map((c) => c.name);
+    // Deterministic weighted history — shared with the paste-ingredients
+    // route so both paths categorize identically.
+    const { history, validCategories } = await loadCategoryContext();
 
     const ingredients: RecipeIngredient[] = parsedScrape.ingredients.map(
       (parsed) => {
@@ -218,6 +199,7 @@ export async function POST(req: NextRequest) {
       description: parsedScrape.description,
       ingredients,
       hasApproximate: parsedScrape.hasApproximate,
+      source: parsedScrape.source,
     };
     return NextResponse.json(result);
   } catch (e) {

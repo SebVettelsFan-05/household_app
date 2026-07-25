@@ -6,6 +6,7 @@ import {
   addRecipe,
   deleteFavorite,
   deleteRecipe,
+  parseIngredientsFromText,
   scrapeRecipeFromUrl,
   updateRecipe,
 } from "@/lib/client";
@@ -85,6 +86,27 @@ export default function RecipeModal({
   const [weekStart, setWeekStart] = useState<string>(initial.weekStart);
   const [busy, setBusy] = useState(false);
   const [scraping, setScraping] = useState(false);
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [pasting, setPasting] = useState(false);
+
+  // Append rather than replace so a user mid-edit doesn't lose what they've
+  // manually entered. Dedupe by case-insensitive name so a second fetch
+  // (e.g. user re-pastes the URL) doesn't double up.
+  function mergeIngredients(incoming: RecipeIngredient[]) {
+    if (incoming.length === 0) return;
+    setIngredients((prev) => {
+      const seen = new Set(prev.map((p) => p.name.toLowerCase()));
+      const next = [...prev];
+      for (const ing of incoming) {
+        if (!seen.has(ing.name.toLowerCase())) {
+          next.push(ing);
+          seen.add(ing.name.toLowerCase());
+        }
+      }
+      return next;
+    });
+  }
 
   async function fetchFromLink() {
     const trimmed = link.trim();
@@ -101,21 +123,16 @@ export default function RecipeModal({
       if (!description.trim() && data.description) {
         setDescription(data.description);
       }
-      if (data.ingredients.length > 0) {
-        // Append rather than replace so a user mid-edit doesn't lose what
-        // they've manually entered. Dedupe by case-insensitive name so a
-        // second fetch (e.g. user re-pastes the URL) doesn't double up.
-        setIngredients((prev) => {
-          const seen = new Set(prev.map((p) => p.name.toLowerCase()));
-          const next = [...prev];
-          for (const ing of data.ingredients) {
-            if (!seen.has(ing.name.toLowerCase())) {
-              next.push(ing);
-              seen.add(ing.name.toLowerCase());
-            }
-          }
-          return next;
-        });
+      mergeIngredients(data.ingredients);
+      if (data.ingredients.length === 0) {
+        // Page loaded but had no usable ingredient data — steer straight to
+        // the manual fallback instead of a dead-end "0 ingredients" toast.
+        setShowPaste(true);
+        onResult(
+          [],
+          "No ingredients found on the page — paste them below instead"
+        );
+        return;
       }
       const summary = `Fetched ${data.ingredients.length} ingredient${data.ingredients.length === 1 ? "" : "s"}`;
       onResult(
@@ -125,9 +142,38 @@ export default function RecipeModal({
           : summary
       );
     } catch (err) {
+      // Most scrape errors ("site is blocking…") point at the paste
+      // fallback — open it so the fix is one paste away.
+      setShowPaste(true);
       onError(err instanceof Error ? err.message : String(err));
     } finally {
       setScraping(false);
+    }
+  }
+
+  async function parsePasted() {
+    const trimmed = pasteText.trim();
+    if (!trimmed) {
+      onError("Paste some ingredients first");
+      return;
+    }
+    setPasting(true);
+    try {
+      const data = await parseIngredientsFromText(trimmed);
+      mergeIngredients(data.ingredients);
+      setPasteText("");
+      setShowPaste(false);
+      const summary = `Added ${data.ingredients.length} ingredient${data.ingredients.length === 1 ? "" : "s"}`;
+      onResult(
+        [],
+        data.hasApproximate
+          ? `${summary} (some quantities are estimates — double-check)`
+          : summary
+      );
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPasting(false);
     }
   }
 
@@ -349,8 +395,44 @@ export default function RecipeModal({
             >
               {scraping ? "Fetching…" : "Fetch"}
             </button>
+            <button
+              type="button"
+              className="btn-secondary link-fetch"
+              onClick={() => setShowPaste((v) => !v)}
+              disabled={scraping || busy}
+              aria-expanded={showPaste}
+              title="Paste an ingredient list copied from anywhere"
+            >
+              Paste
+            </button>
           </div>
         </div>
+
+        {showPaste ? (
+          <div className="field">
+            <label htmlFor="r-paste">
+              Pasted ingredients (one per line)
+            </label>
+            <textarea
+              id="r-paste"
+              className="textarea"
+              rows={5}
+              placeholder={"2 tbsp olive oil\n500g chicken thighs\n1 large onion"}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+            />
+            <div className="link-row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn-secondary link-fetch"
+                onClick={parsePasted}
+                disabled={pasting || busy || !pasteText.trim()}
+              >
+                {pasting ? "Parsing…" : "Add to ingredients"}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="field">
           <label htmlFor="r-desc">Description / notes (optional)</label>

@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx --test lib/guessCategory.test.ts",
+    "test": "tsx --test lib/guessCategory.test.ts lib/parseIngredient.test.ts lib/recipeScraper.test.ts",
     "lint": "next lint",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",

@@ -82,6 +82,83 @@ test("cold-start compound names prefer the product type over a modifier", () => 
   }
 });
 
+test("expanded vocabulary covers common recipe ingredients", () => {
+  const cases: Array<[name: string, expected: string]> = [
+    // Meat / seafood
+    ["beef brisket", "Meat"],
+    ["chorizo", "Meat"],
+    ["mussels", "Meat"],
+    ["hot dogs", "Meat"],
+    ["pork tenderloin", "Meat"],
+    // Produce + fresh herbs
+    ["shallots", "Veggies"],
+    ["eggplant", "Veggies"],
+    ["bok choy", "Veggies"],
+    ["brussels sprouts", "Veggies"],
+    ["fresh basil", "Veggies"],
+    ["swiss chard", "Veggies"],
+    // Fruits
+    ["figs", "Fruits"],
+    ["pomegranate", "Fruits"],
+    ["clementines", "Fruits"],
+    // Dairy
+    ["halloumi", "Dairy"],
+    ["buttermilk", "Dairy"],
+    ["cream cheese", "Dairy"],
+    // Bakery
+    ["ciabatta", "Bakery"],
+    ["brioche buns", "Bakery"],
+    // Pantry
+    ["tahini", "Pantry"],
+    ["maple syrup", "Pantry"],
+    ["walnuts", "Pantry"],
+    ["active dry yeast", "Pantry"],
+    ["tomato soup", "Pantry"],
+    ["dried cranberries", "Pantry"],
+    ["fennel seeds", "Pantry"],
+    ["ramen noodles", "Pantry"],
+    ["pine nuts", "Pantry"],
+    ["chile powder", "Pantry"],
+    // Condiments
+    ["olives", "Condiments"],
+    ["kimchi", "Condiments"],
+    ["dill pickles", "Condiments"],
+    ["gravy", "Condiments"],
+    // Beverages
+    ["kombucha", "Beverages"],
+    ["apple cider", "Beverages"],
+    ["hot chocolate", "Beverages"],
+    // Frozen / snacks
+    ["mango sorbet", "Frozen"],
+    ["beef jerky", "Snacks"],
+    ["trail mix", "Snacks"],
+    ["rice cakes", "Snacks"],
+  ];
+
+  for (const [name, expected] of cases) {
+    assert.equal(
+      guessCategory(name, [], VALID_CATEGORIES),
+      expected,
+      `expected ${name} to resolve to ${expected}`
+    );
+  }
+});
+
+test("expanded vocabulary does not break existing product-type wins", () => {
+  // "olive" (Condiments) must stay below "oil" so this classic keeps working.
+  assert.equal(guessCategory("olive oil", [], VALID_CATEGORIES), "Pantry");
+  // "dill" (Veggies) must stay below "pickle".
+  assert.equal(
+    guessCategory("dill pickle spears", [], VALID_CATEGORIES),
+    "Condiments"
+  );
+  // "cider" must lose to the vinegar phrase.
+  assert.equal(
+    guessCategory("apple cider vinegar", [], VALID_CATEGORIES),
+    "Pantry"
+  );
+});
+
 test("a repeated word does not break phrase adjacency", () => {
   // "green pepper green bean" keeps a real "green bean" adjacency at the end.
   // De-duping the tokens before phrase matching collapses it to
