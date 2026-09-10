@@ -27,6 +27,9 @@ type AddBody = {
   link?: string;
   description?: string;
   ingredients?: unknown;
+  servings?: number;
+  portions?: number;
+  noMeal?: boolean;
 };
 
 export async function POST(req: NextRequest) {
@@ -41,6 +44,9 @@ export async function POST(req: NextRequest) {
       link: body.link,
       description: body.description,
       ingredients: body.ingredients,
+      servings: body.servings,
+      portions: body.portions,
+      noMeal: body.noMeal,
     });
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, recipes });

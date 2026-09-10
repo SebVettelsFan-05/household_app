@@ -1,0 +1,968 @@
+/*
+ * Fresh shell. Every rule is scoped under `.fresh` so the classic UI, which
+ * owns all of globals.css, is untouched by anything in here.
+ *
+ * The token block at the top is deliberately the same set of names
+ * globals.css defines, so the classic modals and forms reused inside this
+ * shell (recipe scraping, dictation, label scanning, passwords, the monthly
+ * breakdown) inherit the new colour, radius and type without being rewritten.
+ */
+
+.fresh {
+  /* One cool neutral ramp, one accent. */
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-soft: #e9ebef;
+  --ink: #16181d;
+  --ink-soft: #5c6270;
+  --accent: #205ac5;
+  --accent-soft: #e3eaf8;
+  /* Text that sits on the accent. Dark mode's accent is light, so white on
+     it would fail AA. */
+  --accent-ink: #ffffff;
+  --warn: #9a5209;
+  --danger: #b3261e;
+  --line: rgba(22, 24, 29, 0.12);
+  --shadow: 0 1px 2px rgba(22, 24, 29, 0.05), 0 6px 18px rgba(22, 24, 29, 0.08);
+  --radius: 10px;
+  --fresh-font: "Geist", ui-sans-serif, system-ui, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --fresh-top-h: 57px;
+
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  font-size: 15px;
+  line-height: 1.45;
+  /* Money and counts read in columns everywhere, including inside the
+     reused classic modals. */
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme="dark"] .fresh {
+  --bg: #101215;
+  --surface: #191c21;
+  --surface-soft: #23272e;
+  --ink: #e7e9ee;
+  --ink-soft: #9ba1ae;
+  --accent: #5a91e2;
+  --accent-soft: #1d2a3d;
+  --accent-ink: #0d1626;
+  --warn: #e0a25c;
+  --danger: #ec7b72;
+  --line: rgba(231, 233, 238, 0.14);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+/* The page background behind the shell (overscroll, short screens). */
+body:has(.fresh) {
+  background: #f4f5f7;
+}
+:root[data-theme="dark"] body:has(.fresh) {
+  background: #101215;
+}
+
+/*
+ * One typeface for the whole surface. `!important` because globals.css sets
+ * the serif on a couple of dozen element-qualified selectors, and matching
+ * every one of them here would be a second stylesheet to keep in sync.
+ */
+.fresh,
+.fresh * {
+  font-family: var(--fresh-font) !important;
+  font-variation-settings: normal;
+}
+.fresh .scan-barcode {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
+}
+
+/* Hierarchy by weight and colour, not size. */
+.fresh h1,
+.fresh h2,
+.fresh h3,
+.fresh .modal h2,
+.fresh .add-card h2,
+.fresh .list-head h2,
+.fresh .split-card h2,
+.fresh .login-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.fresh .empty .icon {
+  font-size: 28px;
+  color: var(--ink-soft);
+}
+
+/* No uppercase tracked labels as a rhythm. */
+.fresh .field label,
+.fresh .cat-pills-row label,
+.fresh .cat-group-head,
+.fresh .split-group h3,
+.fresh .split-summary dt,
+.fresh .monthly-section-head h3,
+.fresh .recipe-day-label,
+.fresh .modal-sub,
+.fresh .favorite-meta,
+.fresh .archive-recipe-head,
+.fresh .manage-link,
+.fresh .home-card-cta {
+  text-transform: none;
+  letter-spacing: normal;
+}
+.fresh .field label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+/* One radius scale. The classic sheet corners are the only hard-coded ones. */
+.fresh .modal {
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--bg);
+  /* In dark mode the panel and the page are close in value, so the edge has
+     to be drawn rather than implied. */
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+@media (min-width: 520px) {
+  .fresh .modal {
+    border-radius: var(--radius);
+  }
+}
+.fresh .modal-bg {
+  background: rgba(16, 18, 21, 0.55);
+}
+.fresh .theme-toggle,
+.fresh .refresh-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  font-size: 15px;
+}
+.fresh .btn-primary,
+.fresh .btn-secondary,
+.fresh .btn-accent,
+.fresh .btn-danger {
+  border-radius: var(--radius);
+  font-weight: 600;
+}
+.fresh .btn-primary,
+.fresh .btn-accent,
+.fresh .alloc-chip.active,
+.fresh .pool-chip.active,
+.fresh .filter-pill.active,
+.fresh .check.checked {
+  color: var(--accent-ink);
+}
+.fresh .alloc-chip,
+.fresh .pool-chip,
+.fresh .filter-pill,
+.fresh .cat-pill {
+  border-radius: 999px;
+}
+
+/* The receipt attachment is a single large control. */
+.fresh .receipt-picker-cta {
+  display: block;
+  width: 100%;
+  text-align: center;
+  padding: 18px 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Reuse of the receipt splitter: lead with the "split this receipt" tap. */
+.fresh .alloc-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fresh .alloc-footer {
+  order: -1;
+}
+
+/* ---------- Shell ---------- */
+
+.fresh-top {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.fresh-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+.fresh-top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fresh-body {
+  display: block;
+}
+.fresh-rail {
+  display: none;
+}
+.fresh-main {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 18px 16px 104px;
+}
+
+@media (min-width: 720px) {
+  .fresh-body {
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    align-items: start;
+  }
+  .fresh-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: sticky;
+    top: var(--fresh-top-h);
+    align-self: start;
+    max-height: calc(100vh - var(--fresh-top-h));
+    overflow-y: auto;
+    padding: 16px 12px;
+    border-right: 1px solid var(--line);
+  }
+  .fresh-main {
+    padding: 24px 24px 56px;
+  }
+}
+
+.fresh-rail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+}
+.fresh-rail-btn:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+.fresh-rail-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.fresh-rail-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 12px 8px;
+}
+.fresh-rail-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.fresh-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+@media (min-width: 720px) {
+  .fresh-tabbar {
+    display: none;
+  }
+}
+.fresh-tab {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  border-top: 2px solid transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 2px 12px;
+  border-radius: 0;
+  white-space: nowrap;
+}
+.fresh-tab.active {
+  color: var(--accent);
+  font-weight: 600;
+  border-top-color: var(--accent);
+}
+.fresh-tab-count {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fresh :is(.fresh-tab, .fresh-rail-btn, .fresh-btn, .fresh-chip, .fresh-row, .fresh-icon-btn):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Primitives ---------- */
+
+.fresh-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.fresh-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.fresh-h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.fresh-sub {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.fresh-section {
+  margin: 0 0 22px;
+}
+.fresh-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0 0 8px;
+}
+
+.fresh-btn {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+.fresh-btn:hover {
+  background: var(--surface-soft);
+}
+.fresh-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.fresh .alloc-amount,
+.fresh .alloc-split {
+  border-radius: 10px;
+}
+.fresh-btn-primary:hover {
+  background: var(--accent);
+  opacity: 0.92;
+}
+.fresh-btn-primary:disabled {
+  opacity: 0.5;
+}
+.fresh-btn-quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-soft);
+  font-weight: 500;
+  padding: 6px 8px;
+}
+.fresh-btn-quiet:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+.fresh-btn-danger {
+  color: var(--danger);
+}
+.fresh-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fresh-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 14px;
+}
+.fresh-chip:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+.fresh-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.fresh-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fresh-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-soft);
+  border-radius: var(--radius);
+}
+.fresh-seg-btn {
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+.fresh-seg-btn.active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Rows group with hairlines, not cards. */
+.fresh-rows {
+  border-top: 1px solid var(--line);
+}
+.fresh-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 6px;
+  color: var(--ink);
+  font-size: 15px;
+}
+.fresh-row:hover {
+  background: var(--surface-soft);
+}
+.fresh-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.fresh-row-title {
+  display: block;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.fresh-row-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+button.fresh-row-main {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+.fresh-row-amount {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fresh-row-note {
+  font-size: 13px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.fresh-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 6px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.fresh-empty {
+  padding: 22px 6px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.fresh-empty strong {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+.fresh-error {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--danger);
+  font-size: 14px;
+  background: var(--surface);
+}
+.fresh-form-error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+.fresh-field-hint {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+/* Skeletons match the layout they stand in for. */
+.fresh-skel {
+  background: var(--surface-soft);
+  border-radius: var(--radius);
+  height: 14px;
+  margin: 10px 0;
+}
+.fresh-skel-row {
+  height: 46px;
+  margin: 8px 0;
+}
+.fresh-skel-card {
+  height: 130px;
+}
+
+.fresh-avatar {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.fresh-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+}
+.fresh-badge-warn {
+  background: color-mix(in srgb, var(--warn) 16%, var(--surface) 84%);
+  color: var(--warn);
+}
+
+.fresh-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(74px + env(safe-area-inset-bottom));
+  z-index: 25;
+  border: none;
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+@media (min-width: 720px) {
+  .fresh-fab {
+    right: 24px;
+    bottom: 24px;
+  }
+}
+
+/* ---------- Sheets ---------- */
+
+.fresh-sheet-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(16, 18, 21, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.fresh-sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 94vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+}
+.fresh-sheet-tall {
+  min-height: 92vh;
+}
+@media (min-width: 520px) {
+  .fresh-sheet-bg {
+    align-items: center;
+    padding: 20px;
+  }
+  .fresh-sheet,
+  .fresh-sheet-tall {
+    border-radius: var(--radius);
+    min-height: 0;
+  }
+}
+.fresh-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.fresh-sheet-head h2 {
+  margin: 0;
+}
+.fresh-sheet-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+.fresh-sheet-actions .fresh-btn-primary {
+  flex: 1;
+}
+
+/* ---------- Forms ---------- */
+
+.fresh-field {
+  margin-bottom: 14px;
+}
+.fresh-field > label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+.fresh-input {
+  width: 100%;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  font-size: 16px;
+  color: var(--ink);
+}
+.fresh-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+.fresh-input-amount {
+  font-size: 30px;
+  font-weight: 600;
+  padding: 12px 14px;
+  letter-spacing: -0.01em;
+}
+.fresh-field-narrow .fresh-input {
+  max-width: 360px;
+}
+.fresh-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.fresh-field-row .fresh-field {
+  min-width: 0;
+}
+
+/* ---------- Home ---------- */
+
+.fresh-home {
+  display: grid;
+  align-items: start;
+  gap: 16px;
+}
+@media (min-width: 900px) {
+  .fresh-home {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fresh-home-wide {
+    grid-column: 1 / -1;
+  }
+}
+.fresh-block-link {
+  margin-top: 12px;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.fresh-block-link:hover {
+  text-decoration: underline;
+}
+
+.fresh-tonight-dish {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.fresh-tonight-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.fresh-tonight-quiet {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.fresh-settle-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.fresh-settle-row:last-of-type {
+  border-bottom: none;
+}
+.fresh-settle-name {
+  font-weight: 500;
+}
+.fresh-settle-amount {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fresh-settle-send .fresh-settle-amount {
+  color: var(--warn);
+}
+.fresh-settle-receive .fresh-settle-amount {
+  color: var(--accent);
+}
+.fresh-settle-even .fresh-settle-amount {
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+.fresh-settle-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  padding: 0 0 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---------- Expenses ---------- */
+
+.fresh-expenses {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.fresh-expenses > .fresh-settlement-col {
+  order: -1;
+}
+@media (min-width: 1000px) {
+  .fresh-expenses {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    align-items: start;
+    gap: 22px;
+  }
+  .fresh-expenses > .fresh-settlement-col {
+    order: 0;
+    position: sticky;
+    top: calc(var(--fresh-top-h) + 24px);
+  }
+}
+.fresh-expenses-main {
+  min-width: 0;
+}
+.fresh-row.locked {
+  opacity: 0.62;
+}
+.fresh .monthly-card {
+  box-shadow: none;
+}
+
+/* ---------- Recipes ---------- */
+
+.fresh-weeks {
+  display: grid;
+  gap: 22px;
+}
+@media (min-width: 900px) {
+  .fresh-weeks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 26px;
+  }
+}
+.fresh-day-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding-right: 6px;
+}
+.fresh-day-open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 12px 6px;
+  color: var(--ink);
+  font-size: 15px;
+}
+.fresh-day-open:hover {
+  background: var(--surface-soft);
+}
+.fresh-day-name {
+  flex-shrink: 0;
+  width: 66px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.fresh-day-abbr,
+.fresh-day-date {
+  display: block;
+}
+.fresh-day-date {
+  font-weight: 400;
+  font-size: 12px;
+}
+.fresh-cook-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.fresh-day-quiet {
+  color: var(--ink-soft);
+}
+.fresh-day-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+/* ---------- Grocery ---------- */
+
+.fresh-grocery {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+@media (min-width: 1000px) {
+  .fresh-grocery {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    align-items: start;
+    gap: 24px;
+  }
+}
+.fresh-check {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.fresh-check.checked {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.fresh-row.done .fresh-row-title {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+.fresh-side-note {
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin: 0 0 8px;
+}
+
+/* ---------- Inventory ---------- */
+
+.fresh-owner {
+  color: var(--ink);
+  font-weight: 500;
+}
+.fresh-expiring .fresh-row-note {
+  color: var(--warn);
+  font-weight: 500;
+}
+.fresh-expired .fresh-row-note {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* ---------- More ---------- */
+
+.fresh-more {
+  max-width: 520px;
+}

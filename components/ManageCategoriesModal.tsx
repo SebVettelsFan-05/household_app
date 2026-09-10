@@ -74,7 +74,7 @@ export default function ManageCategoriesModal({
       onItemsChange(res.items);
       onToast(
         res.reassigned
-          ? `Removed "${name}" — ${res.reassigned} item${res.reassigned === 1 ? "" : "s"} reassigned`
+          ? `Removed "${name}", ${res.reassigned} item${res.reassigned === 1 ? "" : "s"} reassigned`
           : `Removed "${name}"`
       );
     } catch (err) {

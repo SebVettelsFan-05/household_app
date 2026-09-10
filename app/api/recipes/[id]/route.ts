@@ -19,6 +19,9 @@ type PatchBody = {
   link?: string;
   description?: string;
   ingredients?: unknown;
+  servings?: number;
+  portions?: number;
+  noMeal?: boolean;
 };
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {

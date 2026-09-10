@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { deleteFavorite } from "@/lib/client";
-import type { FavoriteRecipe, Recipe, RecipeIngredient } from "@/lib/types";
+import type { FavoriteRecipe, RecipeIngredient } from "@/lib/types";
 
 type Props = {
   favorites: FavoriteRecipe[];
@@ -13,6 +13,7 @@ type Props = {
     link: string;
     description: string;
     ingredients: RecipeIngredient[];
+    servings: number;
   }) => void;
   onToast: (msg: string) => void;
   onError: (msg: string) => void;
@@ -94,6 +95,7 @@ export default function FavoritesModal({
                         link: f.link,
                         description: f.description,
                         ingredients: f.ingredients,
+                        servings: f.servings ?? 0,
                       })
                     }
                     disabled={busy}

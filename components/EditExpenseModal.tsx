@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AllocationEditor, {
+  allocationsForSubmit,
+  allocationsRemainder,
+  seedAllocations,
+  type EditableAllocation,
+} from "@/components/AllocationEditor";
 import { ReceiptPicker } from "@/components/AddExpenseForm";
+import { normalizeAllocations } from "@/lib/allocations";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { deleteExpense, updateExpense } from "@/lib/client";
 import {
@@ -15,6 +22,7 @@ import { BUYERS, type Expense } from "@/lib/types";
 
 type Props = {
   item: Expense;
+  mealGroup: string[];
   onClose: () => void;
   onResult: (expenses: Expense[], toast: string) => void;
   onError: (message: string) => void;
@@ -22,6 +30,7 @@ type Props = {
 
 export default function EditExpenseModal({
   item,
+  mealGroup,
   onClose,
   onResult,
   onError,
@@ -37,7 +46,12 @@ export default function EditExpenseModal({
   const [receipt, setReceipt] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [expandedExisting, setExpandedExisting] = useState(false);
+  const [allocations, setAllocations] = useState<EditableAllocation[]>(() =>
+    seedAllocations(item.allocations ?? [])
+  );
   const [busy, setBusy] = useState(false);
+
+  const totalCents = parseCents(amount) ?? 0;
 
   const hasExistingReceipt = Boolean(item.receiptUrl);
   const existingIsImage =
@@ -91,6 +105,23 @@ export default function EditExpenseModal({
       onError("Past months are locked");
       return;
     }
+    if (allocations.some((a) => a.kind === "")) {
+      onError("Pick what each split line was for");
+      return;
+    }
+    if (allocationsRemainder(allocations, cents) !== 0) {
+      onError("The split lines have to add up to the receipt total");
+      return;
+    }
+    // Untouched lines send their stored snapshot back so an old month keeps
+    // the people it was settled against.
+    const payload = allocationsForSubmit(allocations, { keepSnapshots: true });
+    try {
+      normalizeAllocations(payload, cents, { members: BUYERS, mealGroup });
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+      return;
+    }
     setBusy(true);
     try {
       const prepared = receipt ? await prepareReceipt(receipt) : null;
@@ -101,6 +132,7 @@ export default function EditExpenseModal({
         paidBy,
         occurredOn,
         description: description.trim(),
+        allocations: payload,
         ...(prepared
           ? { receipt: { blob: prepared.blob, filename: prepared.filename } }
           : {}),
@@ -198,6 +230,18 @@ export default function EditExpenseModal({
         </div>
 
         <div className="field">
+          <label>Split</label>
+          <AllocationEditor
+            totalCents={totalCents}
+            value={allocations}
+            onChange={setAllocations}
+            members={BUYERS}
+            mealGroup={mealGroup}
+            disabled={busy}
+          />
+        </div>
+
+        <div className="field">
           <label>Receipt</label>
           {hasExistingReceipt && !receipt ? (
             <div className="receipt-existing">
@@ -229,7 +273,7 @@ export default function EditExpenseModal({
             </div>
           ) : !hasExistingReceipt && !receipt ? (
             <p className="receipt-legacy-note">
-              This expense was logged before receipts were required — attach
+              This expense was logged before receipts were required. Attach
               one now to backfill (optional).
             </p>
           ) : null}

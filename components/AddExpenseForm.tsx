@@ -1,8 +1,15 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useState } from "react";
+import AllocationEditor, {
+  allocationsForSubmit,
+  allocationsRemainder,
+  blankAllocation,
+  type EditableAllocation,
+} from "@/components/AllocationEditor";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { addExpense } from "@/lib/client";
+import { normalizeAllocations } from "@/lib/allocations";
 import {
   currentExpenseMonth,
   firstDayOfMonth,
@@ -13,6 +20,8 @@ import { parseCents } from "@/lib/money";
 import { BUYERS, type Expense } from "@/lib/types";
 
 type Props = {
+  // Current meal group, already resolved ("everyone" when unset).
+  mealGroup: string[];
   onResult: (expenses: Expense[], toast: string) => void;
   onError: (message: string) => void;
 };
@@ -27,7 +36,11 @@ function todayYmd(): string {
 
 const ACCEPT = "image/*,application/pdf";
 
-export default function AddExpenseForm({ onResult, onError }: Props) {
+export default function AddExpenseForm({
+  mealGroup,
+  onResult,
+  onError,
+}: Props) {
   const currentMonthStart = firstDayOfMonth(currentExpenseMonth());
   const [store, setStore] = useState("");
   const [amount, setAmount] = useState("");
@@ -36,7 +49,12 @@ export default function AddExpenseForm({ onResult, onError }: Props) {
   const [description, setDescription] = useState("");
   const [receipt, setReceipt] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [allocations, setAllocations] = useState<EditableAllocation[]>(() => [
+    blankAllocation(),
+  ]);
   const [busy, setBusy] = useState(false);
+
+  const totalCents = parseCents(amount) ?? 0;
 
   // Object URLs need to be revoked or the browser leaks the blob.
   useEffect(() => {
@@ -75,6 +93,23 @@ export default function AddExpenseForm({ onResult, onError }: Props) {
       onError("Attach a receipt photo or PDF");
       return;
     }
+    if (allocations.some((a) => a.kind === "")) {
+      onError("Pick what each split line was for");
+      return;
+    }
+    if (allocationsRemainder(allocations, cents) !== 0) {
+      onError("The split lines have to add up to the receipt total");
+      return;
+    }
+    const payload = allocationsForSubmit(allocations, { keepSnapshots: false });
+    try {
+      // Same validator the server runs, so bad input fails here with the
+      // identical message instead of after the receipt upload.
+      normalizeAllocations(payload, cents, { members: BUYERS, mealGroup });
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+      return;
+    }
     setBusy(true);
     try {
       const prepared = await prepareReceipt(receipt);
@@ -84,6 +119,7 @@ export default function AddExpenseForm({ onResult, onError }: Props) {
         paidBy,
         occurredOn,
         description: description.trim() || undefined,
+        allocations: payload,
         receipt: { blob: prepared.blob, filename: prepared.filename },
       });
       onResult(res.expenses, "Expense added");
@@ -92,7 +128,9 @@ export default function AddExpenseForm({ onResult, onError }: Props) {
       setDescription("");
       setReceipt(null);
       setOccurredOn(todayYmd());
-      // Keep paidBy for fast repeated entry.
+      // Keep paidBy for fast repeated entry. The editor remembers the last
+      // allocation kind and re-applies it to this fresh line.
+      setAllocations([blankAllocation()]);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -177,6 +215,18 @@ export default function AddExpenseForm({ onResult, onError }: Props) {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="field">
+        <label>Split</label>
+        <AllocationEditor
+          totalCents={totalCents}
+          value={allocations}
+          onChange={setAllocations}
+          members={BUYERS}
+          mealGroup={mealGroup}
+          disabled={busy}
+        />
       </div>
 
       <div className="field">

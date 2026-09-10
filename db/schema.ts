@@ -8,6 +8,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { ExpenseAllocation } from "@/lib/types";
 
 export type IngredientJson = {
   name: string;
@@ -37,6 +38,8 @@ export const items = pgTable("items", {
   // True only after somebody explicitly confirms/changes the category. This
   // lets auto-suggest learn corrections without treating old guesses as fact.
   categoryReviewed: boolean("category_reviewed").notNull().default(false),
+  // Member name when the item belongs to one person; null/"" means shared.
+  owner: text("owner"),
 });
 
 export const categories = pgTable("categories", {
@@ -55,6 +58,10 @@ export const groceryItems = pgTable("grocery_items", {
   store: text("store"),
   // Required — one of the household members.
   addedBy: text("added_by").notNull(),
+  // "house" | "meals" | "personal" — which pool the request belongs to.
+  // Scopes the merge-on-add and decides the owner when the row moves into
+  // inventory. See docs/SHARED_KITCHEN.md.
+  pool: text("pool").notNull().default("house"),
   done: boolean("done").notNull().default(false),
   added: timestamp("added", { withTimezone: false }).notNull().defaultNow(),
 });
@@ -70,6 +77,12 @@ export const recipes = pgTable("recipes", {
   link: text("link"),
   description: text("description"),
   ingredients: jsonb("ingredients").$type<IngredientJson[]>().notNull().default([]),
+  // Base servings the ingredient grams were written for.
+  servings: integer("servings"),
+  // How many portions are being cooked this time.
+  portions: integer("portions"),
+  // Marks a day with no shared dinner — name/cook/ingredients stay empty.
+  noMeal: boolean("no_meal").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: false })
     .notNull()
     .defaultNow(),
@@ -81,6 +94,7 @@ export const favoriteRecipes = pgTable("favorite_recipes", {
   link: text("link"),
   description: text("description"),
   ingredients: jsonb("ingredients").$type<IngredientJson[]>().notNull().default([]),
+  servings: integer("servings"),
   createdAt: timestamp("created_at", { withTimezone: false })
     .notNull()
     .defaultNow(),
@@ -98,6 +112,9 @@ export const expenses = pgTable("expenses", {
   category: text("category").notNull().default("Misc"),
   store: text("store"),
   paidBy: text("paid_by").notNull(),
+  // One line per "how much, and who for". NULL on legacy rows, which read
+  // back as a single house line over everyone. See docs/SHARED_KITCHEN.md.
+  allocations: jsonb("allocations").$type<ExpenseAllocation[]>(),
   // Date the expense occurred on. The user picks this; defaults to today.
   // Distinct from `added`, which is the row creation timestamp.
   occurredOn: date("occurred_on"),

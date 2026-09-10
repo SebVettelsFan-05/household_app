@@ -12,6 +12,7 @@ import {
 } from "@/lib/guessCategory";
 import { normalizeName } from "@/lib/normalize";
 import {
+  BUYERS,
   FALLBACK_CATEGORY,
   type Category,
   type CategoryDef,
@@ -38,6 +39,8 @@ export default function AddItemForm({
   const [qty, setQty] = useState("");
   const [exp, setExp] = useState("");
   const [cat, setCat] = useState<Category>(FALLBACK_CATEGORY);
+  // "" means shared household food.
+  const [owner, setOwner] = useState("");
   const [busy, setBusy] = useState(false);
   // Same idea as the grocery form — once you tap a pill, we stop overriding
   // your choice until the form submits.
@@ -150,6 +153,7 @@ export default function AddItemForm({
         expiry: exp || undefined,
         category: submitCategory,
         categoryReviewed: userPickedCat,
+        owner: owner || undefined,
       });
       const msg = res.merged
         ? `Added ${res.addedQty}g to existing "${res.mergedInto}"`
@@ -161,6 +165,9 @@ export default function AddItemForm({
       setCat(FALLBACK_CATEGORY);
       setScanSuggestion(null);
       setUserPickedCat(false);
+      // Items are shared by default; leaving an owner selected would quietly
+      // mark the next thing added as somebody's personal food.
+      setOwner("");
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -255,6 +262,22 @@ export default function AddItemForm({
             onKeyDown={onEnter}
           />
         </div>
+      </div>
+      <div className="field">
+        <label htmlFor="owner">Belongs to</label>
+        <select
+          id="owner"
+          className="select"
+          value={owner}
+          onChange={(e) => setOwner(e.target.value)}
+        >
+          <option value="">Shared</option>
+          {BUYERS.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
+        </select>
       </div>
       <button
         className="btn-primary"

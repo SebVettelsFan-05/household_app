@@ -2,10 +2,13 @@ import { after, NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
 import {
   addExpenseRepo,
+  currentMealGroup,
   deleteExpenseRepo,
   listExpensesRepo,
   updateExpenseRepo,
 } from "@/lib/repo";
+import { normalizeAllocations } from "@/lib/allocations";
+import { BUYERS, isBuyer } from "@/lib/types";
 import { mirrorToSheet } from "@/lib/mirror";
 import {
   deleteReceipt,
@@ -49,7 +52,23 @@ type ExpenseBody = {
   paidBy?: string;
   occurredOn?: string;
   description?: string;
+  // Multipart sends this as a JSON string; JSON bodies send the array.
+  allocations?: unknown;
 };
+
+// Multipart can only carry strings, so the allocations field arrives as
+// JSON text. A malformed blob is a client bug — say so rather than silently
+// falling back to a default split.
+function parseAllocationsField(raw: FormDataEntryValue | null): unknown {
+  if (raw === null) return undefined;
+  const text = raw.toString().trim();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Allocations must be valid JSON");
+  }
+}
 
 type ParsedExpense = ExpenseBody & {
   receipt: { bytes: ArrayBuffer; mimeType: string; filename: string } | null;
@@ -69,6 +88,7 @@ async function parseExpenseBody(req: NextRequest): Promise<ParsedExpense> {
       paidBy: form.get("paidBy")?.toString() ?? undefined,
       occurredOn: form.get("occurredOn")?.toString() ?? undefined,
       description: form.get("description")?.toString() ?? undefined,
+      allocations: parseAllocationsField(form.get("allocations")),
     };
     const file = form.get("receipt");
     if (file && typeof file !== "string" && file.size > 0) {
@@ -103,6 +123,22 @@ export async function POST(req: NextRequest) {
       return err("A receipt photo or PDF is required to log an expense.", 400);
     }
 
+    // Validate the payer and the split before the upload — a bad request
+    // should cost the user a 400, not a Drive round trip we then undo.
+    const amountCents = Math.round(Number(body.amountCents));
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      return err("Amount must be greater than zero", 400);
+    }
+    const paidBy = String(body.paidBy ?? "").trim();
+    if (!paidBy) return err("Paid by required", 400);
+    if (!isBuyer(paidBy)) {
+      return err(`"${paidBy}" is not a household member`, 400);
+    }
+    const allocations = normalizeAllocations(body.allocations, amountCents, {
+      members: BUYERS,
+      mealGroup: await currentMealGroup(),
+    });
+
     // Upload to Drive first. If the upload fails we never touch the DB, so
     // the user sees one clean error instead of an orphaned half-saved row.
     let uploaded: { id: string; url: string };
@@ -121,11 +157,12 @@ export async function POST(req: NextRequest) {
     // Drive file so we don't leak orphans.
     try {
       const expenses = await addExpenseRepo({
-        amountCents: Number(body.amountCents),
+        amountCents,
         store: body.store,
-        paidBy: body.paidBy ?? "",
+        paidBy,
         occurredOn: body.occurredOn,
         description: body.description,
+        allocations,
         receiptUrl: uploaded.url,
         receiptFileId: uploaded.id,
         receiptMime: body.receipt.mimeType,
@@ -155,6 +192,7 @@ export async function PATCH(req: NextRequest) {
         paidBy: form.get("paidBy")?.toString() ?? undefined,
         occurredOn: form.get("occurredOn")?.toString() ?? undefined,
         description: form.get("description")?.toString() ?? undefined,
+        allocations: parseAllocationsField(form.get("allocations")),
         receipt: null,
       };
       const file = form.get("receipt");
@@ -219,6 +257,7 @@ export async function PATCH(req: NextRequest) {
         paidBy: parsed.paidBy,
         occurredOn: parsed.occurredOn,
         description: parsed.description,
+        allocations: parsed.allocations,
         ...(uploadedReceipt
           ? {
               receiptUrl: uploadedReceipt.url,

@@ -1,17 +1,59 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import AllocationSummary from "@/components/AllocationSummary";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
-import SplitCard, { type SplitLine } from "@/components/SplitCard";
+import SplitCard from "@/components/SplitCard";
 import { getSetting, putSetting } from "@/lib/client";
 import {
   currentExpenseMonth,
   FIRST_EXPENSE_MONTH,
 } from "@/lib/expenseMonths";
 import { driveImageUrl } from "@/lib/imageResize";
+import {
+  activeForMonth,
+  amountForMonth,
+  BE_FIXED,
+  BE_RENT,
+  BE_VARIABLE,
+  clearBillOverride,
+  clearRentOverride,
+  emptyVariable,
+  hasOverride,
+  hasRentOverride,
+  isFixedTrivial,
+  isRentTrivial,
+  isVariableTrivial,
+  loadFixed,
+  loadRent,
+  loadVariable,
+  LS_FIXED_V3,
+  LS_RENT_V1,
+  LS_VARIABLE_V3,
+  makeRecurringId,
+  mergeProtected,
+  normalizeVariableState,
+  parseFixedEntry,
+  parseVariableState,
+  rentForMonth,
+  setBillAmount,
+  setRentAlloc,
+  settlementBills,
+  sortFixed,
+  ymLabel,
+  shiftMonth,
+  fmtTripDate,
+  type FixedRecurring,
+  type RentAlloc,
+  type RentState,
+  type VariableKey,
+  type VariableMap,
+  type VariableState,
+} from "@/lib/monthlyBills";
 import { fmtMoney, parseCents } from "@/lib/money";
 import { titleCaseName } from "@/lib/normalize";
-import { BUYERS, type Expense } from "@/lib/types";
+import { computeSettlement } from "@/lib/settlement";
+import { BUYERS, type Expense, type ExpenseAllocation } from "@/lib/types";
 
 /**
  * Monthly breakdown — three editable sections (one-time, recurring fixed,
@@ -28,529 +70,6 @@ import { BUYERS, type Expense } from "@/lib/types";
  * by Arthur — that's the household convention, so the settlement math
  * gives Arthur credit for the whole amount.
  */
-
-/* ---------- Types ---------- */
-
-type ScheduleEntry = { from: string; cents: number };
-type FixedRecurring = {
-  id: string;
-  name: string;
-  protected?: boolean;
-  activeFrom?: string;
-  inactiveFrom?: string;
-  // When set, the bill's full amount is treated as "paid" by this person
-  // in the settlement math (the household's Internet convention).
-  paidBy?: string;
-  schedule: ScheduleEntry[];
-  overrides: Record<string, number>;
-};
-type VariableMap = Record<string, Record<string, number>>;
-type VariableRecurring = {
-  id: string;
-  name: string;
-  protected?: boolean;
-  activeFrom: string;
-  inactiveFrom?: string;
-};
-type VariableState = {
-  lines: VariableRecurring[];
-  amounts: VariableMap;
-};
-
-type RentAlloc = Record<string, number>; // name → cents
-type RentAllocSchedule = { from: string; alloc: RentAlloc };
-type RentState = {
-  schedule: RentAllocSchedule[];
-  overrides: Record<string, RentAlloc>;
-};
-
-/* ---------- Storage keys ---------- */
-
-// localStorage keys — kept around as a write-through cache so the first
-// paint is instant. Backend (household_settings table) is the source of
-// truth so all housemates and fresh devices see the same numbers.
-const LS_FIXED_V3 = "monthly_recurring_fixed_v3";
-const LEGACY_FIXED_KEYS = [
-  "monthly_recurring_fixed_v2",
-  "monthly_recurring_fixed_v1",
-];
-const LS_VARIABLE_V3 = "monthly_recurring_variable_v3";
-const LEGACY_VARIABLE_KEYS = [
-  "monthly_recurring_variable_v2",
-  "monthly_recurring_variable_v1",
-];
-const LS_RENT_V1 = "monthly_rent_alloc_v1";
-
-// Backend keys (household_settings.key). Must match the server allowlist.
-const BE_FIXED = "recurring_fixed";
-const BE_VARIABLE = "recurring_variable";
-const BE_RENT = "rent_alloc";
-
-// Rent used to be a regular protected entry in the fixed list. It's been
-// promoted to its own per-person allocation block — filter the legacy id out
-// on load so it doesn't linger as an unprotected single-amount line.
-const LEGACY_RENT_ID = "fixed-mainstay-rent";
-
-/* ---------- Protected mainstays ---------- */
-
-type ProtectedSeed = Pick<FixedRecurring, "id" | "name" | "paidBy">;
-
-const PROTECTED_FIXED: ProtectedSeed[] = [
-  { id: "fixed-mainstay-internet", name: "Internet", paidBy: "Arthur" },
-  { id: "fixed-mainstay-rental-insurance", name: "Rental insurance" },
-];
-
-const VARIABLE_SEEDS = ["Gas", "Water", "Electricity"] as const;
-type VariableKey = string;
-
-/* ---------- Month helpers ---------- */
-
-function ym(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
-
-function ymLabel(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  if (!y || !m) return key;
-  const d = new Date(y, m - 1, 1);
-  return d.toLocaleString("en-US", { month: "long", year: "numeric" });
-}
-
-function shiftMonth(key: string, delta: number): string {
-  const [y, m] = key.split("-").map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return ym(d);
-}
-
-/** Validates YYYY-MM keys used by recurring bill schedules. */
-function validMonthKey(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  return /^\d{4}-\d{2}$/.test(value) ? value : undefined;
-}
-
-function activeForMonth(
-  entry: { activeFrom?: string; inactiveFrom?: string },
-  month: string
-): boolean {
-  const from = entry.activeFrom || FIRST_EXPENSE_MONTH;
-  if (month < from) return false;
-  if (entry.inactiveFrom && month >= entry.inactiveFrom) return false;
-  return true;
-}
-
-function makeRecurringId(kind: "fixed" | "variable", name: string): string {
-  const slug =
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 32) || "row";
-  return `${kind}-${Date.now().toString(36)}-${slug}`;
-}
-
-/** "2026-06-12" to "Jun 12". Empty string when the input isn't a valid date. */
-function fmtTripDate(iso: string): string {
-  if (!iso) return "";
-  const [y, m, d] = iso.split("-").map(Number);
-  if (!y || !m || !d) return "";
-  return new Date(y, m - 1, d).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
-}
-
-/* ---------- Fixed-bill load + persist ---------- */
-
-function emptyProtected(): FixedRecurring[] {
-  return PROTECTED_FIXED.map((p) => ({
-    id: p.id,
-    name: p.name,
-    paidBy: p.paidBy,
-    protected: true,
-    activeFrom: FIRST_EXPENSE_MONTH,
-    schedule: [],
-    overrides: {},
-  }));
-}
-
-function parseFixedEntry(raw: unknown): FixedRecurring | null {
-  if (!raw || typeof raw !== "object") return null;
-  const r = raw as {
-    id?: unknown;
-    name?: unknown;
-    protected?: unknown;
-    activeFrom?: unknown;
-    inactiveFrom?: unknown;
-    paidBy?: unknown;
-    schedule?: unknown;
-    overrides?: unknown;
-  };
-  if (typeof r.id !== "string" || typeof r.name !== "string") return null;
-  return {
-    id: r.id,
-    name: r.name,
-    protected: Boolean(r.protected),
-    activeFrom: validMonthKey(r.activeFrom) || FIRST_EXPENSE_MONTH,
-    inactiveFrom: validMonthKey(r.inactiveFrom),
-    paidBy: typeof r.paidBy === "string" ? r.paidBy : undefined,
-    schedule: Array.isArray(r.schedule)
-      ? (r.schedule as ScheduleEntry[]).filter(
-          (s) =>
-            s && typeof s.from === "string" && typeof s.cents === "number"
-        )
-      : [],
-    overrides:
-      r.overrides && typeof r.overrides === "object"
-        ? (r.overrides as Record<string, number>)
-        : {},
-  };
-}
-
-/** True when the recurring-fixed list has no user-entered amounts in it. */
-function isFixedTrivial(arr: FixedRecurring[]): boolean {
-  return arr.every(
-    (r) => r.schedule.length === 0 && Object.keys(r.overrides).length === 0
-  );
-}
-
-/** True when the variable utility state has no user rows or recorded amounts. */
-function isVariableTrivial(v: VariableState): boolean {
-  if (v.lines.some((line) => !line.protected)) return false;
-  for (const month of Object.values(v.amounts)) {
-    for (const cents of Object.values(month)) {
-      if (cents && cents > 0) return false;
-    }
-  }
-  return true;
-}
-
-/** True when the rent state has no allocation schedule or overrides. */
-function isRentTrivial(r: RentState): boolean {
-  return r.schedule.length === 0 && Object.keys(r.overrides).length === 0;
-}
-
-/**
- * Drops the legacy rent entry (moved to its own per-person block) and
- * ensures every protected mainstay (Internet, Rental insurance) is present
- * with the correct flags. Pure — safe to call on backend payloads too.
- */
-function mergeProtected(arr: FixedRecurring[]): FixedRecurring[] {
-  const next = arr.filter((r) => r.id !== LEGACY_RENT_ID);
-  for (const p of PROTECTED_FIXED) {
-    const existing = next.find((r) => r.id === p.id);
-    if (!existing) {
-      next.push({
-        id: p.id,
-        name: p.name,
-        protected: true,
-        paidBy: p.paidBy,
-        activeFrom: FIRST_EXPENSE_MONTH,
-        schedule: [],
-        overrides: {},
-      });
-    } else {
-      existing.protected = true;
-      existing.name = p.name;
-      existing.paidBy = p.paidBy;
-      existing.activeFrom = existing.activeFrom || FIRST_EXPENSE_MONTH;
-      existing.inactiveFrom = undefined;
-      existing.schedule = existing.schedule ?? [];
-      existing.overrides = existing.overrides ?? {};
-    }
-  }
-  return next;
-}
-
-function loadFixed(): FixedRecurring[] {
-  if (typeof window === "undefined") return emptyProtected();
-  for (const key of LEGACY_FIXED_KEYS) {
-    try {
-      window.localStorage.removeItem(key);
-    } catch {
-      /* ignore */
-    }
-  }
-  let raw: string | null = null;
-  try {
-    raw = window.localStorage.getItem(LS_FIXED_V3);
-  } catch {
-    return emptyProtected();
-  }
-  let arr: FixedRecurring[] = [];
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        arr = parsed
-          .map(parseFixedEntry)
-          .filter((x): x is FixedRecurring => x !== null);
-      }
-    } catch {
-      arr = [];
-    }
-  }
-  return mergeProtected(arr);
-}
-
-function seedVariableLines(): VariableRecurring[] {
-  return VARIABLE_SEEDS.map((name) => ({
-    id: `variable-mainstay-${name.toLowerCase()}`,
-    name,
-    protected: true,
-    activeFrom: FIRST_EXPENSE_MONTH,
-  }));
-}
-
-function emptyVariable(): VariableState {
-  return { lines: seedVariableLines(), amounts: {} };
-}
-
-function parseVariableLine(raw: unknown): VariableRecurring | null {
-  if (!raw || typeof raw !== "object") return null;
-  const r = raw as {
-    id?: unknown;
-    name?: unknown;
-    protected?: unknown;
-    activeFrom?: unknown;
-    inactiveFrom?: unknown;
-  };
-  if (typeof r.id !== "string" || typeof r.name !== "string") return null;
-  const name = r.name.trim();
-  if (!name) return null;
-  return {
-    id: r.id,
-    name,
-    protected: Boolean(r.protected),
-    activeFrom: validMonthKey(r.activeFrom) || FIRST_EXPENSE_MONTH,
-    inactiveFrom: validMonthKey(r.inactiveFrom),
-  };
-}
-
-function parseVariableAmounts(raw: unknown): VariableMap {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const out: VariableMap = {};
-  for (const [month, bucket] of Object.entries(raw as Record<string, unknown>)) {
-    if (!validMonthKey(month) || !bucket || typeof bucket !== "object") continue;
-    const cleanBucket: Record<string, number> = {};
-    for (const [name, cents] of Object.entries(bucket as Record<string, unknown>)) {
-      if (typeof cents === "number" && Number.isFinite(cents)) {
-        cleanBucket[name] = cents;
-      }
-    }
-    if (Object.keys(cleanBucket).length > 0) out[month] = cleanBucket;
-  }
-  return out;
-}
-
-function normalizeVariableState(state: VariableState): VariableState {
-  const lines: VariableRecurring[] = [];
-  const seen = new Set<string>();
-
-  for (const seed of seedVariableLines()) {
-    const existing = state.lines.find(
-      (l) => l.name.toLowerCase() === seed.name.toLowerCase()
-    );
-    lines.push({
-      ...(existing ?? seed),
-      id: seed.id,
-      name: seed.name,
-      protected: true,
-      activeFrom: (existing && existing.activeFrom) || FIRST_EXPENSE_MONTH,
-      inactiveFrom: undefined,
-    });
-    seen.add(seed.name.toLowerCase());
-  }
-
-  for (const line of state.lines) {
-    const key = line.name.toLowerCase();
-    if (seen.has(key)) continue;
-    lines.push(line);
-    seen.add(key);
-  }
-
-  for (const bucket of Object.values(state.amounts)) {
-    for (const name of Object.keys(bucket)) {
-      const key = name.toLowerCase();
-      if (seen.has(key)) continue;
-      lines.push({
-        id: makeRecurringId("variable", name),
-        name,
-        activeFrom: FIRST_EXPENSE_MONTH,
-      });
-      seen.add(key);
-    }
-  }
-
-  return { lines, amounts: state.amounts };
-}
-
-function parseVariableState(raw: unknown): VariableState {
-  if (!raw || typeof raw !== "object") return emptyVariable();
-  const maybe = raw as { lines?: unknown; amounts?: unknown };
-  if (Array.isArray(maybe.lines)) {
-    return normalizeVariableState({
-      lines: maybe.lines
-        .map(parseVariableLine)
-        .filter((x): x is VariableRecurring => x !== null),
-      amounts: parseVariableAmounts(maybe.amounts),
-    });
-  }
-  return normalizeVariableState({
-    lines: [],
-    amounts: parseVariableAmounts(raw),
-  });
-}
-
-function loadVariable(): VariableState {
-  if (typeof window === "undefined") return emptyVariable();
-  try {
-    const raw = window.localStorage.getItem(LS_VARIABLE_V3);
-    if (raw) return parseVariableState(JSON.parse(raw) as unknown);
-    for (const key of LEGACY_VARIABLE_KEYS) {
-      const legacy = window.localStorage.getItem(key);
-      if (legacy) return parseVariableState(JSON.parse(legacy) as unknown);
-    }
-    return emptyVariable();
-  } catch {
-    return emptyVariable();
-  }
-}
-
-function loadRent(): RentState {
-  const empty: RentState = { schedule: [], overrides: {} };
-  if (typeof window === "undefined") return empty;
-  try {
-    const raw = window.localStorage.getItem(LS_RENT_V1);
-    if (!raw) return empty;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return empty;
-    const r = parsed as { schedule?: unknown; overrides?: unknown };
-    const schedule = Array.isArray(r.schedule)
-      ? (r.schedule as RentAllocSchedule[]).filter(
-          (s) =>
-            s &&
-            typeof s.from === "string" &&
-            s.alloc &&
-            typeof s.alloc === "object"
-        )
-      : [];
-    const overrides =
-      r.overrides && typeof r.overrides === "object"
-        ? (r.overrides as Record<string, RentAlloc>)
-        : {};
-    return { schedule, overrides };
-  } catch {
-    return empty;
-  }
-}
-
-function sortFixed(rows: FixedRecurring[]): FixedRecurring[] {
-  const order = PROTECTED_FIXED.map((p) => p.id);
-  const protectedRows = order
-    .map((id) => rows.find((r) => r.id === id))
-    .filter((r): r is FixedRecurring => Boolean(r));
-  const others = rows.filter((r) => !order.includes(r.id));
-  return [...protectedRows, ...others];
-}
-
-/* ---------- Resolution helpers ---------- */
-
-/** Resolves `bill`'s amount for the given month. Returns 0 if nothing matches. */
-function amountForMonth(bill: FixedRecurring, month: string): number {
-  if (!activeForMonth(bill, month)) return 0;
-  if (Object.prototype.hasOwnProperty.call(bill.overrides, month)) {
-    return bill.overrides[month];
-  }
-  let result = 0;
-  for (const entry of [...bill.schedule].sort((a, b) =>
-    a.from.localeCompare(b.from)
-  )) {
-    if (entry.from <= month) result = entry.cents;
-    else break;
-  }
-  return result;
-}
-
-function hasOverride(bill: FixedRecurring, month: string): boolean {
-  return Object.prototype.hasOwnProperty.call(bill.overrides, month);
-}
-
-function setBillAmount(
-  bill: FixedRecurring,
-  month: string,
-  currentMonth: string,
-  cents: number
-): FixedRecurring {
-  if (month >= currentMonth) {
-    const trimmed = bill.schedule.filter((s) => s.from < month);
-    trimmed.push({ from: month, cents });
-    return { ...bill, schedule: trimmed };
-  }
-  return {
-    ...bill,
-    overrides: { ...bill.overrides, [month]: cents },
-  };
-}
-
-function clearBillOverride(
-  bill: FixedRecurring,
-  month: string
-): FixedRecurring {
-  if (!hasOverride(bill, month)) return bill;
-  const next = { ...bill.overrides };
-  delete next[month];
-  return { ...bill, overrides: next };
-}
-
-/** Resolves rent allocations for a month — same schedule/override rules. */
-function rentForMonth(state: RentState, month: string): RentAlloc {
-  if (Object.prototype.hasOwnProperty.call(state.overrides, month)) {
-    return state.overrides[month];
-  }
-  let result: RentAlloc = {};
-  for (const entry of [...state.schedule].sort((a, b) =>
-    a.from.localeCompare(b.from)
-  )) {
-    if (entry.from <= month) result = entry.alloc;
-    else break;
-  }
-  return result;
-}
-
-function hasRentOverride(state: RentState, month: string): boolean {
-  return Object.prototype.hasOwnProperty.call(state.overrides, month);
-}
-
-/**
- * Applies a per-person rent edit. The whole alloc map for the month is
- * written together — current/future edits forward-write, past edits go to
- * overrides only. Caller passes the full new alloc map.
- */
-function setRentAlloc(
-  state: RentState,
-  month: string,
-  currentMonth: string,
-  alloc: RentAlloc
-): RentState {
-  if (month >= currentMonth) {
-    const trimmed = state.schedule.filter((s) => s.from < month);
-    trimmed.push({ from: month, alloc });
-    return { ...state, schedule: trimmed };
-  }
-  return {
-    ...state,
-    overrides: { ...state.overrides, [month]: alloc },
-  };
-}
-
-function clearRentOverride(state: RentState, month: string): RentState {
-  if (!hasRentOverride(state, month)) return state;
-  const next = { ...state.overrides };
-  delete next[month];
-  return { ...state, overrides: next };
-}
 
 /* ---------- Free-form amount input ---------- */
 
@@ -749,7 +268,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
     if (!hydratedRef.current) return; // mount-time setState, not a real edit
     putSetting(key, value).catch((err) => {
       console.warn(`[settings] push ${key} failed`, err);
-      onToast(`Couldn't sync ${label} — saved locally only`);
+      onToast(`Couldn't sync ${label}, saved locally only`);
     });
   }
 
@@ -797,6 +316,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
       occurredOn: string;
       description: string;
       amount: number;
+      allocations: ExpenseAllocation[];
       receiptUrl: string;
       receiptFileId: string;
       receiptMime: string;
@@ -817,6 +337,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         occurredOn: e.occurredOn || e.added || "",
         description: (e.description || "").trim(),
         amount: e.amountCents,
+        allocations: e.allocations ?? [],
         receiptUrl: e.receiptUrl || "",
         receiptFileId: e.receiptFileId || "",
         receiptMime: e.receiptMime || "",
@@ -1039,63 +560,20 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
 
   /* ---- Settlement math ---- */
 
-  const settlement = useMemo(() => {
-    const N = BUYERS.length;
-    // One-time pool: split N ways. Each person's "paid" picks up whatever
-    // they fronted in the expenses list.
-    const oneTimePaidBy = new Map<string, number>();
-    for (const b of BUYERS) oneTimePaidBy.set(b, 0);
-    for (const e of oneTime.inMonth) {
-      oneTimePaidBy.set(
-        e.paidBy,
-        (oneTimePaidBy.get(e.paidBy) ?? 0) + e.amountCents
-      );
-    }
-    const oneTimeShare = Math.round(oneTime.total / N);
-
-    // Five-way bills (non-rent recurring fixed without paidBy + variable).
-    // For each, the share is total/N and any paidBy gets credit for the
-    // full amount.
-    let fiveWayPool = 0;
-    const paidByExtra = new Map<string, number>();
-    for (const b of BUYERS) paidByExtra.set(b, 0);
-
-    for (const r of fixed) {
-      const cents = amountForMonth(r, month);
-      if (cents <= 0) continue;
-      fiveWayPool += cents;
-      if (r.paidBy && BUYERS.includes(r.paidBy as (typeof BUYERS)[number])) {
-        paidByExtra.set(r.paidBy, (paidByExtra.get(r.paidBy) ?? 0) + cents);
-      }
-    }
-    for (const line of variableLines) {
-      const cents = monthVariable[line.name] ?? 0;
-      if (cents > 0) fiveWayPool += cents;
-    }
-    const fiveWayShare = Math.round(fiveWayPool / N);
-
-    // Settlement total = the entire monthly pool (one-time + 5-way + rent).
-    // Rent is per-person, so its share is whatever each person owes.
-    const grand = oneTime.total + fiveWayPool + rentTotal;
-
-    const lines: SplitLine[] = BUYERS.map((name) => {
-      const paid =
-        (oneTimePaidBy.get(name) ?? 0) + (paidByExtra.get(name) ?? 0);
-      const share =
-        oneTimeShare + fiveWayShare + (monthRent[name] ?? 0);
-      return { name, paid, share };
-    });
-
-    return { lines, grand };
-  }, [
-    oneTime,
-    fixed,
-    month,
-    monthVariable,
-    variableLines,
-    rentTotal,
-    monthRent,
-  ]);
+  const settlement = useMemo(
+    () =>
+      computeSettlement({
+        members: BUYERS,
+        expenses: oneTime.inMonth.map((e) => ({
+          paidBy: e.paidBy,
+          amountCents: e.amountCents,
+          allocations: e.allocations ?? [],
+        })),
+        bills: settlementBills(fixed, variable, month),
+        rent: monthRent,
+      }),
+    [oneTime, fixed, variable, month, monthRent]
+  );
 
   const grandTotal = settlement.grand;
 
@@ -1201,6 +679,10 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                         <span className="monthly-trip-amount">
                           {fmtMoney(t.amount)}
                         </span>
+                        <AllocationSummary
+                          allocations={t.allocations}
+                          memberCount={BUYERS.length}
+                        />
                       </div>
                     );
                   })}
@@ -1421,6 +903,9 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         <span>Total for {ymLabel(month)}</span>
         <strong>{fmtMoney(grandTotal)}</strong>
       </div>
+      <p className="monthly-total-note">
+        Personal items on receipts are excluded
+      </p>
 
       {grandTotal > 0 ? (
         <SplitCard

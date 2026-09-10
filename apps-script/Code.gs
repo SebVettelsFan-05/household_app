@@ -6,13 +6,17 @@
  *   - doPost handles the `mirror` action: replaces both sheets from a snapshot
  *   - doGet still serves the legacy read API used by the one-time seed import
  *
+ * IMPORTANT: this file is NOT deployed by the app. After changing it here,
+ * Arthur has to re-paste it into the GAS project by hand (steps below) or
+ * the sheet keeps writing the old columns.
+ *
  * To deploy: open script.google.com → your project → paste this file over
  * Code.gs → Deploy → Manage deployments → pencil/edit on the existing
  * deployment → Version: "New version" → Deploy. The /exec URL stays the same.
  */
 
 const SHEET_NAME = 'Inventory';
-const HEADERS = ['ID', 'Name', 'Quantity (g)', 'Expiry Date', 'Added', 'Category', 'Category reviewed'];
+const HEADERS = ['ID', 'Name', 'Quantity (g)', 'Expiry Date', 'Added', 'Category', 'Category reviewed', 'Owner'];
 
 const CATEGORIES_SHEET = 'Categories';
 const CAT_HEADERS = ['Name', 'Color'];
@@ -20,17 +24,21 @@ const DEFAULT_CATEGORIES = ['Meat', 'Veggies', 'Other'];
 const FALLBACK_CATEGORY = 'Other';
 
 const GROCERY_SHEET = 'Grocery List';
-const GROCERY_HEADERS = ['ID', 'Name', 'Quantity (g)', 'Category', 'Category reviewed', 'Store', 'Added by', 'Done', 'Added'];
+const GROCERY_HEADERS = ['ID', 'Name', 'Quantity (g)', 'Category', 'Category reviewed', 'Store', 'Added by', 'Pool', 'Done', 'Added'];
 
 const RECIPES_SHEET = 'Recipes';
-const RECIPES_HEADERS = ['ID', 'Week start', 'Day', 'Day name', 'Assigned to', 'Name', 'Link', 'Description', 'Ingredients'];
+const RECIPES_HEADERS = ['ID', 'Week start', 'Day', 'Day name', 'Assigned to', 'Name', 'Link', 'Description', 'Ingredients', 'Servings', 'Portions', 'No meal'];
 const DAY_NAMES_GS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const FAVORITES_SHEET = 'Favorite Recipes';
-const FAVORITES_HEADERS = ['ID', 'Name', 'Link', 'Description', 'Ingredients'];
+const FAVORITES_HEADERS = ['ID', 'Name', 'Link', 'Description', 'Ingredients', 'Servings'];
 
 const EXPENSES_SHEET = 'Expenses';
-const EXPENSES_HEADERS = ['ID', 'Name', 'Amount', 'Category', 'Store', 'Paid by', 'Added'];
+const EXPENSES_HEADERS = ['ID', 'Name', 'Amount', 'Category', 'Store', 'Paid by', 'Occurred on', 'Description', 'Allocations', 'Added'];
+
+// Household size, used only to print "Everyone" instead of listing all five
+// names on an allocation line. Keep in sync with BUYERS in lib/types.ts.
+const HOUSEHOLD_SIZE = 5;
 
 const EXPENSE_CATS_SHEET = 'Expense Categories';
 const EXPENSE_CATS_HEADERS = ['Name', 'Color'];
@@ -90,6 +98,7 @@ function mirrorAll_(items, categories, grocery, recipes, favorites, expenses, ex
         it.added ? new Date(it.added + 'T00:00:00') : '',
         it.category || FALLBACK_CATEGORY,
         it.categoryReviewed ? 'Yes' : '',
+        it.owner || '',
       ];
     });
     sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
@@ -128,6 +137,7 @@ function mirrorAll_(items, categories, grocery, recipes, favorites, expenses, ex
           g.categoryReviewed ? 'Yes' : '',
           g.store || '',
           g.addedBy || '',
+          g.pool || 'house',
           g.done ? 'Yes' : '',
           g.added ? new Date(g.added + 'T00:00:00') : '',
         ];
@@ -155,6 +165,9 @@ function mirrorAll_(items, categories, grocery, recipes, favorites, expenses, ex
           r.link || '',
           r.description || '',
           formatIngredients_(r.ingredients),
+          Number(r.servings) || '',
+          Number(r.portions) || '',
+          r.noMeal ? 'Yes' : '',
         ];
       });
       recSheet.getRange(2, 1, rows.length, RECIPES_HEADERS.length).setValues(rows);
@@ -176,6 +189,7 @@ function mirrorAll_(items, categories, grocery, recipes, favorites, expenses, ex
           f.link || '',
           f.description || '',
           formatIngredients_(f.ingredients),
+          f.servings || '',
         ];
       });
       favSheet.getRange(2, 1, rows.length, FAVORITES_HEADERS.length).setValues(rows);
@@ -198,6 +212,9 @@ function mirrorAll_(items, categories, grocery, recipes, favorites, expenses, ex
           e.category || 'Misc',
           e.store || '',
           e.paidBy || '',
+          e.occurredOn ? new Date(e.occurredOn + 'T00:00:00') : '',
+          e.description || '',
+          formatAllocations_(e.allocations),
           e.added ? new Date(e.added + 'T00:00:00') : '',
         ];
       });
@@ -268,6 +285,26 @@ function getExpenseCatsSheet_() {
   sheet.setFrozenRows(1);
   sheet.getRange(1, 1, 1, EXPENSE_CATS_HEADERS.length).setFontWeight('bold');
   return sheet;
+}
+
+/**
+ * Human-readable summary of an expense's allocation lines, e.g.
+ * "meals $60.00 (Arthur, Eli, Minh); house $30.00 (Everyone)". Personal
+ * lines have no participants, so they print as just "personal $20.00".
+ */
+function formatAllocations_(list) {
+  if (!Array.isArray(list)) return '';
+  return list
+    .map(function (a) {
+      if (!a || !a.kind) return '';
+      var amount = '$' + ((Number(a.amountCents) || 0) / 100).toFixed(2);
+      var names = Array.isArray(a.splitAmong) ? a.splitAmong : [];
+      if (names.length === 0) return a.kind + ' ' + amount;
+      var who = names.length >= HOUSEHOLD_SIZE ? 'Everyone' : names.join(', ');
+      return a.kind + ' ' + amount + ' (' + who + ')';
+    })
+    .filter(Boolean)
+    .join('; ');
 }
 
 function formatIngredients_(list) {

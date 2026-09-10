@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { extractRecipeFromHtml } from "./recipeScraper";
+import { extractRecipeFromHtml, parseServings } from "./recipeScraper";
 
 const page = (body: string) =>
   `<!doctype html><html><head><title>Fallback Title - Some Site</title></head><body>${body}</body></html>`;
@@ -178,4 +178,68 @@ test("JSON-LD recipe with no ingredients falls through to other strategies", () 
   // The thin JSON-LD block still knew the real recipe name — it should win
   // over the page title.
   assert.equal(r?.name, "Video Only Recipe");
+});
+
+test("recipeYield as a string with a unit yields numeric servings", () => {
+  const html = page(`
+    <script type="application/ld+json">
+      {"@type":"Recipe","name":"Pad See Ew","recipeYield":"4 servings",
+       "recipeIngredient":["200 g rice noodles","2 eggs"]}
+    </script>`);
+  assert.equal(extractRecipeFromHtml(html)?.servings, 4);
+});
+
+test("recipeYield as a single-element array yields numeric servings", () => {
+  const html = page(`
+    <script type="application/ld+json">
+      {"@type":"Recipe","name":"Congee","recipeYield":["6"],
+       "recipeIngredient":["1 cup rice","8 cups stock"]}
+    </script>`);
+  assert.equal(extractRecipeFromHtml(html)?.servings, 6);
+});
+
+test("piece-count yields are not treated as servings", () => {
+  assert.equal(parseServings("24 cookies"), undefined);
+  assert.equal(parseServings("16 muffins"), undefined);
+  assert.equal(parseServings("Serves 16"), 16);
+  assert.equal(parseServings("8 pieces"), 8);
+  assert.equal(parseServings(["30"]), undefined);
+});
+
+test("a missing or implausible recipeYield leaves servings unset", () => {
+  const noYield = page(`
+    <script type="application/ld+json">
+      {"@type":"Recipe","name":"Toast","recipeIngredient":["2 slices bread"]}
+    </script>`);
+  assert.equal(extractRecipeFromHtml(noYield)?.servings, undefined);
+
+  // "1 batch (makes 240 cookies)" must never become a 240x scale factor.
+  const hugeYield = page(`
+    <script type="application/ld+json">
+      {"@type":"Recipe","name":"Cookies","recipeYield":"240 cookies",
+       "recipeIngredient":["500 g flour"]}
+    </script>`);
+  assert.equal(extractRecipeFromHtml(hugeYield)?.servings, undefined);
+});
+
+test("parseServings handles the shapes real sites emit", () => {
+  assert.equal(parseServings(4), 4);
+  assert.equal(parseServings("Serves 6"), 6);
+  assert.equal(parseServings("4-6 servings"), 4);
+  assert.equal(parseServings(["4", "4 rolls"]), 4);
+  assert.equal(parseServings(["makes a lot", "8 servings"]), 8);
+  assert.equal(parseServings("a few"), undefined);
+  assert.equal(parseServings(0), undefined);
+  assert.equal(parseServings(4.5), undefined);
+  assert.equal(parseServings(undefined), undefined);
+});
+
+test("microdata recipeYield is picked up too", () => {
+  const html = page(`
+    <span itemprop="recipeYield">Serves 3</span>
+    <li itemprop="recipeIngredient">1 cup lentils</li>
+    <li itemprop="recipeIngredient">4 cups water</li>`);
+  const r = extractRecipeFromHtml(html);
+  assert.equal(r?.source, "microdata");
+  assert.equal(r?.servings, 3);
 });

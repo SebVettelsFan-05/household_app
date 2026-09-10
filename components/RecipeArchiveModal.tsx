@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { listArchivedRecipes } from "@/lib/client";
-import { DAY_LONG, parseYmd } from "@/lib/dates";
+import { cookCountsLabel } from "@/lib/cookCounts";
+import { DAY_LONG, parseYmd, ymd } from "@/lib/dates";
 import type { Recipe } from "@/lib/types";
 
 type Props = {
@@ -27,7 +28,7 @@ function weekLabel(weekStart: string): string {
     start.getFullYear() !== new Date().getFullYear()
       ? `, ${start.getFullYear()}`
       : "";
-  return `${startStr} – ${endStr}${year}`;
+  return `${startStr} to ${endStr}${year}`;
 }
 
 export default function RecipeArchiveModal({ onClose, onError }: Props) {
@@ -63,7 +64,9 @@ export default function RecipeArchiveModal({ onClose, onError }: Props) {
     if (!recipes) return [];
     const out: { weekStart: string; recipes: Recipe[] }[] = [];
     let current: { weekStart: string; recipes: Recipe[] } | null = null;
-    for (const r of recipes) {
+    // "No shared meal" markers hold a slot in the planner; there is nothing
+    // to look back at.
+    for (const r of recipes.filter((x) => !x.noMeal)) {
       if (!current || current.weekStart !== r.weekStart) {
         current = { weekStart: r.weekStart, recipes: [] };
         out.push(current);
@@ -71,6 +74,16 @@ export default function RecipeArchiveModal({ onClose, onError }: Props) {
       current.recipes.push(r);
     }
     return out;
+  }, [recipes]);
+
+  // Who has been cooking lately. 28 days keeps it to roughly four cooking
+  // weeks without needing exact week arithmetic.
+  const recentCooks = useMemo(() => {
+    if (!recipes) return "";
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 28);
+    const key = ymd(cutoff);
+    return cookCountsLabel(recipes.filter((r) => r.weekStart >= key));
   }, [recipes]);
 
   return (
@@ -86,6 +99,9 @@ export default function RecipeArchiveModal({ onClose, onError }: Props) {
           Past weeks, newest first. Recipes stay searchable here once the week
           rolls over.
         </p>
+        {recentCooks ? (
+          <p className="archive-cooks">Last 4 weeks: {recentCooks}</p>
+        ) : null}
 
         {recipes === null ? (
           <div className="loading">

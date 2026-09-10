@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import PoolChips from "@/components/PoolChips";
 import { deleteGrocery, updateGrocery } from "@/lib/client";
 import {
   BUYERS,
@@ -8,6 +9,7 @@ import {
   type Category,
   type CategoryDef,
   type GroceryItem,
+  type GroceryPool,
 } from "@/lib/types";
 import CategoryPills from "./CategoryPills";
 
@@ -36,6 +38,7 @@ export default function EditGroceryModal({
   );
   const [store, setStore] = useState(item.store || "");
   const [addedBy, setAddedBy] = useState(item.addedBy);
+  const [pool, setPool] = useState<GroceryPool>(item.pool ?? "house");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -75,6 +78,7 @@ export default function EditGroceryModal({
         categoryReviewed,
         store,
         addedBy,
+        pool,
       });
       onResult(res.grocery, "Saved");
       onClose();
@@ -159,6 +163,10 @@ export default function EditGroceryModal({
               placeholder="(optional)"
             />
           </div>
+        </div>
+        <div className="field">
+          <label>Pool</label>
+          <PoolChips value={pool} onChange={setPool} disabled={busy} />
         </div>
         <div className="field">
           <label htmlFor="eg-by">Added by</label>

@@ -11,7 +11,6 @@ import {
   updateRecipe,
 } from "@/lib/client";
 import {
-  BUYERS,
   type CategoryDef,
   type FavoriteRecipe,
   type Recipe,
@@ -21,6 +20,12 @@ import { DAY_LONG, shortDayLabel } from "@/lib/dates";
 import { findFavoriteMatch, isFavoriteMatch } from "@/lib/favoriteMatch";
 import IngredientList from "./IngredientList";
 
+/** Reads a small count field. Blank or junk means "not set" (0). */
+function countOf(text: string): number {
+  const n = Math.round(Number(text.trim()));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 export type RecipeFields = {
   weekStart: string;
   day: number;
@@ -29,6 +34,10 @@ export type RecipeFields = {
   link: string;
   description: string;
   ingredients: RecipeIngredient[];
+  // Servings the ingredient weights were written for (0 = unknown).
+  servings: number;
+  // Portions being cooked this time (0 = not set).
+  portions: number;
 };
 
 type Props = {
@@ -37,6 +46,8 @@ type Props = {
   initial: RecipeFields;
   categories: CategoryDef[];
   fridgeItems: import("@/lib/types").Item[];
+  // Effective meal group, already falling back to everyone when unset.
+  mealGroup: string[];
   // The two weeks currently visible (this week, next week). The user can
   // move/place a recipe in either of these slots from inside the modal.
   weekOptions: { weekStart: string; label: string }[];
@@ -54,6 +65,8 @@ type Props = {
     recipeName: string;
     ingredients: RecipeIngredient[];
     defaultAddedBy: string;
+    servings: number;
+    portions: number;
     onCategoriesReviewed: (ingredients: RecipeIngredient[]) => void;
   }) => void;
 };
@@ -64,6 +77,7 @@ export default function RecipeModal({
   initial,
   categories,
   fridgeItems,
+  mealGroup,
   weekOptions,
   favorites,
   onFavoritesChange,
@@ -84,6 +98,12 @@ export default function RecipeModal({
   );
   const [day, setDay] = useState<number>(initial.day);
   const [weekStart, setWeekStart] = useState<string>(initial.weekStart);
+  const [servings, setServings] = useState<string>(
+    initial.servings > 0 ? String(initial.servings) : ""
+  );
+  const [portions, setPortions] = useState<string>(
+    initial.portions > 0 ? String(initial.portions) : ""
+  );
   const [busy, setBusy] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
@@ -123,6 +143,12 @@ export default function RecipeModal({
       if (!description.trim() && data.description) {
         setDescription(data.description);
       }
+      // `servings` is newer than this client's response type — read it
+      // defensively so an older API just leaves the field blank.
+      const scraped = Number((data as { servings?: unknown }).servings ?? 0);
+      if (!servings.trim() && Number.isFinite(scraped) && scraped > 0) {
+        setServings(String(Math.round(scraped)));
+      }
       mergeIngredients(data.ingredients);
       if (data.ingredients.length === 0) {
         // Page loaded but had no usable ingredient data — steer straight to
@@ -130,7 +156,7 @@ export default function RecipeModal({
         setShowPaste(true);
         onResult(
           [],
-          "No ingredients found on the page — paste them below instead"
+          "No ingredients found on the page. Paste them below instead"
         );
         return;
       }
@@ -138,7 +164,7 @@ export default function RecipeModal({
       onResult(
         [],
         data.hasApproximate
-          ? `${summary} (some quantities are estimates — double-check)`
+          ? `${summary} (some quantities are estimates, double-check)`
           : summary
       );
     } catch (err) {
@@ -167,7 +193,7 @@ export default function RecipeModal({
       onResult(
         [],
         data.hasApproximate
-          ? `${summary} (some quantities are estimates — double-check)`
+          ? `${summary} (some quantities are estimates, double-check)`
           : summary
       );
     } catch (err) {
@@ -196,6 +222,8 @@ export default function RecipeModal({
       onError("Pick who's cooking");
       return;
     }
+    const servingsNum = countOf(servings);
+    const portionsNum = countOf(portions);
     setBusy(true);
     try {
       if (editing && recipeId) {
@@ -207,6 +235,8 @@ export default function RecipeModal({
           ingredients,
           day,
           weekStart,
+          servings: servingsNum,
+          portions: portionsNum,
         });
         onResult(res.recipes, "Saved");
       } else {
@@ -218,6 +248,8 @@ export default function RecipeModal({
           link: link || undefined,
           description: description || undefined,
           ingredients,
+          servings: servingsNum,
+          portions: portionsNum,
         });
         onResult(res.recipes, "Recipe added");
       }
@@ -295,9 +327,18 @@ export default function RecipeModal({
       recipeName: name.trim() || initial.name || "Recipe",
       ingredients,
       defaultAddedBy: assignedTo,
+      servings: countOf(servings),
+      portions: countOf(portions),
       onCategoriesReviewed: setIngredients,
     });
   }
+
+  // Cooks come from the meal group, but an existing recipe's cook stays
+  // selectable so editing it never silently reassigns the dinner.
+  const cookOptions =
+    !initial.assignedTo || mealGroup.includes(initial.assignedTo)
+      ? mealGroup
+      : [...mealGroup, initial.assignedTo];
 
   const label = weekStart ? shortDayLabel(weekStart, day) : DAY_LONG[day];
 
@@ -357,12 +398,39 @@ export default function RecipeModal({
             <option value="" disabled>
               Pick a cook…
             </option>
-            {BUYERS.map((b) => (
+            {cookOptions.map((b) => (
               <option key={b} value={b}>
                 {b}
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="r-servings">Recipe serves</label>
+            <input
+              id="r-servings"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              placeholder="e.g. 4"
+              value={servings}
+              onChange={(e) => setServings(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="r-portions">Cooking for</label>
+            <input
+              id="r-portions"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              placeholder="e.g. 3"
+              value={portions}
+              onChange={(e) => setPortions(e.target.value)}
+            />
+          </div>
         </div>
 
         <div className="field">

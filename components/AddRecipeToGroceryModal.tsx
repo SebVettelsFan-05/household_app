@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import PoolChips from "@/components/PoolChips";
 import { bulkAddGrocery } from "@/lib/client";
 import { fmtQty } from "@/lib/format";
+import { inventoryItemCounts } from "@/lib/inventoryMatch";
 import { normalizeName } from "@/lib/normalize";
 import {
   BUYERS,
   FALLBACK_CATEGORY,
   type CategoryDef,
   type GroceryItem,
+  type GroceryPool,
   type Item,
   type RecipeIngredient,
 } from "@/lib/types";
@@ -18,6 +21,10 @@ type Props = {
   ingredients: RecipeIngredient[];
   categories: CategoryDef[];
   defaultAddedBy: string;
+  // Base servings the recipe's weights were written for (0 = unknown).
+  servings: number;
+  // Portions being cooked this time (0 = not set).
+  portions: number;
   fridgeItems: Item[];
   onCategoriesReviewed: (ingredients: RecipeIngredient[]) => void;
   onClose: () => void;
@@ -41,6 +48,8 @@ export default function AddRecipeToGroceryModal({
   ingredients,
   categories,
   defaultAddedBy,
+  servings,
+  portions,
   fridgeItems,
   onCategoriesReviewed,
   onClose,
@@ -69,7 +78,21 @@ export default function AddRecipeToGroceryModal({
   );
   const [addedBy, setAddedBy] = useState<string>(defaultAddedBy);
   const [store, setStore] = useState<string>("");
+  // Recipe ingredients are dinner shopping by definition.
+  const [pool, setPool] = useState<GroceryPool>("meals");
   const [busy, setBusy] = useState(false);
+
+  // Weights in the recipe are for `servings` people; we are cooking for
+  // `portions`. Scale on the way out only — the recipe itself is untouched.
+  const scale =
+    servings > 0 && portions > 0 && servings !== portions
+      ? portions / servings
+      : 1;
+  function scaledQuantity(quantity: number): number {
+    if (quantity <= 0) return 0;
+    if (scale === 1) return quantity;
+    return Math.max(1, Math.round(quantity * scale));
+  }
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -110,9 +133,12 @@ export default function AddRecipeToGroceryModal({
   }, [categories, draftIngredients]);
 
   const fridgeIndex = useMemo(() => {
-    const map = new Map<string, Item>();
+    const map = new Map<string, Item[]>();
     for (const it of fridgeItems) {
-      map.set(normalizeName(it.name), it);
+      const key = normalizeName(it.name);
+      const list = map.get(key);
+      if (list) list.push(it);
+      else map.set(key, [it]);
     }
     return map;
   }, [fridgeItems]);
@@ -120,9 +146,12 @@ export default function AddRecipeToGroceryModal({
   const matches = useMemo(
     () =>
       draftIngredients.map(
-        (ing) => fridgeIndex.get(normalizeName(ing.name)) ?? null
+        (ing) =>
+          (fridgeIndex.get(normalizeName(ing.name)) ?? []).find((it) =>
+            inventoryItemCounts(it, pool, addedBy)
+          ) ?? null
       ),
-    [draftIngredients, fridgeIndex]
+    [draftIngredients, fridgeIndex, pool, addedBy]
   );
 
   function toggle(i: number) {
@@ -176,11 +205,12 @@ export default function AddRecipeToGroceryModal({
       const res = await bulkAddGrocery({
         items: toAdd.map(({ ingredient, index }) => ({
           name: ingredient.name,
-          quantity: ingredient.quantity,
+          quantity: scaledQuantity(ingredient.quantity),
           category: resolveCategory(ingredient.category, categories),
           categoryReviewed: ingredient.categoryReviewed === true,
           store: store || undefined,
           addedBy,
+          pool,
         })),
       });
       const reviewedCount = toAdd.filter(
@@ -220,6 +250,13 @@ export default function AddRecipeToGroceryModal({
           <span className="modal-sub">{recipeName || "Recipe"}</span>
         </div>
 
+        {scale !== 1 ? (
+          <p className="scale-note">
+            Scaled x{String(Math.round(scale * 100) / 100)} for {portions} of{" "}
+            {servings} servings
+          </p>
+        ) : null}
+
         <div className="ingredient-actions">
           <button
             type="button"
@@ -242,7 +279,7 @@ export default function AddRecipeToGroceryModal({
         <div className="ing-add-list">
           {draftIngredients.map((ing, i) => {
             const match = matches[i];
-            const qty = fmtQty(ing.quantity);
+            const qty = fmtQty(scaledQuantity(ing.quantity));
             const hasQuantity = ing.quantity > 0;
             return (
               <div className="ing-add-row" key={i}>
@@ -295,6 +332,11 @@ export default function AddRecipeToGroceryModal({
               </div>
             );
           })}
+        </div>
+
+        <div className="field">
+          <label>Pool</label>
+          <PoolChips value={pool} onChange={setPool} disabled={busy} />
         </div>
 
         <div className="field-row">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { deleteItem, updateItem } from "@/lib/client";
 import {
+  BUYERS,
   FALLBACK_CATEGORY,
   type Category,
   type CategoryDef,
@@ -35,6 +36,7 @@ export default function EditModal({
     item.categoryReviewed
   );
   const [useAmt, setUseAmt] = useState("");
+  const [owner, setOwner] = useState(item.owner || "");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -69,6 +71,7 @@ export default function EditModal({
         expiry: exp || undefined,
         category: cat,
         categoryReviewed,
+        owner,
       });
       onResult(res.items, "Saved");
       onClose();
@@ -105,7 +108,7 @@ export default function EditModal({
       setBusy(true);
       try {
         const res = await deleteItem(item.id);
-        onResult(res.items, `Used ${used}g — removed`);
+        onResult(res.items, `Used ${used}g, removed`);
         onClose();
       } catch (err) {
         onError(err instanceof Error ? err.message : String(err));
@@ -123,6 +126,7 @@ export default function EditModal({
         expiry: item.expiry || undefined,
         category: item.category,
         categoryReviewed: item.categoryReviewed,
+        owner: item.owner || "",
       });
       onResult(res.items, `Used ${used}g`);
       onClose();
@@ -192,6 +196,23 @@ export default function EditModal({
               onChange={(e) => setExp(e.target.value)}
             />
           </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="edit-owner">Belongs to</label>
+          <select
+            id="edit-owner"
+            className="select"
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+          >
+            <option value="">Shared</option>
+            {BUYERS.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="field" style={{ marginTop: 12 }}>

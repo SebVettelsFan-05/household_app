@@ -219,6 +219,31 @@ export function msUntilNextLocalMidnight(now: Date = new Date()): number {
   return diff > 0 ? diff : 1000; // safety: never schedule a zero/negative timeout
 }
 
+/** Today's date in the household timezone, as YYYY-MM-DD. */
+export function todayYmd(now: Date = new Date()): string {
+  return ymdFromParts(zonedDateParts(now));
+}
+
+/**
+ * Which Sun-Thu slot today occupies inside `weekStart`'s week, or -1 when
+ * today sits outside it. That happens on Friday and Saturday, when the
+ * active week has already rolled forward to the coming Sunday.
+ */
+export function todayCookingDay(
+  weekStart: string,
+  now: Date = new Date()
+): number {
+  const [wy, wm, wd] = weekStart.split("-").map(Number);
+  if (!wy || !wm || !wd) return -1;
+  const today = zonedDateParts(now);
+  const diff = Math.round(
+    (Date.UTC(today.year, today.month - 1, today.day) -
+      Date.UTC(wy, wm - 1, wd)) /
+      86400000
+  );
+  return diff >= 0 && diff <= 4 ? diff : -1;
+}
+
 /** Pretty label like "Sun, May 24". */
 export function shortDayLabel(weekStart: string, day: number): string {
   const d = addDays(parseYmd(weekStart), day);

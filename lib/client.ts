@@ -34,7 +34,11 @@ import type {
   UpdateCategoryResponse,
   UpdateExpenseCategoryResponse,
   ListSharedAccountsResponse,
+  AllocationKind,
+  GroceryPool,
+  MealGroup,
 } from "./types";
+import { isBuyer, MEAL_GROUP_KEY } from "./types";
 
 async function parse<T>(res: Response): Promise<ApiResponse<T>> {
   let body: unknown = null;
@@ -72,6 +76,8 @@ export type AddInput = {
   expiry?: string;
   category?: string;
   categoryReviewed?: boolean;
+  // Member name for personal food; "" or omitted means shared.
+  owner?: string;
 };
 
 export async function addItem(input: AddInput) {
@@ -148,6 +154,8 @@ export type AddGroceryInput = {
   categoryReviewed?: boolean;
   store?: string;
   addedBy: string;
+  // Defaults to "house" server-side when omitted.
+  pool?: GroceryPool;
 };
 
 export async function addGrocery(input: AddGroceryInput) {
@@ -167,6 +175,7 @@ export type UpdateGroceryInput = {
   categoryReviewed?: boolean;
   store?: string;
   addedBy?: string;
+  pool?: GroceryPool;
   done?: boolean;
 };
 
@@ -225,6 +234,7 @@ export type BulkGroceryInput = {
     categoryReviewed?: boolean;
     store?: string;
     addedBy: string;
+    pool?: GroceryPool;
   }>;
 };
 
@@ -281,6 +291,8 @@ export type ScrapeRecipeResponse = {
   description: string;
   ingredients: RecipeIngredient[];
   hasApproximate: boolean;
+  // Base servings from the site's recipeYield; 0 when it didn't say.
+  servings: number;
   // Which extraction strategy found the recipe ("json-ld", "microdata", …).
   source?: string;
 };
@@ -344,6 +356,10 @@ export type AddRecipeInput = {
   link?: string;
   description?: string;
   ingredients: RecipeIngredient[];
+  servings?: number;
+  portions?: number;
+  // A "no shared meal" marker: name/assignedTo/ingredients may be empty.
+  noMeal?: boolean;
 };
 
 export async function addRecipe(input: AddRecipeInput) {
@@ -383,6 +399,7 @@ export async function addFavorite(input: {
   link?: string;
   description?: string;
   ingredients: RecipeIngredient[];
+  servings?: number;
 }) {
   const res = await fetch("/api/favorites", {
     method: "POST",
@@ -412,6 +429,14 @@ export type AddExpenseInput = {
   paidBy: string;
   occurredOn?: string;
   description?: string;
+  // Required on add. Omit `splitAmong` on house/meals lines to let the
+  // server snapshot the current roster / meal group; send it to keep an
+  // existing snapshot when editing.
+  allocations?: Array<{
+    kind: AllocationKind;
+    amountCents: number;
+    splitAmong?: string[];
+  }>;
   // Required at the API level. Made optional in the type so the form can
   // also call this in places that haven't wired a receipt yet (legacy
   // tests); the server returns a 400 if the file is missing.
@@ -431,6 +456,8 @@ function expenseToFormData(
     fd.append("occurredOn", input.occurredOn);
   if (input.description !== undefined)
     fd.append("description", input.description);
+  if (input.allocations !== undefined)
+    fd.append("allocations", JSON.stringify(input.allocations));
   if (input.receipt) {
     fd.append("receipt", input.receipt.blob, input.receipt.filename);
   }
@@ -570,6 +597,19 @@ export async function getSetting<T>(key: string): Promise<T | null> {
     throw new Error(body && "error" in body ? body.error : "Failed to load setting");
   }
   return body.value;
+}
+
+/** Current meal group. Empty list means "everyone" (legacy behaviour). */
+export async function getMealGroup(): Promise<MealGroup> {
+  const v = await getSetting<MealGroup>(MEAL_GROUP_KEY);
+  const members = Array.isArray(v?.members)
+    ? v!.members.map(String).filter(isBuyer)
+    : [];
+  return { members };
+}
+
+export async function putMealGroup(group: MealGroup): Promise<void> {
+  await putSetting(MEAL_GROUP_KEY, { members: group.members.filter(isBuyer) });
 }
 
 export async function putSetting<T>(key: string, value: T): Promise<void> {

@@ -1,24 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import AddRecipeToGroceryModal from "@/components/AddRecipeToGroceryModal";
 import FavoritesModal from "@/components/FavoritesModal";
 import RecipeArchiveModal from "@/components/RecipeArchiveModal";
 import RecipeCard from "@/components/RecipeCard";
 import RecipeModal, { type RecipeFields } from "@/components/RecipeModal";
-import {
-  addFavorite,
-  deleteFavorite,
-  listFavorites,
-  listRecipes,
-} from "@/lib/client";
-import {
-  COOKING_DAYS,
-  msUntilNextLocalMidnight,
-  nextWeekStart,
-  thisWeekStart,
-} from "@/lib/dates";
-import { findFavoriteMatch, isFavoriteMatch } from "@/lib/favoriteMatch";
+import { COOKING_DAYS } from "@/lib/dates";
+import { isFavoriteMatch } from "@/lib/favoriteMatch";
+import { useRecipeWeeks } from "@/lib/useRecipeWeeks";
 import type {
   CategoryDef,
   FavoriteRecipe,
@@ -32,6 +22,8 @@ type Props = {
   recipes: Recipe[];
   categories: CategoryDef[];
   fridgeItems: Item[];
+  // Effective meal group, already falling back to everyone when unset.
+  mealGroup: string[];
   loading: boolean;
   loadError: string | null;
   onRecipesChange: (next: Recipe[]) => void;
@@ -44,7 +36,11 @@ type EditingState =
   | { mode: "edit"; recipeId: string; initial: RecipeFields }
   | null;
 
-function blankFields(weekStart: string, day: number): RecipeFields {
+function blankFields(
+  weekStart: string,
+  day: number,
+  portions: number
+): RecipeFields {
   return {
     weekStart,
     day,
@@ -53,6 +49,9 @@ function blankFields(weekStart: string, day: number): RecipeFields {
     link: "",
     description: "",
     ingredients: [],
+    servings: 0,
+    // New recipes assume the whole meal group is eating.
+    portions,
   };
 }
 
@@ -65,6 +64,8 @@ function recipeToFields(r: Recipe): RecipeFields {
     link: r.link,
     description: r.description,
     ingredients: r.ingredients,
+    servings: r.servings ?? 0,
+    portions: r.portions ?? 0,
   };
 }
 
@@ -72,6 +73,7 @@ export default function RecipesView({
   recipes,
   categories,
   fridgeItems,
+  mealGroup,
   loading,
   loadError,
   onRecipesChange,
@@ -83,162 +85,32 @@ export default function RecipesView({
     recipeName: string;
     ingredients: RecipeIngredient[];
     defaultAddedBy: string;
+    servings: number;
+    portions: number;
     onCategoriesReviewed: (ingredients: RecipeIngredient[]) => void;
   } | null>(null);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const [favorites, setFavorites] = useState<FavoriteRecipe[]>([]);
-  const [favsLoaded, setFavsLoaded] = useState(false);
-  const [favBusy, setFavBusy] = useState(false);
 
-  // Preload favorites on first mount so the star state on each card is
-  // accurate from the first render — without it the cards would briefly show
-  // unfavorited and then "snap" to favorited once the user opens the modal.
-  useEffect(() => {
-    if (favsLoaded) return;
-    let cancelled = false;
-    listFavorites()
-      .then((data) => {
-        if (cancelled) return;
-        setFavorites(data);
-        setFavsLoaded(true);
-      })
-      .catch(() => {
-        // Silent — the modal will surface load errors on demand.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [favsLoaded]);
-
-  async function toggleFavorite(recipe: Recipe) {
-    if (favBusy) return;
-    setFavBusy(true);
-    try {
-      // Match by name OR link, identical rule to the in-modal check, so the
-      // card star and the modal button never disagree about the state.
-      const match = findFavoriteMatch(
-        { name: recipe.name, link: recipe.link },
-        favorites
-      );
-      if (match) {
-        const res = await deleteFavorite(match.id);
-        setFavorites(res.favorites);
-        onToast(`Removed "${recipe.name}" from favorites`);
-      } else {
-        const res = await addFavorite({
-          name: recipe.name,
-          link: recipe.link,
-          description: recipe.description,
-          ingredients: recipe.ingredients,
-        });
-        setFavorites(res.favorites);
-        onToast(`Saved "${recipe.name}" to favorites`);
-      }
-    } catch (err) {
-      onToast(
-        "Error: " + (err instanceof Error ? err.message : String(err))
-      );
-    } finally {
-      setFavBusy(false);
-    }
-  }
-
-  // Re-computed when `today` changes. A timer schedules itself for the next
-  // household-timezone midnight so the week boundary advances live without a
-  // refresh. At Friday 00:00 Toronto time, the completed Sun-Thu cooking week
-  // drops into the archive and the upcoming Sunday becomes "this week".
-  const [today, setToday] = useState<Date>(() => new Date());
-  const week1 = useMemo(() => thisWeekStart(today), [today]);
-  const week2 = useMemo(() => nextWeekStart(today), [today]);
-
-  useEffect(() => {
-    const delay = msUntilNextLocalMidnight(today);
-    const t = window.setTimeout(() => setToday(new Date()), delay);
-    return () => window.clearTimeout(t);
-  }, [today]);
-
-  // Mobile and laptops aggressively suspend background tabs - the midnight
-  // setTimeout above silently fails to fire across a sleep. Re-read the
-  // clock whenever the tab regains visibility so a user opening the app
-  // Sunday morning sees the rolled-over week even if their phone had been
-  // asleep through the actual boundary.
-  useEffect(() => {
-    function refreshIfVisible() {
-      if (typeof document === "undefined") return;
-      if (document.visibilityState === "visible") {
-        setToday(new Date());
-      }
-    }
-    document.addEventListener("visibilitychange", refreshIfVisible);
-    window.addEventListener("focus", refreshIfVisible);
-    return () => {
-      document.removeEventListener("visibilitychange", refreshIfVisible);
-      window.removeEventListener("focus", refreshIfVisible);
-    };
-  }, []);
-
-  // When the week actually rolls over, refetch so the server-side window
-  // (this/next week) returns the recipes for the new range. Skipped on the
-  // first render so we don't double-fetch right after mount.
-  const firstRender = useMemo(() => ({ v: true }), []);
-  useEffect(() => {
-    if (firstRender.v) {
-      firstRender.v = false;
-      return;
-    }
-    listRecipes()
-      .then(onRecipesChange)
-      .catch((err: unknown) => {
-        onToast(
-          "Error reloading recipes: " +
-            (err instanceof Error ? err.message : String(err))
-        );
-      });
-    // intentionally only depends on week1 — we want a refetch precisely when
-    // the active window slides forward.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [week1]);
-
-  const recipesByWeek = useMemo(() => {
-    const map = new Map<string, Map<number, Recipe>>();
-    map.set(week1, new Map());
-    map.set(week2, new Map());
-    for (const r of recipes) {
-      if (!map.has(r.weekStart)) continue;
-      const slot = map.get(r.weekStart)!;
-      if (!slot.has(r.day)) slot.set(r.day, r);
-    }
-    return map;
-  }, [recipes, week1, week2]);
+  const {
+    week1,
+    week2,
+    recipesByWeek,
+    favorites,
+    setFavorites,
+    favBusy,
+    ensureFavorites,
+    toggleFavorite,
+    markerBusy,
+    addNoMealMarker,
+    removeNoMealMarker,
+    findFirstEmptySlot,
+    weekCooks,
+  } = useRecipeWeeks({ recipes, onRecipesChange, onToast });
 
   async function openFavorites() {
     setFavoritesOpen(true);
-    if (!favsLoaded) {
-      try {
-        const data = await listFavorites();
-        setFavorites(data);
-        setFavsLoaded(true);
-      } catch (err) {
-        onToast(
-          "Error loading favorites: " +
-            (err instanceof Error ? err.message : String(err))
-        );
-      }
-    }
-  }
-
-  // Walk this week and next, return the first empty (weekStart, day) — so
-  // when the user picks a favorite, we drop it into the next free slot
-  // instead of forcing them to overwrite Sunday.
-  function findFirstEmptySlot(): { weekStart: string; day: number } {
-    for (const weekStart of [week1, week2]) {
-      const slots = recipesByWeek.get(weekStart);
-      for (const d of COOKING_DAYS) {
-        if (!slots?.has(d)) return { weekStart, day: d };
-      }
-    }
-    return { weekStart: week1, day: 0 };
+    await ensureFavorites();
   }
 
   function useFavoriteAsTemplate(template: {
@@ -246,19 +118,19 @@ export default function RecipesView({
     link: string;
     description: string;
     ingredients: FavoriteRecipe["ingredients"];
+    servings: number;
   }) {
     setFavoritesOpen(false);
     const slot = findFirstEmptySlot();
     setEditing({
       mode: "new",
       initial: {
-        weekStart: slot.weekStart,
-        day: slot.day,
-        assignedTo: "",
+        ...blankFields(slot.weekStart, slot.day, mealGroup.length),
         name: template.name,
         link: template.link,
         description: template.description,
         ingredients: template.ingredients,
+        servings: template.servings,
       },
     });
   }
@@ -297,6 +169,9 @@ export default function RecipesView({
             <section className="week-section" key={weekStart}>
               <div className="list-head">
                 <h2>{label}</h2>
+                {weekCooks(weekStart) ? (
+                  <span className="week-cooks">{weekCooks(weekStart)}</span>
+                ) : null}
               </div>
               <div className="recipe-grid">
                 {COOKING_DAYS.map((d) => {
@@ -317,7 +192,31 @@ export default function RecipesView({
                       }
                       favBusy={favBusy}
                       onToggleFavorite={
-                        recipe ? () => toggleFavorite(recipe) : undefined
+                        recipe && !recipe.noMeal
+                          ? () => toggleFavorite(recipe)
+                          : undefined
+                      }
+                      busy={markerBusy}
+                      onNoMeal={
+                        recipe ? undefined : () => addNoMealMarker(weekStart, d)
+                      }
+                      onPlanMeal={
+                        recipe?.noMeal
+                          ? () =>
+                              setEditing({
+                                mode: "new",
+                                initial: blankFields(
+                                  weekStart,
+                                  d,
+                                  mealGroup.length
+                                ),
+                              })
+                          : undefined
+                      }
+                      onClearNoMeal={
+                        recipe?.noMeal
+                          ? () => removeNoMealMarker(recipe)
+                          : undefined
                       }
                       onClick={() =>
                         recipe
@@ -328,7 +227,11 @@ export default function RecipesView({
                             })
                           : setEditing({
                               mode: "new",
-                              initial: blankFields(weekStart, d),
+                              initial: blankFields(
+                                weekStart,
+                                d,
+                                mealGroup.length
+                              ),
                             })
                       }
                     />
@@ -347,6 +250,7 @@ export default function RecipesView({
           initial={editing.initial}
           categories={categories}
           fridgeItems={fridgeItems}
+          mealGroup={mealGroup}
           weekOptions={[
             { weekStart: week1, label: "This week" },
             { weekStart: week2, label: "Next week" },
@@ -370,6 +274,8 @@ export default function RecipesView({
           ingredients={addingToGrocery.ingredients}
           categories={categories}
           defaultAddedBy={addingToGrocery.defaultAddedBy}
+          servings={addingToGrocery.servings}
+          portions={addingToGrocery.portions}
           fridgeItems={fridgeItems}
           onCategoriesReviewed={addingToGrocery.onCategoriesReviewed}
           onClose={() => setAddingToGrocery(null)}

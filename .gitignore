@@ -39,3 +39,8 @@ next-env.d.ts
 .vercel
 .env*
 .claude
+
+# playwright smoke output
+/smoke/out/
+/test-results/
+/playwright-report/

@@ -7,11 +7,13 @@ import {
   guessCategoryOrFallback,
   storedCategoryWeight,
 } from "@/lib/guessCategory";
+import PoolChips from "@/components/PoolChips";
 import {
   BUYERS,
   FALLBACK_CATEGORY,
   type CategoryDef,
   type GroceryItem,
+  type GroceryPool,
   type Item,
 } from "@/lib/types";
 
@@ -66,6 +68,7 @@ export default function DictateItemsModal(props: Props) {
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [addedBy, setAddedBy] = useState<string>(""); // grocery mode only
+  const [pool, setPool] = useState<GroceryPool>("house"); // grocery mode only
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -204,6 +207,7 @@ export default function DictateItemsModal(props: Props) {
                   : FALLBACK_CATEGORY,
               categoryReviewed: row.categoryReviewed,
               addedBy,
+              pool,
             });
             lastGrocery = res.grocery;
             added++;
@@ -250,6 +254,13 @@ export default function DictateItemsModal(props: Props) {
           weights. We&apos;ll detect each item from its weight, so you
           don&apos;t need to add commas or pauses between them.
         </p>
+
+        {props.mode === "grocery" ? (
+          <div className="field">
+            <label>Pool</label>
+            <PoolChips value={pool} onChange={setPool} disabled={busy} />
+          </div>
+        ) : null}
 
         {props.mode === "grocery" ? (
           <div className="field">

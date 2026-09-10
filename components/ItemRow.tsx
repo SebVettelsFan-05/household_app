@@ -29,6 +29,12 @@ export default function ItemRow({ item, color, onClick }: Props) {
           <span className="cat-tag" style={{ color }}>
             {item.category}
           </span>
+          {item.owner ? (
+            <>
+              <span className="dot" />
+              <span className="owner-badge">{item.owner}&apos;s</span>
+            </>
+          ) : null}
           {exp.label ? (
             <>
               <span className="dot" />

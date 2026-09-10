@@ -2,6 +2,7 @@ import { after, NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
 import { bulkAddGroceryRepo } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
+import type { GroceryPool } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ type BulkBody = {
     categoryReviewed?: boolean;
     store?: string;
     addedBy?: string;
+    pool?: GroceryPool;
   }>;
 };
 
@@ -27,6 +29,7 @@ export async function POST(req: NextRequest) {
       categoryReviewed: i.categoryReviewed === true,
       store: i.store,
       addedBy: i.addedBy ?? "",
+      pool: i.pool,
     }));
     const grocery = await bulkAddGroceryRepo(items);
     after(() => mirrorToSheet());
