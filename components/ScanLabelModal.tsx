@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ModalFrame from "@/components/ModalFrame";
 import { lookupProductByBarcode, type ProductScan } from "@/lib/client";
 import { getBarcodeReader } from "@/lib/scanBarcode";
 import { recognizeLabel } from "@/lib/scanExpiry";
@@ -217,85 +218,84 @@ export default function ScanLabelModal({
   }
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal scan-modal">
-        <div className="scan-camera-wrap">
-          <video
-            ref={videoRef}
-            className="scan-camera"
-            playsInline
-            muted
-            autoPlay
-          />
-          {stage.kind === "scanning" ? (
-            <div className="scan-overlay">
-              <div className="scan-reticle" />
-              <div className="scan-status">Looking for a barcode…</div>
-            </div>
-          ) : null}
-          {stage.kind === "ocr-running" ? (
-            <div className="scan-overlay">
-              <div className="scan-status">
-                <span className="spinner" /> Reading the label…
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {stage.kind === "scanning" ? (
-          <div className="scan-section">
-            <p className="scan-hint" style={{ marginBottom: 4 }}>
-              No barcode? Frame the product name (biggest text on the
-              label) and tap below. We&apos;ll read it plus weight + expiry
-              if visible.
-            </p>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={captureForOcr}
-            >
-              <span className="btn-emoji" aria-hidden="true">📸</span> Capture label (skip barcode)
-            </button>
-          </div>
-        ) : null}
-
-        {stage.kind === "error" ? (
-          <div className="scan-section">
-            <p className="scan-error">{stage.message}</p>
-          </div>
-        ) : null}
-
-        {stage.kind === "product" ? (
-          <ProductPanel
-            product={stage.product}
-            barcode={stage.barcode}
-            withExpiry={withExpiry}
-            onCapture={captureForOcr}
-            onSkip={skipOcr}
-          />
-        ) : null}
-
-        {stage.kind === "review" ? (
-          <ReviewPanel
-            product={stage.product}
-            ocr={stage.ocr}
-            withExpiry={withExpiry}
-            onConfirm={confirm}
-          />
-        ) : null}
-
-        <div className="modal-actions">
+    <ModalFrame
+      title="Scan a label"
+      classicTitle={null}
+      classicClass="scan-modal"
+      onClose={onClose}
+      actions={
+        <>
           <button type="button" className="btn-secondary" onClick={onClose}>
             Cancel
           </button>
-        </div>
+        </>
+      }
+    >
+      <div className="scan-camera-wrap">
+        <video
+          ref={videoRef}
+          className="scan-camera"
+          playsInline
+          muted
+          autoPlay
+        />
+        {stage.kind === "scanning" ? (
+          <div className="scan-overlay">
+            <div className="scan-reticle" />
+            <div className="scan-status">Looking for a barcode…</div>
+          </div>
+        ) : null}
+        {stage.kind === "ocr-running" ? (
+          <div className="scan-overlay">
+            <div className="scan-status">
+              <span className="spinner" /> Reading the label…
+            </div>
+          </div>
+        ) : null}
       </div>
-    </div>
+
+      {stage.kind === "scanning" ? (
+        <div className="scan-section">
+          <p className="scan-hint" style={{ marginBottom: 4 }}>
+            No barcode? Frame the product name (biggest text on the
+            label) and tap below. We&apos;ll read it plus weight + expiry
+            if visible.
+          </p>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={captureForOcr}
+          >
+            <span className="btn-emoji" aria-hidden="true">📸</span> Capture label (skip barcode)
+          </button>
+        </div>
+      ) : null}
+
+      {stage.kind === "error" ? (
+        <div className="scan-section">
+          <p className="scan-error">{stage.message}</p>
+        </div>
+      ) : null}
+
+      {stage.kind === "product" ? (
+        <ProductPanel
+          product={stage.product}
+          barcode={stage.barcode}
+          withExpiry={withExpiry}
+          onCapture={captureForOcr}
+          onSkip={skipOcr}
+        />
+      ) : null}
+
+      {stage.kind === "review" ? (
+        <ReviewPanel
+          product={stage.product}
+          ocr={stage.ocr}
+          withExpiry={withExpiry}
+          onConfirm={confirm}
+        />
+      ) : null}
+    </ModalFrame>
   );
 }
 

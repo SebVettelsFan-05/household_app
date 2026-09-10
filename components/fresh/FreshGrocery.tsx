@@ -251,6 +251,7 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
       {adding ? (
         <FreshSheet title="Add item" onClose={() => setAdding(false)}>
           <AddGroceryForm
+            embedded
             categories={data.categories}
             fridgeItems={data.items}
             grocery={data.grocery}

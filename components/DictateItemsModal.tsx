@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ModalFrame from "@/components/ModalFrame";
+import PersonPicker from "@/components/PersonPicker";
 import { addGrocery, addItem } from "@/lib/client";
 import { parseDictation, type DictationItem } from "@/lib/dictationParse";
 import {
@@ -9,7 +11,6 @@ import {
 } from "@/lib/guessCategory";
 import PoolChips from "@/components/PoolChips";
 import {
-  BUYERS,
   FALLBACK_CATEGORY,
   type CategoryDef,
   type GroceryItem,
@@ -241,92 +242,18 @@ export default function DictateItemsModal(props: Props) {
   const hasExpiry = props.mode === "inventory";
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) props.onClose();
-      }}
-    >
-      <div className="modal modal-wide">
-        <h2><span className="btn-emoji" aria-hidden="true">🎙️</span> Dictate {targetLabel} items</h2>
-        <p className="scan-hint" style={{ marginTop: -4 }}>
-          Tap the mic on your keyboard and read off products with their
-          weights. We&apos;ll detect each item from its weight, so you
-          don&apos;t need to add commas or pauses between them.
-        </p>
-
-        {props.mode === "grocery" ? (
-          <div className="field">
-            <label>Pool</label>
-            <PoolChips value={pool} onChange={setPool} disabled={busy} />
-          </div>
-        ) : null}
-
-        {props.mode === "grocery" ? (
-          <div className="field">
-            <label htmlFor="dict-by">Added by</label>
-            <select
-              id="dict-by"
-              className="select"
-              value={addedBy}
-              onChange={(e) => setAddedBy(e.target.value)}
-            >
-              <option value="" disabled>
-                Pick a name…
-              </option>
-              {BUYERS.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-
-        <textarea
-          className="textarea"
-          rows={5}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={
-            hasExpiry
-              ? '"Chicken breast 500 grams expires June 12 onions one kilogram yogurt 750 grams best before May 30"'
-              : '"Chicken breast 500 grams onions one kilogram yogurt 750 grams two pounds ground beef"'
-          }
-        />
-
-        <div className="dictate-toolbar">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={handleParse}
-            disabled={busy || !text.trim()}
-          >
-            Parse
-          </button>
-          {rows.length > 0 ? (
-            <span className="scan-hint" style={{ marginLeft: "auto" }}>
-              {rows.length} draft{rows.length === 1 ? "" : "s"}
-            </span>
-          ) : null}
-        </div>
-
-        {rows.length > 0 ? (
-          <div className="dictate-rows">
-            {rows.map((row) => (
-              <DraftRowEditor
-                key={row.id}
-                row={row}
-                categories={props.categories}
-                hasExpiry={hasExpiry}
-                onChange={(patch) => updateRow(row.id, patch)}
-                onRemove={() => removeRow(row.id)}
-              />
-            ))}
-          </div>
-        ) : null}
-
-        <div className="modal-actions">
+    <ModalFrame
+      title={`Dictate ${targetLabel} items`}
+      classicTitle={
+        <>
+          <span className="btn-emoji" aria-hidden="true">🎙️</span> Dictate{" "}
+          {targetLabel} items
+        </>
+      }
+      size="wide"
+      onClose={props.onClose}
+      actions={
+        <>
           <button
             type="button"
             className="btn-secondary"
@@ -349,9 +276,75 @@ export default function DictateItemsModal(props: Props) {
                   " "
                 )}
           </button>
+        </>
+      }
+    >
+      <p className="scan-hint" style={{ marginTop: -4 }}>
+        Tap the mic on your keyboard and read off products with their
+        weights. We&apos;ll detect each item from its weight, so you
+        don&apos;t need to add commas or pauses between them.
+      </p>
+
+      {props.mode === "grocery" ? (
+        <div className="field">
+          <label>Pool</label>
+          <PoolChips value={pool} onChange={setPool} disabled={busy} />
         </div>
+      ) : null}
+
+      {props.mode === "grocery" ? (
+        <PersonPicker
+          id="dict-by"
+          label="Added by"
+          value={addedBy}
+          onChange={setAddedBy}
+          emptyLabel="Pick a name…"
+        />
+      ) : null}
+
+      <textarea
+        className="textarea"
+        rows={5}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={
+          hasExpiry
+            ? '"Chicken breast 500 grams expires June 12 onions one kilogram yogurt 750 grams best before May 30"'
+            : '"Chicken breast 500 grams onions one kilogram yogurt 750 grams two pounds ground beef"'
+        }
+      />
+
+      <div className="dictate-toolbar">
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={handleParse}
+          disabled={busy || !text.trim()}
+        >
+          Parse
+        </button>
+        {rows.length > 0 ? (
+          <span className="scan-hint" style={{ marginLeft: "auto" }}>
+            {rows.length} draft{rows.length === 1 ? "" : "s"}
+          </span>
+        ) : null}
       </div>
-    </div>
+
+      {rows.length > 0 ? (
+        <div className="dictate-rows">
+          {rows.map((row) => (
+            <DraftRowEditor
+              key={row.id}
+              row={row}
+              categories={props.categories}
+              hasExpiry={hasExpiry}
+              onChange={(patch) => updateRow(row.id, patch)}
+              onRemove={() => removeRow(row.id)}
+            />
+          ))}
+        </div>
+      ) : null}
+    </ModalFrame>
   );
 }
 

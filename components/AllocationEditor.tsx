@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PersonCheckList } from "@/components/PersonPicker";
 import { fmtMoney, parseCents } from "@/lib/money";
 import type { AllocationKind, ExpenseAllocation } from "@/lib/types";
 
@@ -276,19 +277,15 @@ export default function AllocationEditor({
           ) : null}
 
           {line.kind === "custom" ? (
-            <div className="alloc-members">
-              {members.map((m) => (
-                <label className="alloc-member" key={m}>
-                  <input
-                    type="checkbox"
-                    checked={line.splitAmong.includes(m)}
-                    onChange={() => toggleMember(i, m)}
-                    disabled={disabled}
-                  />
-                  <span>{m}</span>
-                </label>
-              ))}
-            </div>
+            <PersonCheckList
+              people={members}
+              selected={line.splitAmong}
+              onToggle={(m) => toggleMember(i, m)}
+              disabled={disabled}
+              className="alloc-members"
+              itemClassName="alloc-member"
+              ariaLabel={`Who split line ${i + 1} covers`}
+            />
           ) : null}
         </div>
       ))}

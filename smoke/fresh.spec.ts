@@ -423,13 +423,165 @@ test("dismissing the sheet never activates what is under it", async () => {
   );
 });
 
-test("the month segment still shows the classic breakdown", async () => {
+test("the month segment renders the fresh month view", async () => {
   await page.getByRole("tab", { name: "Month" }).click();
-  await expect(page.locator(".monthly-card")).toBeVisible();
+  await expect(page.locator(".fresh-month")).toBeVisible();
+  // No classic chrome leaks into it.
+  await expect(page.locator(".monthly-card")).toHaveCount(0);
   await expect(
-    page.locator(".split-group li", { hasText: "Daniel" }).first()
-  ).toContainText("Share $6.00");
+    page.locator(".fresh-month .fresh-settle-row", { hasText: "Daniel" })
+  ).toContainText("Send $6.00");
+  // Every store the month knows about is one expandable row.
+  const costco = page
+    .locator(".fresh-month .fresh-row", { hasText: "Costco" })
+    .first();
+  await expect(costco).toHaveAttribute("aria-expanded", "false");
+  await costco.click();
+  await expect(costco).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".fresh-trip").first()).toBeVisible();
   await page.getByRole("tab", { name: "Receipts" }).click();
+});
+
+/** Name to signed cents, positive meaning "send to the joint account". */
+async function freshSettlement(p: Page): Promise<Record<string, number>> {
+  return p.locator(".fresh-month").evaluate((root) => {
+    const out: Record<string, number> = {};
+    for (const row of root.querySelectorAll(".fresh-settle-row")) {
+      const name = row.querySelector(".fresh-settle-name")?.textContent ?? "";
+      const amount = row.querySelector(".fresh-money-amount");
+      const cents = Math.round(
+        parseFloat((amount?.textContent ?? "").replace(/[^0-9.]/g, "") || "0") *
+          100
+      );
+      if (!amount || amount.classList.contains("even")) continue;
+      out[name] = amount.classList.contains("withdraw") ? -cents : cents;
+    }
+    return out;
+  });
+}
+
+async function classicSettlement(p: Page): Promise<Record<string, number>> {
+  return p.locator(".monthly-card").evaluate((root) => {
+    const out: Record<string, number> = {};
+    for (const group of root.querySelectorAll(".split-group")) {
+      const sign = group.classList.contains("split-group-send") ? 1 : -1;
+      for (const li of group.querySelectorAll("li")) {
+        const name = li.querySelector(".split-name")?.textContent ?? "";
+        const cents = Math.round(
+          parseFloat(
+            (li.querySelector(".split-amount")?.textContent ?? "").replace(
+              /[^0-9.]/g,
+              ""
+            ) || "0"
+          ) * 100
+        );
+        out[name] = sign * cents;
+      }
+    }
+    return out;
+  });
+}
+
+test("the fresh month and the classic breakdown settle to the same numbers", async () => {
+  await gotoTab(page, "Expenses");
+  await page.getByRole("tab", { name: "Month" }).click();
+  await page.locator(".fresh-month").waitFor();
+  await page.locator(".fresh-month .fresh-settle-row").first().waitFor();
+  const fresh = await freshSettlement(page);
+  expect(Object.keys(fresh).length).toBeGreaterThan(0);
+
+  await page.evaluate(() => window.localStorage.setItem("hh_ui", "classic"));
+  await page.reload();
+  await page.locator(".wrap").waitFor();
+
+  // While we are in the classic shell: its modal chrome must still be exactly
+  // the markup it has always been, with no wrapper introduced by ModalFrame.
+  await page.getByRole("button", { name: "Household settings" }).click();
+  await page.locator(".modal-bg").waitFor();
+  const chrome = await page.locator(".modal-bg").evaluate((el) => {
+    const box = el.firstElementChild as HTMLElement;
+    return {
+      backdrop: el.className,
+      backdropChildren: el.children.length,
+      box: box.className,
+      children: Array.from(box.children).map(
+        (c) =>
+          c.tagName.toLowerCase() +
+          (c.className ? "." + String(c.className).split(" ").join(".") : "")
+      ),
+    };
+  });
+  expect(chrome).toEqual({
+    backdrop: "modal-bg",
+    backdropChildren: 1,
+    box: "modal",
+    children: ["h2", "div.field", "div.modal-actions"],
+  });
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+
+  await page.locator(".tab-bar button", { hasText: "Expenses" }).click();
+  await page.getByRole("button", { name: "Monthly", exact: true }).click();
+  await page.locator(".monthly-card").waitFor();
+  await page.locator(".split-card").waitFor();
+  const classic = await classicSettlement(page);
+  expect(fresh).toEqual(classic);
+
+  await page.evaluate(() => window.localStorage.setItem("hh_ui", "fresh"));
+  await page.reload();
+  await expect(page.locator(".fresh")).toBeVisible();
+});
+
+test("dark mode and the classic look live in the settings sheet", async () => {
+  await expect(page.locator(".fresh-top .theme-toggle")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Household settings" }).first().click();
+  const sheet = page.locator(".fresh-sheet");
+  await expect(sheet).toBeVisible();
+
+  await sheet.getByRole("button", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await sheet.getByRole("button", { name: "Light", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await sheet.getByRole("button", { name: "Classic", exact: true }).click();
+  await expect(page.locator(".wrap")).toBeVisible();
+  expect(
+    await page.evaluate(() => window.localStorage.getItem("hh_ui"))
+  ).toBe("classic");
+
+  // The classic settings modal keeps its own way back.
+  await page.getByRole("button", { name: "Household settings" }).click();
+  await page.getByRole("button", { name: "Try the new look" }).click();
+  await expect(page.locator(".fresh")).toBeVisible();
+});
+
+test("the rail sits in the same place on every section", async () => {
+  for (const width of [1280, 1920, 2560]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const lefts: number[] = [];
+    for (const label of [
+      "Home",
+      "Recipes",
+      "Grocery",
+      "Expenses",
+      "Inventory",
+      "Passwords",
+    ]) {
+      await gotoTab(page, label);
+      await page.locator(".fresh-rail").waitFor();
+      await page.waitForTimeout(150);
+      lefts.push(
+        await page
+          .locator(".fresh-rail")
+          .evaluate((el) => el.getBoundingClientRect().left)
+      );
+    }
+    // Identical on every section, or the rail slides sideways as you browse.
+    expect(new Set(lefts).size, `rail moved at ${width}px: ${lefts}`).toBe(1);
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoTab(page, "Expenses");
 });
 
 test("a grocery row can be added to the meals pool from the fresh shell", async () => {
@@ -441,7 +593,8 @@ test("a grocery row can be added to the meals pool from the fresh shell", async 
   await sheet.locator("#g-name").fill("Freshsmokesoap");
   await sheet.locator("#g-qty").fill("250");
   await sheet.locator(".pool-chips").getByRole("button", { name: "Meals" }).click();
-  await sheet.locator("#g-by").selectOption("Eli");
+  // "Added by" is a row of person discs in the fresh shell, not a <select>.
+  await sheet.locator(".fresh-chip-person", { hasText: "Eli" }).click();
   await sheet.getByRole("button", { name: "Add to list" }).click();
   await expect(page.locator(".fresh-sheet")).toHaveCount(0, {
     timeout: 15_000,
@@ -483,7 +636,7 @@ test("a Saturday dinner is a real slot in both shells", async () => {
   await expect(card).toContainText("Sat");
   // The reused classic modal must offer all seven days and show Saturday.
   await card.locator(".fresh-day-open, button").first().click();
-  const daySelect = page.locator(".modal select").nth(1);
+  const daySelect = page.locator(".fresh-sheet select").nth(1);
   await expect(daySelect.locator("option")).toHaveCount(7);
   await expect(daySelect).toHaveValue("6");
   await page.keyboard.press("Escape");
@@ -604,8 +757,14 @@ test("every fresh screen is captured in both themes and all three sizes", async 
         }
         if (screen.file === "expenses") {
           await p.getByRole("tab", { name: "Month" }).click();
-          await p.locator(".monthly-card").waitFor();
+          await p.locator(".fresh-month").waitFor();
+          await p.waitForTimeout(500);
           await shot("expenses-month");
+          if (vp.width < 720) {
+            await scrollToBottom(p);
+            await shot("expenses-month-bottom");
+            await p.evaluate(() => window.scrollTo(0, 0));
+          }
           await p.getByRole("tab", { name: "Receipts" }).click();
         }
         if (screen.file === "recipes") {
@@ -617,11 +776,48 @@ test("every fresh screen is captured in both themes and all three sizes", async 
         }
       }
 
-      // The add sheet is a screen of its own.
+      // Every sheet is a screen of its own.
       await gotoTab(p, "Expenses");
       await p.getByRole("button", { name: "Add expense" }).first().click();
       await p.locator(".fresh-sheet").waitFor();
       await shot("expense-sheet");
+      await p.locator("#fx-amount").focus();
+      await shot("expense-sheet-focus");
+      await p.keyboard.press("Escape");
+
+      await gotoTab(p, "Grocery");
+      await p.getByRole("button", { name: "Add item" }).first().click();
+      await p.locator(".fresh-sheet").waitFor();
+      await shot("grocery-sheet");
+      await p
+        .locator(".fresh-sheet-body")
+        .evaluate((el) => el.scrollTo(0, el.scrollHeight));
+      await p.waitForTimeout(300);
+      await shot("grocery-sheet-bottom");
+      await p.keyboard.press("Escape");
+
+      await gotoTab(p, "Inventory");
+      await p.getByRole("button", { name: "Add item" }).first().click();
+      await p.locator(".fresh-sheet").waitFor();
+      await shot("inventory-sheet");
+      await p.keyboard.press("Escape");
+
+      await p
+        .getByRole("button", { name: "Household settings" })
+        .first()
+        .click();
+      await p.locator(".fresh-sheet").waitFor();
+      await shot("settings-sheet");
+      await p.keyboard.press("Escape");
+
+      await gotoTab(p, "Expenses");
+      const anyRow = p.locator(".fresh-row").first();
+      if (await anyRow.count()) {
+        await anyRow.click();
+        await p.locator(".fresh-sheet").waitFor();
+        await shot("edit-expense-sheet");
+        await p.keyboard.press("Escape");
+      }
 
       await context.close();
     }

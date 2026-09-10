@@ -7,6 +7,7 @@ import AllocationEditor, {
   blankAllocation,
   type EditableAllocation,
 } from "@/components/AllocationEditor";
+import PersonPicker from "@/components/PersonPicker";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { addExpense } from "@/lib/client";
 import { normalizeAllocations } from "@/lib/allocations";
@@ -198,24 +199,13 @@ export default function AddExpenseForm({
         </div>
       </div>
 
-      <div className="field">
-        <label htmlFor="e-by">Paid by</label>
-        <select
-          id="e-by"
-          className="select"
-          value={paidBy}
-          onChange={(e) => setPaidBy(e.target.value)}
-        >
-          <option value="" disabled>
-            Pick a name…
-          </option>
-          {BUYERS.map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </select>
-      </div>
+      <PersonPicker
+        id="e-by"
+        label="Paid by"
+        value={paidBy}
+        onChange={setPaidBy}
+        emptyLabel="Pick a name…"
+      />
 
       <div className="field">
         <label>Split</label>

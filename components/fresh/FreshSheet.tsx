@@ -3,12 +3,17 @@
 import { useEffect, type ReactNode } from "react";
 import { IconX } from "@/components/fresh/icons";
 
+export type SheetSize = "default" | "wide";
+
 type Props = {
   title: string;
+  subtitle?: ReactNode;
   onClose: () => void;
   children: ReactNode;
   /** Sticky row pinned to the bottom of the sheet. */
   actions?: ReactNode;
+  /** "wide" widens the desktop dialog for list-heavy content. */
+  size?: SheetSize;
 };
 
 /**
@@ -21,9 +26,11 @@ type Props = {
  */
 export default function FreshSheet({
   title,
+  subtitle,
   onClose,
   children,
   actions,
+  size = "default",
 }: Props) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -33,6 +40,8 @@ export default function FreshSheet({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // The FAB sits in the same corner as a sheet's sticky action row, so
+  // fresh.css hides it while a sheet is open (`.fresh:has(.fresh-sheet-bg)`).
   return (
     <div
       className="fresh-sheet-bg"
@@ -41,14 +50,19 @@ export default function FreshSheet({
       }}
     >
       <div
-        className="fresh-sheet"
+        className={`fresh-sheet${size === "wide" ? " fresh-sheet-wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
       >
         <div className="fresh-sheet-grip" aria-hidden="true" />
         <div className="fresh-sheet-head">
-          <h2 className="fresh-sheet-title">{title}</h2>
+          <div className="fresh-sheet-heading">
+            <h2 className="fresh-sheet-title">{title}</h2>
+            {subtitle ? (
+              <span className="fresh-sheet-sub">{subtitle}</span>
+            ) : null}
+          </div>
           <button
             type="button"
             className="fresh-icon-btn"

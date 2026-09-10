@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import ReceiptImage from "@/components/ReceiptImage";
 
 type Props = {
   src: string;
@@ -48,8 +49,15 @@ export default function ReceiptLightbox({
         className="receipt-lightbox-content"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} />
+        <ReceiptImage
+          src={src}
+          alt={alt}
+          fallback={
+            <p className="receipt-lightbox-missing">
+              This receipt image could not be loaded.
+            </p>
+          }
+        />
         {originalHref ? (
           <a
             href={originalHref}

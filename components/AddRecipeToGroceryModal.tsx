@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ModalFrame from "@/components/ModalFrame";
+import PersonPicker from "@/components/PersonPicker";
 import PoolChips from "@/components/PoolChips";
 import { bulkAddGrocery } from "@/lib/client";
 import { fmtQty } from "@/lib/format";
 import { inventoryItemCounts } from "@/lib/inventoryMatch";
 import { normalizeName } from "@/lib/normalize";
 import {
-  BUYERS,
   FALLBACK_CATEGORY,
   type CategoryDef,
   type GroceryItem,
@@ -238,139 +239,13 @@ export default function AddRecipeToGroceryModal({
   const checkedCount = checked.filter(Boolean).length;
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal modal-wide">
-        <div className="modal-header">
-          <h2>Add to grocery list</h2>
-          <span className="modal-sub">{recipeName || "Recipe"}</span>
-        </div>
-
-        {scale !== 1 ? (
-          <p className="scale-note">
-            Scaled x{String(Math.round(scale * 100) / 100)} for {portions} of{" "}
-            {servings} servings
-          </p>
-        ) : null}
-
-        <div className="ingredient-actions">
-          <button
-            type="button"
-            className="manage-link"
-            onClick={selectAll}
-            disabled={busy}
-          >
-            Select all
-          </button>
-          <button
-            type="button"
-            className="manage-link"
-            onClick={selectNone}
-            disabled={busy}
-          >
-            None
-          </button>
-        </div>
-
-        <div className="ing-add-list">
-          {draftIngredients.map((ing, i) => {
-            const match = matches[i];
-            const qty = fmtQty(scaledQuantity(ing.quantity));
-            const hasQuantity = ing.quantity > 0;
-            return (
-              <div className="ing-add-row" key={i}>
-                <label className="ing-add-choice">
-                  <input
-                    type="checkbox"
-                    checked={checked[i] ?? false}
-                    onChange={() => toggle(i)}
-                    disabled={busy || !hasQuantity}
-                  />
-                  <div className="ing-add-body">
-                    <div className="ing-add-name">
-                      {ing.name}{" "}
-                      <span className="ing-add-qty">
-                        {qty.num}
-                        {qty.unit}
-                      </span>
-                    </div>
-                    {match ? (
-                      <div className="ing-add-hint">
-                        You already have{" "}
-                        <strong>
-                          {fmtQty(match.quantity).num}
-                          {fmtQty(match.quantity).unit}
-                        </strong>{" "}
-                        in inventory
-                      </div>
-                    ) : null}
-                    {!hasQuantity ? (
-                      <div className="ing-add-hint">
-                        Add a weight in the recipe before putting this item on
-                        the grocery list.
-                      </div>
-                    ) : null}
-                  </div>
-                </label>
-                <select
-                  className="ingredient-cat ing-add-category"
-                  aria-label={`Category for ${ing.name}`}
-                  value={resolveCategory(ing.category, categories)}
-                  onChange={(e) => updateCategory(i, e.target.value)}
-                  disabled={busy || !checked[i]}
-                >
-                  {categoryOptions.map((category) => (
-                    <option key={category.name} value={category.name}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="field">
-          <label>Pool</label>
-          <PoolChips value={pool} onChange={setPool} disabled={busy} />
-        </div>
-
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="rg-by">Added by</label>
-            <select
-              id="rg-by"
-              className="select"
-              value={addedBy}
-              onChange={(e) => setAddedBy(e.target.value)}
-            >
-              <option value="" disabled>
-                Pick a name…
-              </option>
-              {BUYERS.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="rg-store">Store (optional)</label>
-            <input
-              id="rg-store"
-              type="text"
-              placeholder="e.g. Costco"
-              value={store}
-              onChange={(e) => setStore(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="modal-actions">
+    <ModalFrame
+      title="Add to grocery list"
+      subtitle={recipeName || "Recipe"}
+      size="wide"
+      onClose={onClose}
+      actions={
+        <>
           <div />
           <div className="right">
             <button
@@ -393,8 +268,117 @@ export default function AddRecipeToGroceryModal({
                 : `Add ${checkedCount} item${checkedCount === 1 ? "" : "s"}`}
             </button>
           </div>
+        </>
+      }
+    >
+      {scale !== 1 ? (
+        <p className="scale-note">
+          Scaled x{String(Math.round(scale * 100) / 100)} for {portions} of{" "}
+          {servings} servings
+        </p>
+      ) : null}
+
+      <div className="ingredient-actions">
+        <button
+          type="button"
+          className="manage-link"
+          onClick={selectAll}
+          disabled={busy}
+        >
+          Select all
+        </button>
+        <button
+          type="button"
+          className="manage-link"
+          onClick={selectNone}
+          disabled={busy}
+        >
+          None
+        </button>
+      </div>
+
+      <div className="ing-add-list">
+        {draftIngredients.map((ing, i) => {
+          const match = matches[i];
+          const qty = fmtQty(scaledQuantity(ing.quantity));
+          const hasQuantity = ing.quantity > 0;
+          return (
+            <div className="ing-add-row" key={i}>
+              <label className="ing-add-choice">
+                <input
+                  type="checkbox"
+                  checked={checked[i] ?? false}
+                  onChange={() => toggle(i)}
+                  disabled={busy || !hasQuantity}
+                />
+                <div className="ing-add-body">
+                  <div className="ing-add-name">
+                    {ing.name}{" "}
+                    <span className="ing-add-qty">
+                      {qty.num}
+                      {qty.unit}
+                    </span>
+                  </div>
+                  {match ? (
+                    <div className="ing-add-hint">
+                      You already have{" "}
+                      <strong>
+                        {fmtQty(match.quantity).num}
+                        {fmtQty(match.quantity).unit}
+                      </strong>{" "}
+                      in inventory
+                    </div>
+                  ) : null}
+                  {!hasQuantity ? (
+                    <div className="ing-add-hint">
+                      Add a weight in the recipe before putting this item on
+                      the grocery list.
+                    </div>
+                  ) : null}
+                </div>
+              </label>
+              <select
+                className="ingredient-cat ing-add-category"
+                aria-label={`Category for ${ing.name}`}
+                value={resolveCategory(ing.category, categories)}
+                onChange={(e) => updateCategory(i, e.target.value)}
+                disabled={busy || !checked[i]}
+              >
+                {categoryOptions.map((category) => (
+                  <option key={category.name} value={category.name}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="field">
+        <label>Pool</label>
+        <PoolChips value={pool} onChange={setPool} disabled={busy} />
+      </div>
+
+      <div className="field-row">
+        <PersonPicker
+          id="rg-by"
+          label="Added by"
+          value={addedBy}
+          onChange={setAddedBy}
+          emptyLabel="Pick a name…"
+        />
+        <div className="field">
+          <label htmlFor="rg-store">Store (optional)</label>
+          <input
+            id="rg-store"
+            type="text"
+            placeholder="e.g. Costco"
+            value={store}
+            onChange={(e) => setStore(e.target.value)}
+          />
         </div>
       </div>
-    </div>
+    </ModalFrame>
   );
 }

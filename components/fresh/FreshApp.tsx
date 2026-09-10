@@ -21,7 +21,6 @@ import HouseholdSettingsModal from "@/components/HouseholdSettingsModal";
 import ManageCategoriesModal from "@/components/ManageCategoriesModal";
 import PasswordsView from "@/components/PasswordsView";
 import RefreshButton from "@/components/RefreshButton";
-import ThemeToggle from "@/components/ThemeToggle";
 import Toast from "@/components/Toast";
 import { effectiveMealGroup } from "@/lib/mealGroup";
 import type { HouseholdData } from "@/lib/useHouseholdData";
@@ -134,7 +133,6 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
         <h1 className="fresh-title">{TITLES[tab]}</h1>
         <div className="fresh-top-actions">
           <RefreshButton onRefresh={data.refresh} onError={data.showToast} />
-          <ThemeToggle />
           <button
             type="button"
             className="fresh-icon-btn"
@@ -254,6 +252,7 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
       {settingsOpen ? (
         <HouseholdSettingsModal
           group={data.mealGroup}
+          onSwitchUi={onSwitchUi}
           onClose={() => setSettingsOpen(false)}
           onSaved={data.setMealGroup}
           onToast={data.showToast}

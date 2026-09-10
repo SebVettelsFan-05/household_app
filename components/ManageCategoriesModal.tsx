@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyboardEvent, useState } from "react";
+import ModalFrame from "@/components/ModalFrame";
 import {
   addCategory,
   deleteCategory,
@@ -120,112 +121,11 @@ export default function ManageCategoriesModal({
     (newName.trim() ? getCategoryColor(newName.trim()) : "#8B8278");
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal">
-        <h2>Categories</h2>
-        <div className="cat-mgr-list">
-          {sortCategories(categories).map((c) => {
-            const resolved = getCategoryColor(c.name, c.color);
-            const inUse = items.filter((i) => i.category === c.name).length;
-            const protectedCat = isProtectedCategory(c.name);
-            const swatchValue = c.color || resolved;
-            const inputId = `color-${c.name}`;
-            return (
-              <div className="cat-mgr-row" key={c.name}>
-                <label
-                  htmlFor={inputId}
-                  className="cat-swatch"
-                  style={{ background: swatchValue }}
-                  title="Click to change color"
-                />
-                <input
-                  id={inputId}
-                  type="color"
-                  className="cat-color-input"
-                  value={swatchValue}
-                  disabled={busy}
-                  onChange={(e) => changeColor(c.name, e.target.value)}
-                />
-                <span className="cat-mgr-name" style={{ color: resolved }}>
-                  {c.name}
-                </span>
-                <span className="cat-mgr-meta">
-                  {inUse} item{inUse === 1 ? "" : "s"}
-                </span>
-                <button
-                  type="button"
-                  className="cat-mgr-link"
-                  onClick={() => resetColor(c.name)}
-                  disabled={busy || !c.color}
-                  title={
-                    c.color
-                      ? "Reset to default palette color"
-                      : "Already using default color"
-                  }
-                >
-                  Reset
-                </button>
-                {protectedCat ? (
-                  <span className="cat-mgr-protected">default</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-danger"
-                    onClick={() => remove(c.name)}
-                    disabled={busy}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="field">
-          <label htmlFor="new-cat">New category</label>
-          <div className="new-cat-row">
-            <label
-              htmlFor="new-cat-color"
-              className="cat-swatch"
-              style={{ background: newSwatch }}
-              title="Pick a color"
-            />
-            <input
-              id="new-cat-color"
-              type="color"
-              className="cat-color-input"
-              value={newColor || newSwatch}
-              onChange={(e) => setNewColor(e.target.value)}
-              disabled={busy}
-            />
-            <input
-              id="new-cat"
-              type="text"
-              placeholder="e.g. Dairy"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={onEnter}
-              maxLength={32}
-              disabled={busy}
-            />
-            <button
-              type="button"
-              className="btn-accent"
-              onClick={add}
-              disabled={busy}
-            >
-              Add
-            </button>
-          </div>
-        </div>
-
-        <div className="modal-actions">
+    <ModalFrame
+      title="Categories"
+      onClose={onClose}
+      actions={
+        <>
           <div />
           <div className="right">
             <button
@@ -237,8 +137,105 @@ export default function ManageCategoriesModal({
               Done
             </button>
           </div>
+        </>
+      }
+    >
+      <div className="cat-mgr-list">
+        {sortCategories(categories).map((c) => {
+          const resolved = getCategoryColor(c.name, c.color);
+          const inUse = items.filter((i) => i.category === c.name).length;
+          const protectedCat = isProtectedCategory(c.name);
+          const swatchValue = c.color || resolved;
+          const inputId = `color-${c.name}`;
+          return (
+            <div className="cat-mgr-row" key={c.name}>
+              <label
+                htmlFor={inputId}
+                className="cat-swatch"
+                style={{ background: swatchValue }}
+                title="Click to change color"
+              />
+              <input
+                id={inputId}
+                type="color"
+                className="cat-color-input"
+                value={swatchValue}
+                disabled={busy}
+                onChange={(e) => changeColor(c.name, e.target.value)}
+              />
+              <span className="cat-mgr-name" style={{ color: resolved }}>
+                {c.name}
+              </span>
+              <span className="cat-mgr-meta">
+                {inUse} item{inUse === 1 ? "" : "s"}
+              </span>
+              <button
+                type="button"
+                className="cat-mgr-link"
+                onClick={() => resetColor(c.name)}
+                disabled={busy || !c.color}
+                title={
+                  c.color
+                    ? "Reset to default palette color"
+                    : "Already using default color"
+                }
+              >
+                Reset
+              </button>
+              {protectedCat ? (
+                <span className="cat-mgr-protected">default</span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-danger"
+                  onClick={() => remove(c.name)}
+                  disabled={busy}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="field">
+        <label htmlFor="new-cat">New category</label>
+        <div className="new-cat-row">
+          <label
+            htmlFor="new-cat-color"
+            className="cat-swatch"
+            style={{ background: newSwatch }}
+            title="Pick a color"
+          />
+          <input
+            id="new-cat-color"
+            type="color"
+            className="cat-color-input"
+            value={newColor || newSwatch}
+            onChange={(e) => setNewColor(e.target.value)}
+            disabled={busy}
+          />
+          <input
+            id="new-cat"
+            type="text"
+            placeholder="e.g. Dairy"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={onEnter}
+            maxLength={32}
+            disabled={busy}
+          />
+          <button
+            type="button"
+            className="btn-accent"
+            onClick={add}
+            disabled={busy}
+          >
+            Add
+          </button>
         </div>
       </div>
-    </div>
+    </ModalFrame>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ClassicApp from "@/components/classic/ClassicApp";
 import FreshApp from "@/components/fresh/FreshApp";
+import UiModeProvider from "@/components/UiModeProvider";
 import { getUiMode, setUiMode, type UiMode } from "@/lib/uiMode";
 import { useHouseholdData } from "@/lib/useHouseholdData";
 
@@ -24,9 +25,13 @@ export default function Page() {
 
   if (mode === null) return null;
 
-  return mode === "classic" ? (
-    <ClassicApp data={data} onSwitchUi={() => switchTo("fresh")} />
-  ) : (
-    <FreshApp data={data} onSwitchUi={() => switchTo("classic")} />
+  return (
+    <UiModeProvider mode={mode}>
+      {mode === "classic" ? (
+        <ClassicApp data={data} onSwitchUi={() => switchTo("fresh")} />
+      ) : (
+        <FreshApp data={data} onSwitchUi={() => switchTo("classic")} />
+      )}
+    </UiModeProvider>
   );
 }

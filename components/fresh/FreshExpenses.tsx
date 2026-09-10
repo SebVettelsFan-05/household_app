@@ -3,14 +3,14 @@
 import { useMemo, useState } from "react";
 import EditExpenseModal from "@/components/EditExpenseModal";
 import FreshAddExpenseSheet from "@/components/fresh/FreshAddExpenseSheet";
+import FreshMonthly from "@/components/fresh/FreshMonthly";
 import FreshSettlementCard from "@/components/fresh/FreshSettlementCard";
 import { Avatar } from "@/components/fresh/people";
 import { IconPlus } from "@/components/fresh/icons";
-import MonthlyBreakdown from "@/components/MonthlyBreakdown";
-import { allocationLabel } from "@/lib/allocations";
+import { allocationTag } from "@/lib/allocations";
 import { currentExpenseMonth, expenseMonthOf } from "@/lib/expenseMonths";
 import { fmtMoney } from "@/lib/money";
-import { BUYERS, type Expense, type ExpenseAllocation } from "@/lib/types";
+import { BUYERS, type Expense } from "@/lib/types";
 import { useMonthlySettlement } from "@/lib/useMonthlySettlement";
 import type { HouseholdData } from "@/lib/useHouseholdData";
 
@@ -32,11 +32,6 @@ function dateHeading(iso: string): string {
     month: "short",
     day: "numeric",
   });
-}
-
-/** "Meals 3" / "Everyone" / "Personal", the same rule the classic UI uses. */
-function splitTag(a: ExpenseAllocation): string {
-  return allocationLabel(a, BUYERS.length).replace(/[()]/g, "");
 }
 
 export default function FreshExpenses({
@@ -115,10 +110,7 @@ export default function FreshExpenses({
       <div className="fresh-expenses" data-segment={segment}>
         <div className="fresh-expenses-main">
           {segment === "month" ? (
-            <MonthlyBreakdown
-              expenses={data.expenses}
-              onToast={data.showToast}
-            />
+            <FreshMonthly expenses={data.expenses} onToast={data.showToast} />
           ) : data.expensesLoading ? (
             <div>
               <div className="fresh-skel fresh-skel-row" />
@@ -173,7 +165,7 @@ export default function FreshExpenses({
                                 data-kind={a.kind}
                                 key={i}
                               >
-                                {splitTag(a)}
+                                {allocationTag(a, BUYERS.length)}
                               </span>
                             ))}
                           </span>
@@ -190,14 +182,16 @@ export default function FreshExpenses({
           )}
         </div>
 
-        <aside className="fresh-settlement-col">
-          <FreshSettlementCard
-            settlement={settlement}
-            title="Settlement"
-            subtitle={monthLabel}
-            loading={loadingBills || data.expensesLoading}
-          />
-        </aside>
+        {segment === "receipts" ? (
+          <aside className="fresh-settlement-col">
+            <FreshSettlementCard
+              settlement={settlement}
+              title="Settlement"
+              subtitle={monthLabel}
+              loading={loadingBills || data.expensesLoading}
+            />
+          </aside>
+        ) : null}
       </div>
 
       <button

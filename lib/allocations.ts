@@ -173,3 +173,14 @@ export function allocationLabel(a: ExpenseAllocation, memberCount: number): stri
       return a.splitAmong.join(", ");
   }
 }
+
+/**
+ * The same label with its parentheses dropped, which is how the fresh shell
+ * writes a split on a chip ("Meals 3" rather than "Meals (3)").
+ */
+export function allocationTag(
+  a: ExpenseAllocation,
+  memberCount: number
+): string {
+  return allocationLabel(a, memberCount).replace(/[()]/g, "");
+}

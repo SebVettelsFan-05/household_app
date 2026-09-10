@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ModalFrame from "@/components/ModalFrame";
+import PersonPicker from "@/components/PersonPicker";
 import {
   addFavorite,
   addRecipe,
@@ -343,215 +345,13 @@ export default function RecipeModal({
   const label = weekStart ? shortDayLabel(weekStart, day) : DAY_LONG[day];
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal modal-wide">
-        <div className="modal-header">
-          <h2>{editing ? "Edit recipe" : "Add recipe"}</h2>
-          <span className="modal-sub">{label}</span>
-        </div>
-
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="r-week">Week</label>
-            <select
-              id="r-week"
-              className="select"
-              value={weekStart}
-              onChange={(e) => setWeekStart(e.target.value)}
-            >
-              {weekOptions.map((opt) => (
-                <option key={opt.weekStart} value={opt.weekStart}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="r-day">Day</label>
-            <select
-              id="r-day"
-              className="select"
-              value={day}
-              onChange={(e) => setDay(Number(e.target.value))}
-            >
-              {COOKING_DAYS.map((d) => (
-                <option key={d} value={d}>
-                  {DAY_LONG[d]}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="field">
-          <label htmlFor="r-who">Cook</label>
-          <select
-            id="r-who"
-            className="select"
-            value={assignedTo}
-            onChange={(e) => setAssignedTo(e.target.value)}
-          >
-            <option value="" disabled>
-              Pick a cook…
-            </option>
-            {cookOptions.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="r-servings">Recipe serves</label>
-            <input
-              id="r-servings"
-              type="number"
-              inputMode="numeric"
-              min={0}
-              placeholder="e.g. 4"
-              value={servings}
-              onChange={(e) => setServings(e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="r-portions">Cooking for</label>
-            <input
-              id="r-portions"
-              type="number"
-              inputMode="numeric"
-              min={0}
-              placeholder="e.g. 3"
-              value={portions}
-              onChange={(e) => setPortions(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="field">
-          <label htmlFor="r-name">Recipe name</label>
-          <input
-            id="r-name"
-            type="text"
-            placeholder="e.g. Thai green curry"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-
-        <div className="field">
-          <label htmlFor="r-link">Link (optional)</label>
-          <div className="link-row">
-            <input
-              id="r-link"
-              type="url"
-              placeholder="https://…"
-              value={link}
-              onChange={(e) => setLink(e.target.value)}
-            />
-            <button
-              type="button"
-              className="btn-secondary link-fetch"
-              onClick={fetchFromLink}
-              disabled={scraping || busy || !link.trim()}
-              title="Pull ingredients from the link automatically"
-            >
-              {scraping ? "Fetching…" : "Fetch"}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary link-fetch"
-              onClick={() => setShowPaste((v) => !v)}
-              disabled={scraping || busy}
-              aria-expanded={showPaste}
-              title="Paste an ingredient list copied from anywhere"
-            >
-              Paste
-            </button>
-          </div>
-        </div>
-
-        {showPaste ? (
-          <div className="field">
-            <label htmlFor="r-paste">
-              Pasted ingredients (one per line)
-            </label>
-            <textarea
-              id="r-paste"
-              className="textarea"
-              rows={5}
-              placeholder={"2 tbsp olive oil\n500g chicken thighs\n1 large onion"}
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-            />
-            <div className="link-row" style={{ marginTop: 8 }}>
-              <button
-                type="button"
-                className="btn-secondary link-fetch"
-                onClick={parsePasted}
-                disabled={pasting || busy || !pasteText.trim()}
-              >
-                {pasting ? "Parsing…" : "Add to ingredients"}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="field">
-          <label htmlFor="r-desc">Description / notes (optional)</label>
-          <textarea
-            id="r-desc"
-            className="textarea"
-            rows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Method notes, tweaks, who likes what…"
-          />
-        </div>
-
-        <div className="field">
-          <label>Ingredients</label>
-          <IngredientList
-            value={ingredients}
-            onChange={setIngredients}
-            categories={categories}
-            fridgeItems={fridgeItems}
-          />
-        </div>
-
-        <div className="recipe-actions-row">
-          <button
-            type="button"
-            className={`btn-secondary${isFavorited ? " is-favorited" : ""}`}
-            onClick={toggleFavorite}
-            disabled={busy || !name.trim()}
-            aria-pressed={isFavorited}
-            title={
-              isFavorited
-                ? "Remove this recipe from favorites"
-                : "Save this recipe to favorites"
-            }
-          >
-            <span className="btn-emoji" aria-hidden="true">{isFavorited ? "★ " : "☆ "}</span>
-            {isFavorited ? "Favorited" : "Favorite"}
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={addToGrocery}
-            disabled={busy || ingredients.length === 0}
-            title="Add ingredients to the grocery list"
-          >
-            Add to grocery
-          </button>
-        </div>
-
-        <div className="modal-actions">
+    <ModalFrame
+      title={editing ? "Edit recipe" : "Add recipe"}
+      subtitle={label}
+      size="wide"
+      onClose={onClose}
+      actions={
+        <>
           {editing ? (
             <button
               type="button"
@@ -583,8 +383,194 @@ export default function RecipeModal({
               {busy ? "Saving…" : "Save"}
             </button>
           </div>
+        </>
+      }
+    >
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor="r-week">Week</label>
+          <select
+            id="r-week"
+            className="select"
+            value={weekStart}
+            onChange={(e) => setWeekStart(e.target.value)}
+          >
+            {weekOptions.map((opt) => (
+              <option key={opt.weekStart} value={opt.weekStart}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="r-day">Day</label>
+          <select
+            id="r-day"
+            className="select"
+            value={day}
+            onChange={(e) => setDay(Number(e.target.value))}
+          >
+            {COOKING_DAYS.map((d) => (
+              <option key={d} value={d}>
+                {DAY_LONG[d]}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
-    </div>
+      <PersonPicker
+        id="r-who"
+        label="Cook"
+        value={assignedTo}
+        onChange={setAssignedTo}
+        emptyLabel="Pick a cook…"
+        people={cookOptions}
+      />
+
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor="r-servings">Recipe serves</label>
+          <input
+            id="r-servings"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            placeholder="e.g. 4"
+            value={servings}
+            onChange={(e) => setServings(e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="r-portions">Cooking for</label>
+          <input
+            id="r-portions"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            placeholder="e.g. 3"
+            value={portions}
+            onChange={(e) => setPortions(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="r-name">Recipe name</label>
+        <input
+          id="r-name"
+          type="text"
+          placeholder="e.g. Thai green curry"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+
+      <div className="field">
+        <label htmlFor="r-link">Link (optional)</label>
+        <div className="link-row">
+          <input
+            id="r-link"
+            type="url"
+            placeholder="https://…"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn-secondary link-fetch"
+            onClick={fetchFromLink}
+            disabled={scraping || busy || !link.trim()}
+            title="Pull ingredients from the link automatically"
+          >
+            {scraping ? "Fetching…" : "Fetch"}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary link-fetch"
+            onClick={() => setShowPaste((v) => !v)}
+            disabled={scraping || busy}
+            aria-expanded={showPaste}
+            title="Paste an ingredient list copied from anywhere"
+          >
+            Paste
+          </button>
+        </div>
+      </div>
+
+      {showPaste ? (
+        <div className="field">
+          <label htmlFor="r-paste">
+            Pasted ingredients (one per line)
+          </label>
+          <textarea
+            id="r-paste"
+            className="textarea"
+            rows={5}
+            placeholder={"2 tbsp olive oil\n500g chicken thighs\n1 large onion"}
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+          />
+          <div className="link-row" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn-secondary link-fetch"
+              onClick={parsePasted}
+              disabled={pasting || busy || !pasteText.trim()}
+            >
+              {pasting ? "Parsing…" : "Add to ingredients"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="field">
+        <label htmlFor="r-desc">Description / notes (optional)</label>
+        <textarea
+          id="r-desc"
+          className="textarea"
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Method notes, tweaks, who likes what…"
+        />
+      </div>
+
+      <div className="field">
+        <label>Ingredients</label>
+        <IngredientList
+          value={ingredients}
+          onChange={setIngredients}
+          categories={categories}
+          fridgeItems={fridgeItems}
+        />
+      </div>
+
+      <div className="recipe-actions-row">
+        <button
+          type="button"
+          className={`btn-secondary${isFavorited ? " is-favorited" : ""}`}
+          onClick={toggleFavorite}
+          disabled={busy || !name.trim()}
+          aria-pressed={isFavorited}
+          title={
+            isFavorited
+              ? "Remove this recipe from favorites"
+              : "Save this recipe to favorites"
+          }
+        >
+          <span className="btn-emoji" aria-hidden="true">{isFavorited ? "★ " : "☆ "}</span>
+          {isFavorited ? "Favorited" : "Favorite"}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={addToGrocery}
+          disabled={busy || ingredients.length === 0}
+          title="Add ingredients to the grocery list"
+        >
+          Add to grocery
+        </button>
+      </div>
+    </ModalFrame>
   );
 }

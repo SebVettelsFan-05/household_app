@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ModalFrame from "@/components/ModalFrame";
 import { listArchivedRecipes } from "@/lib/client";
 import { cookCountsLabel } from "@/lib/cookCounts";
 import { DAY_LONG, parseYmd, ymd } from "@/lib/dates";
@@ -87,69 +88,12 @@ export default function RecipeArchiveModal({ onClose, onError }: Props) {
   }, [recipes]);
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal archive-modal">
-        <h2>Recipe archive</h2>
-        <p className="archive-sub">
-          Past weeks, newest first. Recipes stay searchable here once the week
-          rolls over.
-        </p>
-        {recentCooks ? (
-          <p className="archive-cooks">Last 4 weeks: {recentCooks}</p>
-        ) : null}
-
-        {recipes === null ? (
-          <div className="loading">
-            <span className="spinner" />
-            Loading…
-          </div>
-        ) : grouped.length === 0 ? (
-          <div className="empty">
-            <p>No archived recipes yet.</p>
-            <p style={{ fontSize: 13 }}>
-              Past weeks will show up here automatically.
-            </p>
-          </div>
-        ) : (
-          <div className="archive-list">
-            {grouped.map((week) => (
-              <section key={week.weekStart} className="archive-week">
-                <h3>{weekLabel(week.weekStart)}</h3>
-                <div className="archive-recipes">
-                  {week.recipes.map((r) => (
-                    <div key={r.id} className="archive-recipe">
-                      <div className="archive-recipe-head">
-                        <span className="archive-day">{DAY_LONG[r.day]}</span>
-                        <span className="archive-cook">{r.assignedTo}</span>
-                      </div>
-                      <div className="archive-name">{r.name}</div>
-                      {r.description ? (
-                        <div className="archive-desc">{r.description}</div>
-                      ) : null}
-                      {r.link ? (
-                        <a
-                          className="archive-link"
-                          href={r.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          Open recipe<span className="btn-emoji" aria-hidden="true"> ↗</span>
-                        </a>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
-
-        <div className="modal-actions">
+    <ModalFrame
+      title="Recipe archive"
+      classicClass="archive-modal"
+      onClose={onClose}
+      actions={
+        <>
           <div />
           <div className="right">
             <button
@@ -160,8 +104,62 @@ export default function RecipeArchiveModal({ onClose, onError }: Props) {
               Close
             </button>
           </div>
+        </>
+      }
+    >
+      <p className="archive-sub">
+        Past weeks, newest first. Recipes stay searchable here once the week
+        rolls over.
+      </p>
+      {recentCooks ? (
+        <p className="archive-cooks">Last 4 weeks: {recentCooks}</p>
+      ) : null}
+
+      {recipes === null ? (
+        <div className="loading">
+          <span className="spinner" />
+          Loading…
         </div>
-      </div>
-    </div>
+      ) : grouped.length === 0 ? (
+        <div className="empty">
+          <p>No archived recipes yet.</p>
+          <p style={{ fontSize: 13 }}>
+            Past weeks will show up here automatically.
+          </p>
+        </div>
+      ) : (
+        <div className="archive-list">
+          {grouped.map((week) => (
+            <section key={week.weekStart} className="archive-week">
+              <h3>{weekLabel(week.weekStart)}</h3>
+              <div className="archive-recipes">
+                {week.recipes.map((r) => (
+                  <div key={r.id} className="archive-recipe">
+                    <div className="archive-recipe-head">
+                      <span className="archive-day">{DAY_LONG[r.day]}</span>
+                      <span className="archive-cook">{r.assignedTo}</span>
+                    </div>
+                    <div className="archive-name">{r.name}</div>
+                    {r.description ? (
+                      <div className="archive-desc">{r.description}</div>
+                    ) : null}
+                    {r.link ? (
+                      <a
+                        className="archive-link"
+                        href={r.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Open recipe<span className="btn-emoji" aria-hidden="true"> ↗</span>
+                      </a>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+    </ModalFrame>
   );
 }

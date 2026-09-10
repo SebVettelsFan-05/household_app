@@ -9,7 +9,7 @@ import AllocationEditor, {
   type EditableAllocation,
 } from "@/components/AllocationEditor";
 import FreshSheet from "@/components/fresh/FreshSheet";
-import { Avatar, personColor } from "@/components/fresh/people";
+import PersonPicker from "@/components/PersonPicker";
 import { normalizeAllocations } from "@/lib/allocations";
 import { addExpense } from "@/lib/client";
 import {
@@ -168,36 +168,14 @@ export default function FreshAddExpenseSheet({
         </div>
       </div>
 
-      <div className="fresh-field">
-        <label id="fx-paid-label">Paid by</label>
-        <div
-          className="fresh-chips"
-          role="group"
-          aria-labelledby="fx-paid-label"
-        >
-          {BUYERS.map((b) => (
-            <button
-              key={b}
-              type="button"
-              className={`fresh-chip fresh-chip-person${paidBy === b ? " active" : ""}`}
-              style={
-                paidBy === b
-                  ? {
-                      background: personColor(b),
-                      borderColor: personColor(b),
-                    }
-                  : undefined
-              }
-              aria-pressed={paidBy === b}
-              onClick={() => setPaidBy(b)}
-              disabled={busy}
-            >
-              <Avatar name={b} size={22} />
-              {b}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PersonPicker
+        id="fx-by"
+        label="Paid by"
+        value={paidBy}
+        onChange={setPaidBy}
+        emptyLabel="Pick a name…"
+        disabled={busy}
+      />
 
       <div className="fresh-field">
         <label id="fx-split-label">Split</label>

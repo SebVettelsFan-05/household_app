@@ -48,9 +48,11 @@
   --r-control: 14px;
   --top-h: 64px;
   --nav-h: 68px;
-  /* Desktop shell width: rail plus content. Wider where the screen earns a
-     second column, so the block stays centred instead of drifting right. */
-  --shell-w: 944px;
+  /* Desktop shell width: rail plus content. One width for every screen, or
+     the rail slides sideways each time you change section. */
+  --shell-w: 1240px;
+  /* The measure a one-column screen reads at inside that content area. */
+  --column-w: 680px;
 
   /* ---- names globals.css reads ---- */
   --bg: var(--paper);
@@ -129,9 +131,19 @@
   --on-section: #151311;
 }
 
-/* The page behind the shell (overscroll, short screens). */
+/* The page behind the shell (overscroll, short screens). Reserving the
+   scrollbar gutter matters: without it a short screen and a long one lay out
+   at different widths, and the rail jumps sideways between sections. */
 body:has(.fresh) {
   background: #f6f1e7;
+}
+/* Reserve the scrollbar gutter so the rail never shifts between a short
+   and a long section. Desktop only: on phones a reserved gutter narrows
+   every fixed element (sheets, tab bar) by a scrollbar's width. */
+@media (min-width: 720px) {
+  :root:has(.fresh) {
+    scrollbar-gutter: stable;
+  }
 }
 :root[data-theme="dark"] body:has(.fresh) {
   background: #151311;
@@ -373,30 +385,41 @@ body:has(.fresh) {
   flex-direction: column;
   gap: 12px;
 }
+/* The split lines are a panel of controls, so the panel takes the page
+   ground and each field inside it stays on the card ground every other
+   input in the shell uses. */
 .fresh .alloc-line {
   border: 1.5px solid var(--hairline);
   border-radius: var(--r-card);
-  background: var(--card);
+  background: var(--paper);
   padding: 12px;
 }
 .fresh .alloc-amount {
-  height: 44px;
   border: 1.5px solid var(--hairline);
   border-radius: var(--r-control);
-  background: var(--paper);
-  padding: 0 12px;
-}
-.fresh .alloc-amount:focus-within {
-  border-color: var(--section);
-  border-width: 2px;
+  background: var(--card);
+  padding: 0 14px;
 }
 .fresh .alloc-amount-sign {
   font-size: 16px;
+  color: var(--ink-soft);
 }
 .fresh .alloc-amount input {
-  width: 88px;
+  width: 92px;
   font-size: 16px;
   font-weight: 600;
+}
+.fresh .alloc-line-head {
+  gap: 10px;
+}
+.fresh .alloc-note {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh .alloc-remove {
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
 }
 .fresh .alloc-footer {
   display: flex;
@@ -523,14 +546,6 @@ body:has(.fresh) {
   flex-direction: column;
   gap: 24px;
 }
-.fresh[data-section="expenses"],
-.fresh[data-section="recipes"] {
-  --shell-w: 1240px;
-}
-.fresh[data-section="expenses"] .fresh-main,
-.fresh[data-section="recipes"] .fresh-main {
-  max-width: 960px;
-}
 
 /* ---- Bottom nav (phones) ---- */
 
@@ -624,8 +639,17 @@ body:has(.fresh) {
     padding: 20px 14px;
     border-right: 1.5px solid var(--hairline);
   }
+  /* Two-column screens use the whole content area; every other screen
+     centres one readable column inside it. Either way the grid, and so the
+     rail, is exactly as wide on every section. */
   .fresh-main {
+    max-width: none;
     padding: 28px 32px 72px;
+  }
+  .fresh:not([data-section="expenses"]):not([data-section="recipes"])
+    .fresh-main {
+    max-width: calc(var(--column-w) + 64px);
+    margin: 0 auto;
   }
 }
 
@@ -1135,6 +1159,11 @@ button.fresh-row-main {
 .fresh-fab:hover {
   background: color-mix(in srgb, var(--section) 92%, #000);
 }
+/* A sheet owns the screen while it is open; the FAB would sit on top of its
+   sticky action row. */
+.fresh:has(.fresh-sheet-bg) .fresh-fab {
+  display: none;
+}
 @media (min-width: 720px) {
   .fresh-fab {
     right: max(32px, calc((100% - var(--shell-w)) / 2 + 32px));
@@ -1183,12 +1212,22 @@ button.fresh-row-main {
   padding: 8px 16px 12px;
   border-bottom: 1.5px solid var(--hairline);
 }
+.fresh-sheet-heading {
+  min-width: 0;
+}
 .fresh-sheet-title {
   margin: 0;
   font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--section);
+  overflow-wrap: anywhere;
+}
+.fresh-sheet-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--ink-soft);
 }
 .fresh-sheet-head .fresh-icon-btn {
   border: 1.5px solid var(--hairline);
@@ -1200,11 +1239,35 @@ button.fresh-row-main {
   overscroll-behavior: contain;
   padding: 16px;
 }
+/* The sticky row takes whatever the classic modal used to put in
+   `.modal-actions`: a lone full-width primary, or a destructive button on the
+   left with a `.right` cluster opposite it. */
 .fresh-sheet-actions {
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
   padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
   border-top: 1.5px solid var(--hairline);
   background: var(--card);
+}
+.fresh-sheet-actions > * {
+  min-width: 0;
+}
+.fresh-sheet-actions .right {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.fresh-sheet-actions .btn-primary,
+.fresh-sheet-actions .btn-secondary,
+.fresh-sheet-actions .btn-accent,
+.fresh-sheet-actions .btn-danger {
+  padding: 0 20px;
+  white-space: nowrap;
 }
 @media (min-width: 520px) {
   .fresh-sheet-bg {
@@ -1215,12 +1278,45 @@ button.fresh-row-main {
     border-radius: var(--r-card);
     max-height: 88vh;
   }
+  .fresh-sheet-wide {
+    max-width: 640px;
+  }
   .fresh-sheet-grip {
     display: none;
   }
   .fresh-sheet-actions {
     padding-bottom: 16px;
   }
+}
+
+/* ---------------------------------------------------------------- *
+ * Reused add forms inside a sheet
+ * ---------------------------------------------------------------- */
+
+/* The sheet already draws the card, the title and the close button, so the
+   embedded form is just its fields plus a compact tool row. */
+.fresh-embedded-form {
+  display: block;
+}
+.fresh-form-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+/* The submit reads as the sheet's action row: it sticks to the bottom of the
+   scrolling body instead of hiding under the last field. */
+.fresh-form-submit {
+  position: sticky;
+  bottom: calc(-16px - env(safe-area-inset-bottom));
+  z-index: 1;
+  margin: 6px -16px calc(-16px - env(safe-area-inset-bottom));
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--card);
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-form-submit > .btn-primary {
+  width: 100%;
 }
 
 /* ---------------------------------------------------------------- *
@@ -1743,13 +1839,8 @@ button.fresh-row-main {
   flex-direction: column;
   gap: 24px;
 }
-/* On a phone the settlement belongs to the Month segment, above the bills. */
-.fresh-expenses[data-segment="receipts"] > .fresh-settlement-col {
-  display: none;
-}
-.fresh-expenses[data-segment="month"] > .fresh-settlement-col {
-  order: -1;
-}
+/* The Month screen carries its own month-aware settlement card; the side
+   column belongs to the Receipts screen and is only rendered there. */
 .fresh-expenses-main {
   min-width: 0;
   display: flex;
@@ -1763,10 +1854,13 @@ button.fresh-row-main {
     align-items: start;
     gap: 24px;
   }
-  .fresh-expenses[data-segment="receipts"] > .fresh-settlement-col,
-  .fresh-expenses[data-segment="month"] > .fresh-settlement-col {
+  /* One column, full width. It must not stay a flex row here: the grid rule
+     above also sets `align-items: start`, which in a column shrinks the
+     month down to its content width and strands it mid-screen. */
+  .fresh-expenses[data-segment="month"] {
     display: block;
-    order: 0;
+  }
+  .fresh-expenses[data-segment="receipts"] > .fresh-settlement-col {
     position: sticky;
     top: calc(var(--top-h) + 24px);
   }
@@ -1834,6 +1928,219 @@ button.fresh-row-main {
 }
 
 /* ---------------------------------------------------------------- *
+ * Month
+ * ---------------------------------------------------------------- */
+
+.fresh-month {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (min-width: 900px) {
+  /* A bill row is a name and one amount; stretched across the full content
+     area it reads as two things shouting at each other from opposite walls.
+     Centred keeps the rail where it is and the numbers next to their names. */
+  .fresh-month {
+    max-width: 820px;
+    margin: 0 auto;
+  }
+}
+.fresh-month-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fresh-month-nav {
+  border: 1.5px solid var(--hairline);
+}
+.fresh-month-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.fresh-month-label {
+  min-width: 0;
+  font-family: var(--font-display) !important;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+/* Store groups expand into their trips. */
+.fresh-trips {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0 14px;
+  border-bottom: 1.5px solid var(--hairline);
+}
+.fresh-trip {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.fresh-trip-thumb {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  overflow: hidden;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--sunk);
+  cursor: pointer;
+}
+.fresh-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.fresh-thumb-fallback {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-align: center;
+  padding: 0 4px;
+}
+.fresh-trip-main {
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+.fresh-trip-when {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.fresh-trip-desc {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fresh-trip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+.fresh-trip-link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--section);
+}
+.fresh-trip-amount {
+  flex: none;
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Bill rows: a name, optional row buttons, and one money field. */
+.fresh-bill-rows {
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-bill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 68px;
+  padding: 8px 0;
+  border-bottom: 1.5px solid var(--hairline);
+}
+.fresh-bill-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fresh-bill-note {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.fresh-bill-btn {
+  border: 1.5px solid var(--hairline);
+  width: 34px;
+  height: 34px;
+}
+
+/* One control, not a box inside a box: the border and the focus ring live on
+   the wrapper and the input itself is bare. */
+.fresh-money-field {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 124px;
+  height: 52px;
+  padding: 0 12px;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--card);
+}
+.fresh-money-field:has(.fresh-money-input:disabled) {
+  background: var(--sunk);
+}
+.fresh-money-sign {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.fresh-money-input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: none;
+  padding: 0;
+  text-align: right;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.fresh-money-input:disabled {
+  color: var(--ink-soft);
+}
+
+.fresh-bill-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.fresh-bill-add .fresh-input:first-child {
+  flex: 2 1 140px;
+}
+.fresh-bill-add .fresh-input:nth-child(2) {
+  flex: 1 1 90px;
+}
+.fresh-btn-add {
+  flex: none;
+  min-height: 52px;
+  padding: 0 18px;
+}
+
+.fresh-month-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fresh-month-total .fresh-field-hint {
+  margin-top: 6px;
+}
+
+/* ---------------------------------------------------------------- *
  * More
  * ---------------------------------------------------------------- */
 
@@ -1873,21 +2180,182 @@ button.fresh-row-main {
   }
 }
 
-/* Reused classic views (Passwords, modals) inside the fresh shell: every
-   text input is at least 16px so iOS does not zoom, and controls stay in
-   the 18 / 14 / pill radius family. */
-.fresh input:not([type="checkbox"]):not([type="radio"]),
+/* ---------------------------------------------------------------- *
+ * One control vocabulary, everywhere
+ * ---------------------------------------------------------------- */
+
+/*
+ * Every field in the shell, whether it was written for the fresh look or
+ * reused from the classic forms, is one 52px box: 1.5px hairline, 14px
+ * radius, card ground, 16px text (under 16px iOS zooms the page on focus).
+ *
+ * The display-size money fields opt out of the 16px floor by name. They are
+ * far above it, and this rule used to quietly shrink the add-expense amount
+ * from the spec's 36px numerals down to 16px.
+ */
+.fresh
+  input:not([type="checkbox"]):not([type="radio"]):not(.fresh-input-amount),
 .fresh select,
 .fresh textarea {
   font-size: 16px;
-  border-radius: 14px;
+  border-radius: var(--r-control);
 }
+/* Direct children only. A composite control nested inside a `.field` (the
+   split-line amount) owns its own geometry, and a descendant selector here
+   is what used to draw a second rounded box inside the first one. */
+.fresh .field > input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.fresh .field > textarea,
+.fresh .field > select,
+.fresh .field > .select,
+.fresh .monthly-add > input {
+  min-height: 52px;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+.fresh .field > textarea {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  resize: vertical;
+}
+
+/*
+ * Focus draws inside the existing border rather than thickening it. A
+ * 1.5px-to-2px swap reflowed the field by half a pixel, and an outline with
+ * a negative offset is the only ring that follows the 14px radius exactly.
+ */
+.fresh :is(input, select, textarea):focus,
+.fresh :is(input, select, textarea):focus-visible,
+.fresh .fresh-amount-wrap:focus-within,
+.fresh .fresh-money-field:focus-within,
+.fresh .alloc-amount:focus-within {
+  border-width: 1.5px;
+  outline: 2px solid var(--section);
+  outline-offset: -2px;
+}
+.fresh .field input:focus,
+.fresh .field textarea:focus,
+.fresh .select:focus,
+.fresh select:focus {
+  border-color: var(--hairline);
+  border-width: 1.5px;
+}
+/* The bare inputs inside a composite control must not draw a ring of their
+   own; the wrapper owns it. */
+.fresh .fresh-amount-wrap input:focus,
+.fresh .fresh-money-field input:focus,
+.fresh .alloc-amount input:focus {
+  outline: none;
+}
+
+/*
+ * The split-line amount is one control, not a box inside a box. The broad
+ * `.field input` rule above reaches into it wherever the allocation editor
+ * sits inside a classic `.field` (the edit-expense sheet), so the inner
+ * input is explicitly stripped back to bare text.
+ */
+.fresh .alloc-amount {
+  height: 52px;
+  gap: 4px;
+}
+.fresh .alloc-amount input,
+.fresh .field .alloc-amount input[type="text"] {
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+/* Native pickers: the arrow and the calendar button belong to the section,
+   and neither may spill past the rounded edge. */
+.fresh select,
+.fresh .select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b655c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 18px 18px;
+}
+:root[data-theme="dark"] .fresh select,
+:root[data-theme="dark"] .fresh .select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a39b8f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.fresh input[type="date"] {
+  /* Safari grows date fields to their intrinsic width and lets the editing
+     fields sit outside the padding box; both are pinned here. */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.fresh input[type="date"]::-webkit-calendar-picker-indicator {
+  margin-right: 0;
+  padding: 4px;
+  border-radius: 999px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.fresh input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background: var(--sunk);
+}
+:root[data-theme="dark"] .fresh input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
 .fresh .password-item,
 .fresh .password-modal,
 .fresh .shared-account-card {
-  border-radius: 18px;
+  border-radius: var(--r-card);
 }
 .fresh .password-small-btn,
 .fresh .password-field-toolbar button {
   border-radius: 999px;
+}
+
+/* A sheet is one surface: the sticky rows at its foot share its ground
+   instead of drawing a paler strip across the bottom. */
+.fresh-sheet-actions,
+.fresh-form-submit {
+  background: var(--paper);
+}
+
+/* The last row in a card is followed by the card edge, so its own hairline
+   reads as a stray line. */
+.fresh-card > .fresh-rows > :last-child > .fresh-row,
+.fresh-card > .fresh-rows > .fresh-row:last-child,
+.fresh-bill-rows > .fresh-bill-row:last-child,
+.fresh-settle-card > div:last-child > .fresh-settle-row,
+.fresh-settle-card > div:last-child > .fresh-settle-parts,
+.fresh-money-rows > .fresh-money-row:last-child {
+  border-bottom: none;
+}
+
+/* Text stand-ins for receipt images that never load. */
+.fresh .receipt-existing-icon,
+.fresh .password-image-missing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1.5px dashed var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-weight: 600;
+}
+.receipt-lightbox-missing {
+  margin: 0;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* A filled person chip hides its own disc, so the disc gets a ring. */
+.fresh-chip-person.active .fresh-avatar {
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.7);
 }

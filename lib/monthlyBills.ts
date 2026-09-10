@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Shared monthly-bill state: the recurring fixed bills, the variable
  * utilities and the per-person rent allocations that the monthly breakdown
@@ -5,13 +7,23 @@
  *
  * Extracted from `components/MonthlyBreakdown.tsx` so the fresh UI can read
  * the exact same numbers without re-implementing the schedule/override
- * rules or duplicating the editor.
+ * rules or duplicating the editor. `useMonthlyBills` owns the loading and
+ * the writing for both editors, so the two views cannot disagree about what
+ * a month costs.
  */
 
-import { getSetting } from "./client";
-import { FIRST_EXPENSE_MONTH } from "./expenseMonths";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getSetting, putSetting } from "./client";
+import { currentExpenseMonth, FIRST_EXPENSE_MONTH } from "./expenseMonths";
 import { computeSettlement, type Settlement, type SettlementBill } from "./settlement";
-import { BUYERS, isBuyer, type Expense } from "./types";
+import { parseCents } from "./money";
+import { titleCaseName } from "./normalize";
+import {
+  BUYERS,
+  isBuyer,
+  type Expense,
+  type ExpenseAllocation,
+} from "./types";
 
 
 /* ---------- Types ---------- */
@@ -631,4 +643,526 @@ export async function loadMonthlyBills(): Promise<MonthlyBills> {
     if (!isRentTrivial(parsed)) local.rent = parsed;
   }
   return local;
+}
+
+/* ---------- The editable store both month views share ---------- */
+
+export type MonthlyBillsStore = MonthlyBills & {
+  persistFixed: (next: FixedRecurring[]) => void;
+  persistVariable: (next: VariableState) => void;
+  persistRent: (next: RentState) => void;
+};
+
+/**
+ * Loads the shared bill state and hands back writers for it.
+ *
+ * localStorage is a write-through cache so the first paint is instant; the
+ * `household_settings` row is the source of truth so every housemate and
+ * every device sees the same numbers. When the backend row is still empty
+ * but this device has real data, the device's data is pushed up once as a
+ * migration. "Trivial" means nothing beyond the protected mainstay
+ * scaffold, and it is checked both ways so an empty row can never clobber a
+ * device's saved bills.
+ */
+export function useMonthlyBills(
+  onToast: (msg: string) => void
+): MonthlyBillsStore {
+  const [fixed, setFixed] = useState<FixedRecurring[]>([]);
+  const [variable, setVariable] = useState<VariableState>(() => emptyVariable());
+  const [rent, setRent] = useState<RentState>({ schedule: [], overrides: {} });
+  // Suppress backend pushes triggered by the mount-time hydration. Without
+  // this, hydrating from the backend would echo the same value back as a PUT.
+  const hydratedRef = useRef(false);
+  // Persisting must not re-run the mount effect, so the toast sink is read
+  // through a ref rather than closed over.
+  const toastRef = useRef(onToast);
+  toastRef.current = onToast;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const lsFixed = sortFixed(loadFixed());
+    const lsVariable = loadVariable();
+    const lsRent = loadRent();
+    setFixed(lsFixed);
+    setVariable(lsVariable);
+    setRent(lsRent);
+    try {
+      window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(lsFixed));
+      window.localStorage.setItem(LS_VARIABLE_V3, JSON.stringify(lsVariable));
+    } catch {
+      /* ignore */
+    }
+
+    function migrate(key: string, value: unknown, label: string) {
+      putSetting(key, value).catch((err) => {
+        console.warn(`[settings] migrate ${label} failed`, err);
+      });
+    }
+
+    Promise.all([
+      getSetting<FixedRecurring[]>(BE_FIXED).catch(() => null),
+      getSetting<unknown>(BE_VARIABLE).catch(() => null),
+      getSetting<RentState>(BE_RENT).catch(() => null),
+    ]).then(([beFixed, beVariable, beRent]) => {
+      if (cancelled) return;
+
+      const parsedFixed = Array.isArray(beFixed)
+        ? beFixed
+            .map(parseFixedEntry)
+            .filter((x): x is FixedRecurring => x !== null)
+        : null;
+      if (parsedFixed && !isFixedTrivial(parsedFixed)) {
+        const merged = sortFixed(mergeProtected(parsedFixed));
+        setFixed(merged);
+        try {
+          window.localStorage.setItem(LS_FIXED_V3, JSON.stringify(merged));
+        } catch {
+          /* ignore */
+        }
+      } else if (!isFixedTrivial(lsFixed)) {
+        migrate(BE_FIXED, lsFixed, "recurring_fixed");
+      }
+
+      const parsedVariable =
+        beVariable && typeof beVariable === "object"
+          ? parseVariableState(beVariable)
+          : null;
+      if (parsedVariable && !isVariableTrivial(parsedVariable)) {
+        setVariable(parsedVariable);
+        try {
+          window.localStorage.setItem(
+            LS_VARIABLE_V3,
+            JSON.stringify(parsedVariable)
+          );
+        } catch {
+          /* ignore */
+        }
+      } else if (!isVariableTrivial(lsVariable)) {
+        migrate(BE_VARIABLE, lsVariable, "recurring_variable");
+      }
+
+      const parsedRent =
+        beRent && typeof beRent === "object" ? (beRent as RentState) : null;
+      if (parsedRent && !isRentTrivial(parsedRent)) {
+        setRent(parsedRent);
+        try {
+          window.localStorage.setItem(LS_RENT_V1, JSON.stringify(parsedRent));
+        } catch {
+          /* ignore */
+        }
+      } else if (!isRentTrivial(lsRent)) {
+        migrate(BE_RENT, lsRent, "rent_alloc");
+      }
+
+      hydratedRef.current = true;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function push(key: string, value: unknown, label: string) {
+    if (!hydratedRef.current) return; // mount-time setState, not a real edit
+    putSetting(key, value).catch((err) => {
+      console.warn(`[settings] push ${key} failed`, err);
+      toastRef.current(`Couldn't sync ${label}, saved locally only`);
+    });
+  }
+
+  function cache(key: string, value: unknown, failure: string) {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      toastRef.current(failure);
+    }
+  }
+
+  return {
+    fixed,
+    variable,
+    rent,
+    persistFixed(next) {
+      const sorted = sortFixed(next);
+      setFixed(sorted);
+      cache(LS_FIXED_V3, sorted, "Couldn't save recurring bills");
+      push(BE_FIXED, sorted, "recurring bills");
+    },
+    persistVariable(next) {
+      const normalized = normalizeVariableState(next);
+      setVariable(normalized);
+      cache(LS_VARIABLE_V3, normalized, "Couldn't save utility amounts");
+      push(BE_VARIABLE, normalized, "utility amounts");
+    },
+    persistRent(next) {
+      setRent(next);
+      cache(LS_RENT_V1, next, "Couldn't save rent allocations");
+      push(BE_RENT, next, "rent allocations");
+    },
+  };
+}
+
+/* ---------- The month view model both breakdowns render ---------- */
+
+export type MonthTrip = {
+  id: string;
+  occurredOn: string;
+  description: string;
+  amount: number;
+  allocations: ExpenseAllocation[];
+  receiptUrl: string;
+  receiptFileId: string;
+  receiptMime: string;
+  /** True when the receipt is an image the app can show inline. */
+  canPreview: boolean;
+};
+
+export type MonthStoreGroup = {
+  store: string;
+  total: number;
+  trips: MonthTrip[];
+};
+
+export type MonthlyBreakdownView = {
+  month: string;
+  setMonth: (month: string) => void;
+  currentMonth: string;
+  isCurrentMonth: boolean;
+  monthLocked: boolean;
+  canEditMonth: boolean;
+  canGoPrev: boolean;
+  goPrev: () => void;
+  goNext: () => void;
+
+  oneTime: {
+    rows: MonthStoreGroup[];
+    total: number;
+    count: number;
+    inMonth: Expense[];
+  };
+
+  rent: {
+    alloc: RentAlloc;
+    total: number;
+    overridden: boolean;
+    /** null or a non-positive amount clears that person's share. */
+    commitFor: (name: string, cents: number | null) => void;
+    clearOverride: () => void;
+  };
+
+  fixed: {
+    rows: FixedRecurring[];
+    total: number;
+    amountFor: (bill: FixedRecurring) => number;
+    isOverridden: (bill: FixedRecurring) => boolean;
+    commitAmount: (id: string, cents: number | null) => void;
+    clearOverride: (id: string) => void;
+    /** True when the row was added; false means a toast explained why not. */
+    add: (name: string, amountText: string) => boolean;
+    remove: (id: string) => void;
+  };
+
+  variable: {
+    rows: VariableRecurring[];
+    total: number;
+    amountFor: (line: VariableRecurring) => number | undefined;
+    setAmount: (name: string, cents: number | null) => void;
+    add: (name: string, amountText: string) => boolean;
+    remove: (id: string) => void;
+  };
+
+  settlement: Settlement;
+  grandTotal: number;
+};
+
+/**
+ * Everything a month view shows and everything it can change, in one place.
+ *
+ * Both the classic breakdown and the fresh month screen render this, so a
+ * schedule rule, an override rule or a total can never mean one thing on one
+ * screen and something else on the other.
+ */
+export function useMonthlyBreakdown(
+  expenses: readonly Expense[],
+  onToast: (msg: string) => void
+): MonthlyBreakdownView {
+  const [month, setMonth] = useState<string>(() => currentExpenseMonth());
+  const currentMonth = currentExpenseMonth();
+  const isCurrentMonth = month === currentMonth;
+  const monthLocked = month < currentMonth;
+  const canEditMonth = !monthLocked;
+  const canGoPrev = month > FIRST_EXPENSE_MONTH;
+
+  const { fixed, variable, rent, persistFixed, persistVariable, persistRent } =
+    useMonthlyBills(onToast);
+
+  /* ---- One-time: group by store, list each trip underneath ---- */
+
+  const oneTime = useMemo(() => {
+    const inMonth = expensesInMonth(expenses, month);
+    const buckets = new Map<string, MonthStoreGroup>();
+    let total = 0;
+    for (const e of inMonth) {
+      const rawStore = (e.store || "").trim();
+      const storeName = rawStore ? titleCaseName(rawStore) : "Unspecified";
+      const key = storeName.toLowerCase();
+      const receiptMime = e.receiptMime || "";
+      const trip: MonthTrip = {
+        id: e.id,
+        occurredOn: e.occurredOn || e.added || "",
+        description: (e.description || "").trim(),
+        amount: e.amountCents,
+        allocations: e.allocations ?? [],
+        receiptUrl: e.receiptUrl || "",
+        receiptFileId: e.receiptFileId || "",
+        receiptMime,
+        canPreview: Boolean(
+          e.receiptUrl && e.receiptFileId && receiptMime.startsWith("image/")
+        ),
+      };
+      const existing = buckets.get(key);
+      if (existing) {
+        existing.total += e.amountCents;
+        existing.trips.push(trip);
+      } else {
+        buckets.set(key, {
+          store: storeName,
+          total: e.amountCents,
+          trips: [trip],
+        });
+      }
+      total += e.amountCents;
+    }
+    for (const g of buckets.values()) {
+      // Most recent trip first, larger amount breaking a same-day tie.
+      g.trips.sort((a, b) => {
+        if (a.occurredOn !== b.occurredOn) {
+          return a.occurredOn < b.occurredOn ? 1 : -1;
+        }
+        return b.amount - a.amount;
+      });
+    }
+    const rows = Array.from(buckets.values()).sort((a, b) => b.total - a.total);
+    return { rows, total, count: inMonth.length, inMonth };
+  }, [expenses, month]);
+
+  /* ---- Rent ---- */
+
+  const monthRent = useMemo(() => rentForMonth(rent, month), [rent, month]);
+  const rentTotal = useMemo(
+    () => BUYERS.reduce((s, name) => s + (monthRent[name] ?? 0), 0),
+    [monthRent]
+  );
+  const rentOverridden = hasRentOverride(rent, month);
+
+  /* ---- Recurring ---- */
+
+  const fixedForMonth = useMemo(
+    () => fixed.filter((r) => activeForMonth(r, month)),
+    [fixed, month]
+  );
+  const fixedTotal = useMemo(
+    () => fixedForMonth.reduce((s, r) => s + amountForMonth(r, month), 0),
+    [fixedForMonth, month]
+  );
+
+  const monthVariable = variable.amounts[month] ?? {};
+  const variableLines = useMemo(
+    () => variable.lines.filter((line) => activeForMonth(line, month)),
+    [variable.lines, month]
+  );
+  const variableTotal = variableLines.reduce(
+    (s, line) => s + (monthVariable[line.name] ?? 0),
+    0
+  );
+
+  const settlement = useMemo(
+    () =>
+      computeSettlement({
+        members: BUYERS,
+        expenses: oneTime.inMonth.map((e) => ({
+          paidBy: e.paidBy,
+          amountCents: e.amountCents,
+          allocations: e.allocations ?? [],
+        })),
+        bills: settlementBills(fixed, variable, month),
+        rent: monthRent,
+      }),
+    [oneTime, fixed, variable, month, monthRent]
+  );
+
+  return {
+    month,
+    setMonth,
+    currentMonth,
+    isCurrentMonth,
+    monthLocked,
+    canEditMonth,
+    canGoPrev,
+    goPrev() {
+      if (canGoPrev) setMonth(shiftMonth(month, -1));
+    },
+    goNext() {
+      setMonth(shiftMonth(month, +1));
+    },
+
+    oneTime,
+
+    rent: {
+      alloc: monthRent,
+      total: rentTotal,
+      overridden: rentOverridden,
+      commitFor(name, cents) {
+        if (monthLocked) return;
+        const nextAlloc: RentAlloc = { ...monthRent };
+        if (cents === null || cents <= 0) delete nextAlloc[name];
+        else nextAlloc[name] = cents;
+        persistRent(setRentAlloc(rent, month, currentMonth, nextAlloc));
+      },
+      clearOverride() {
+        if (monthLocked || !rentOverridden) return;
+        persistRent(clearRentOverride(rent, month));
+      },
+    },
+
+    fixed: {
+      rows: fixedForMonth,
+      total: fixedTotal,
+      amountFor: (bill) => amountForMonth(bill, month),
+      isOverridden: (bill) => hasOverride(bill, month),
+      commitAmount(id, cents) {
+        if (monthLocked) return;
+        persistFixed(
+          fixed.map((r) =>
+            r.id === id ? setBillAmount(r, month, currentMonth, cents ?? 0) : r
+          )
+        );
+      },
+      clearOverride(id) {
+        if (monthLocked) return;
+        persistFixed(
+          fixed.map((r) => (r.id === id ? clearBillOverride(r, month) : r))
+        );
+      },
+      add(rawName, amountText) {
+        if (!canEditMonth) return false;
+        const name = titleCaseName(rawName);
+        const cents = parseCents(amountText);
+        if (!name) {
+          onToast("Name required");
+          return false;
+        }
+        if (cents === null || cents <= 0) {
+          onToast("Amount must be greater than $0");
+          return false;
+        }
+        if (
+          fixedForMonth.some((r) => r.name.toLowerCase() === name.toLowerCase())
+        ) {
+          onToast(name + " is already active this month");
+          return false;
+        }
+        persistFixed([
+          ...fixed,
+          {
+            id: makeRecurringId("fixed", name),
+            name,
+            activeFrom: month,
+            schedule: [{ from: month, cents }],
+            overrides: {},
+          },
+        ]);
+        return true;
+      },
+      remove(id) {
+        if (!canEditMonth) return;
+        const row = fixed.find((r) => r.id === id);
+        if (!row || row.protected) return;
+        // A row that only ever ran from this month forward is deleted; an
+        // older one is retired so past months keep their history.
+        if ((row.activeFrom || FIRST_EXPENSE_MONTH) >= month) {
+          persistFixed(fixed.filter((r) => r.id !== id));
+          return;
+        }
+        persistFixed(
+          fixed.map((r) => (r.id === id ? { ...r, inactiveFrom: month } : r))
+        );
+      },
+    },
+
+    variable: {
+      rows: variableLines,
+      total: variableTotal,
+      amountFor: (line) => monthVariable[line.name],
+      setAmount(name, cents) {
+        if (monthLocked) return;
+        const nextAmounts: VariableMap = { ...variable.amounts };
+        const bucket = { ...(nextAmounts[month] ?? {}) };
+        if (cents === null) delete bucket[name];
+        else bucket[name] = cents;
+        if (Object.keys(bucket).length === 0) delete nextAmounts[month];
+        else nextAmounts[month] = bucket;
+        persistVariable({ ...variable, amounts: nextAmounts });
+      },
+      add(rawName, amountText) {
+        if (!canEditMonth) return false;
+        const name = titleCaseName(rawName);
+        if (!name) {
+          onToast("Name required");
+          return false;
+        }
+        if (
+          variableLines.some(
+            (line) => line.name.toLowerCase() === name.toLowerCase()
+          )
+        ) {
+          onToast(name + " is already active this month");
+          return false;
+        }
+        let nextAmounts = variable.amounts;
+        const trimmed = amountText.trim();
+        if (trimmed) {
+          const cents = parseCents(trimmed);
+          if (cents === null || cents <= 0) {
+            onToast("Amount must be greater than $0");
+            return false;
+          }
+          nextAmounts = {
+            ...variable.amounts,
+            [month]: { ...(variable.amounts[month] ?? {}), [name]: cents },
+          };
+        }
+        persistVariable({
+          lines: [
+            ...variable.lines,
+            { id: makeRecurringId("variable", name), name, activeFrom: month },
+          ],
+          amounts: nextAmounts,
+        });
+        return true;
+      },
+      remove(id) {
+        if (!canEditMonth) return;
+        const line = variable.lines.find((r) => r.id === id);
+        if (!line || line.protected) return;
+        if ((line.activeFrom || FIRST_EXPENSE_MONTH) >= month) {
+          persistVariable({
+            ...variable,
+            lines: variable.lines.filter((r) => r.id !== id),
+          });
+          return;
+        }
+        persistVariable({
+          ...variable,
+          lines: variable.lines.map((r) =>
+            r.id === id ? { ...r, inactiveFrom: month } : r
+          ),
+        });
+      },
+    },
+
+    settlement,
+    grandTotal: settlement.grand,
+  };
 }

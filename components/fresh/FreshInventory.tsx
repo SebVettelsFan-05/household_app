@@ -240,6 +240,7 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
       {adding ? (
         <FreshSheet title="Add to inventory" onClose={() => setAdding(false)}>
           <AddItemForm
+            embedded
             categories={data.categories}
             items={data.items}
             onResult={(next, msg) => {
