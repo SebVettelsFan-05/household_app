@@ -3,6 +3,9 @@
 import { useMemo, useState } from "react";
 import AddItemForm from "@/components/AddItemForm";
 import EditModal from "@/components/EditModal";
+import FreshSheet from "@/components/fresh/FreshSheet";
+import { Avatar } from "@/components/fresh/people";
+import { IconPlus, IconSearch } from "@/components/fresh/icons";
 import { expiryStatus, fmtQty } from "@/lib/format";
 import { sortCategories } from "@/lib/normalize";
 import type { Item } from "@/lib/types";
@@ -15,6 +18,16 @@ type Props = {
 
 const EXPIRING_WINDOW_DAYS = 3;
 
+/** "Sep 22" rather than the raw ISO the shared helper falls back to. */
+function farExpiryLabel(expiry: string): string {
+  const [y, m, d] = expiry.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return `Expires ${new Date(y, m - 1, d).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+  })}`;
+}
+
 function daysUntil(expiry: string): number | null {
   if (!expiry) return null;
   const today = new Date();
@@ -26,9 +39,7 @@ function daysUntil(expiry: string): number | null {
 
 export default function FreshInventory({ data, onManageCategories }: Props) {
   const [search, setSearch] = useState("");
-  const [ownerFilter, setOwnerFilter] = useState<"all" | "shared" | "personal">(
-    "all"
-  );
+  const [category, setCategory] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
@@ -36,15 +47,22 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
     ? (data.items.find((i) => i.id === editingId) ?? null)
     : null;
 
+  // Only categories that actually hold something, in the household's order.
+  const categoryChips = useMemo(() => {
+    const present = new Set(data.items.map((i) => i.category));
+    return sortCategories(data.categories)
+      .map((c) => c.name)
+      .filter((name) => present.has(name));
+  }, [data.items, data.categories]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return data.items.filter((i) => {
-      if (ownerFilter === "shared" && i.owner) return false;
-      if (ownerFilter === "personal" && !i.owner) return false;
+      if (category !== "all" && i.category !== category) return false;
       if (term && !i.name.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [data.items, search, ownerFilter]);
+  }, [data.items, search, category]);
 
   // Pinned at the top: anything already gone off, or going off inside three
   // days. Everything else groups by category underneath.
@@ -56,7 +74,9 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
           (r): r is { item: Item; days: number } =>
             r.days !== null && r.days <= EXPIRING_WINDOW_DAYS
         )
-        .sort((a, b) => a.days - b.days || a.item.name.localeCompare(b.item.name)),
+        .sort(
+          (a, b) => a.days - b.days || a.item.name.localeCompare(b.item.name)
+        ),
     [filtered]
   );
   const expiringIds = new Set(expiring.map((r) => r.item.id));
@@ -87,35 +107,42 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
   function row(item: Item) {
     const qty = fmtQty(item.quantity);
     const status = expiryStatus(item.expiry);
-    const tone =
-      status.cls === "expired"
-        ? " fresh-expired"
-        : status.cls === "expiring"
-          ? " fresh-expiring"
-          : "";
+    const expiryLabel =
+      status.cls === "" ? farExpiryLabel(item.expiry) : status.label;
     return (
       <button
         key={item.id}
         type="button"
-        className={`fresh-row${tone}`}
+        className="fresh-row"
         onClick={() => setEditingId(item.id)}
       >
         <span className="fresh-row-main">
           <span className="fresh-row-title">{item.name}</span>
           <span className="fresh-row-meta">
-            {item.category}
             {item.owner ? (
-              <>
-                {" · "}
-                <span className="fresh-owner">{item.owner}</span>
-              </>
+              <span className="fresh-person">
+                <Avatar name={item.owner} size={20} />
+                <span className="fresh-person-name">{item.owner}</span>
+              </span>
+            ) : (
+              <span className="fresh-row-note">Shared</span>
+            )}
+            {expiryLabel ? (
+              <span
+                className={`fresh-badge${
+                  status.cls === "expired"
+                    ? " danger"
+                    : status.cls === "expiring"
+                      ? " warn"
+                      : ""
+                }`}
+              >
+                {expiryLabel}
+              </span>
             ) : null}
           </span>
         </span>
-        {status.label ? (
-          <span className="fresh-row-note">{status.label}</span>
-        ) : null}
-        <span className="fresh-row-amount">
+        <span className="fresh-row-qty fresh-num">
           {qty.num}
           {qty.unit}
         </span>
@@ -125,33 +152,38 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
 
   return (
     <>
-      <div className="fresh-section-head">
-        <div className="fresh-chips" role="group" aria-label="Owner filter">
-          {(["all", "shared", "personal"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={`fresh-chip${ownerFilter === f ? " active" : ""}`}
-              aria-pressed={ownerFilter === f}
-              onClick={() => setOwnerFilter(f)}
-            >
-              {f === "all" ? "All" : f === "shared" ? "Shared" : "Personal"}
-            </button>
-          ))}
-        </div>
-        <span className="fresh-sub">{filtered.length} items</span>
-      </div>
-
-      <div className="fresh-field fresh-field-narrow">
-        <label htmlFor="fi-search">Search</label>
+      <div className="fresh-search">
+        <IconSearch size={20} />
         <input
-          id="fi-search"
           className="fresh-input"
           type="search"
-          placeholder="Name"
+          aria-label="Search inventory"
+          placeholder="Search what the house has"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+      </div>
+
+      <div className="fresh-chips" role="group" aria-label="Category filter">
+        <button
+          type="button"
+          className={`fresh-chip${category === "all" ? " active" : ""}`}
+          aria-pressed={category === "all"}
+          onClick={() => setCategory("all")}
+        >
+          All
+        </button>
+        {categoryChips.map((name) => (
+          <button
+            key={name}
+            type="button"
+            className={`fresh-chip${category === name ? " active" : ""}`}
+            aria-pressed={category === name}
+            onClick={() => setCategory(name)}
+          >
+            {name}
+          </button>
+        ))}
       </div>
 
       {data.itemsLoading ? (
@@ -175,12 +207,12 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
           {expiring.length > 0 ? (
             <section className="fresh-section">
               <div className="fresh-section-head">
-                <h2 className="fresh-h2">Use these first</h2>
+                <span className="fresh-pool-tag" data-pool="soon">
+                  Use soon
+                </span>
                 <span className="fresh-sub">{expiring.length}</span>
               </div>
-              <div className="fresh-rows">
-                {expiring.map((r) => row(r.item))}
-              </div>
+              <div className="fresh-rows">{expiring.map((r) => row(r.item))}</div>
             </section>
           ) : null}
 
@@ -201,45 +233,24 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
         className="fresh-fab"
         onClick={() => setAdding(true)}
       >
+        <IconPlus size={20} />
         Add item
       </button>
 
       {adding ? (
-        <div
-          className="fresh-sheet-bg"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setAdding(false);
-          }}
-        >
-          <div
-            className="fresh-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Add to inventory"
-          >
-            <div className="fresh-sheet-head">
-              <h2 className="fresh-h2">Add item</h2>
-              <button
-                type="button"
-                className="fresh-btn fresh-btn-quiet"
-                onClick={() => setAdding(false)}
-              >
-                Close
-              </button>
-            </div>
-            <AddItemForm
-              categories={data.categories}
-              items={data.items}
-              onResult={(next, msg) => {
-                data.setItems(next);
-                data.showToast(msg);
-                setAdding(false);
-              }}
-              onError={(msg) => data.showToast("Error: " + msg)}
-              onManageCategories={onManageCategories}
-            />
-          </div>
-        </div>
+        <FreshSheet title="Add to inventory" onClose={() => setAdding(false)}>
+          <AddItemForm
+            categories={data.categories}
+            items={data.items}
+            onResult={(next, msg) => {
+              data.setItems(next);
+              data.showToast(msg);
+              setAdding(false);
+            }}
+            onError={(msg) => data.showToast("Error: " + msg)}
+            onManageCategories={onManageCategories}
+          />
+        </FreshSheet>
       ) : null}
 
       {editing ? (

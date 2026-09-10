@@ -17,7 +17,9 @@ import path from "node:path";
  * classic forms still work; `legacy.spec.ts` covers that.
  *
  * Screenshots land in `smoke/out/fresh/` for every screen at 390x844,
- * 1920x1080 and 2560x1400@1.5, in both themes.
+ * 1920x1080 and 2560x1400@1.5, in both themes. The phone shots are
+ * viewport-only, plus a scrolled-to-bottom frame, because a full-page shot
+ * of a phone screen hides exactly the thing that goes wrong on a phone.
  */
 
 const OUT = path.join(__dirname, "out", "fresh");
@@ -61,15 +63,15 @@ function dowOf(ymd: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-/** Sunday anchor of the active cooking week, skipping the dead weekend. */
+/** Sunday anchor of the cooking week today falls in. */
 function activeWeekStart(today: string): string {
-  const dow = dowOf(today);
-  return addDaysYmd(today, dow >= 5 ? 7 - dow : -dow);
+  return addDaysYmd(today, -dowOf(today));
 }
 
 const TODAY = zonedYmd(new Date());
 const WEEK_START = activeWeekStart(TODAY);
-const TODAY_DAY = dowOf(TODAY) <= 4 ? dowOf(TODAY) : -1;
+// The cooking week is Sunday through Saturday, so today always has a slot.
+const TODAY_DAY = dowOf(TODAY);
 
 /* ---------- fixtures ---------- */
 
@@ -118,6 +120,12 @@ async function seedFixtures(api: APIRequestContext) {
   await api.put("/api/settings/meal_group", {
     data: { value: { members: MEAL_GROUP } },
   });
+  // The settlement assertions assume no rent or recurring bills this month
+  // (the local seed script fills them in; clear them so the suite is
+  // independent of whatever the dev DB holds).
+  await api.put("/api/settings/rent_alloc", { data: { value: { schedule: [], overrides: {} } } });
+  await api.put("/api/settings/recurring_fixed", { data: { value: [] } });
+  await api.put("/api/settings/recurring_variable", { data: { value: { lines: [], amounts: {} } } });
 
   await api.post("/api/grocery", {
     data: {
@@ -138,19 +146,17 @@ async function seedFixtures(api: APIRequestContext) {
     },
   });
 
-  if (TODAY_DAY >= 0) {
-    await api.post("/api/recipes", {
-      data: {
-        weekStart: WEEK_START,
-        day: TODAY_DAY,
-        assignedTo: "Eli",
-        name: RECIPE_NAME,
-        ingredients: [{ name: "Coconut milk", quantity: 400, category: "Pantry" }],
-        servings: 4,
-        portions: 3,
-      },
-    });
-  }
+  await api.post("/api/recipes", {
+    data: {
+      weekStart: WEEK_START,
+      day: TODAY_DAY,
+      assignedTo: "Eli",
+      name: RECIPE_NAME,
+      ingredients: [{ name: "Coconut milk", quantity: 400, category: "Pantry" }],
+      servings: 4,
+      portions: 3,
+    },
+  });
 
   await api.post("/api/items", {
     data: {
@@ -200,6 +206,18 @@ async function login(p: Page) {
   await p.addStyleTag({
     content: "nextjs-portal{display:none!important}",
   });
+}
+
+/**
+ * Scroll to the very bottom. Twice, because the web fonts finish loading a
+ * beat after first paint and the resulting reflow nudges the scroll position
+ * back up.
+ */
+async function scrollToBottom(p: Page) {
+  await p.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await p.waitForTimeout(400);
+  await p.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await p.waitForTimeout(200);
 }
 
 /** Rail on desktop, bottom tab bar on phones. */
@@ -271,30 +289,29 @@ test("the look switches to classic and back, and sticks", async () => {
   await expect(page.locator(".fresh")).toBeVisible();
 });
 
-test("home reads tonight's dinner, the settlement and the open list", async () => {
+test("home reads tonight's dinner, the money block and the open list", async () => {
   await gotoTab(page, "Home");
-  const tonight = page.locator(".fresh-card").first();
 
-  if (TODAY_DAY >= 0) {
-    await expect(tonight.locator(".fresh-tonight-dish")).toHaveText(
-      RECIPE_NAME
-    );
-    await expect(tonight).toContainText("Eli is cooking");
-    await expect(tonight).toContainText("3 portions");
-  } else {
-    await expect(tonight).toContainText("No dinner slot today");
-  }
+  const tonight = page.locator(".fresh-tonight");
+  await expect(tonight.locator(".fresh-tonight-dish")).toHaveText(RECIPE_NAME);
+  await expect(tonight.locator(".fresh-person-name")).toHaveText("Eli");
+  await expect(tonight).toContainText("3 portions");
+  await expect(tonight).toContainText("1 ingredient");
 
   // $90 over three diners, $30 over five: Daniel owes the house share only.
-  const settlement = page.locator(".fresh-card", { hasText: "This month" });
+  const monthName = new Date().toLocaleString("en-US", { month: "long" });
+  const money = page.locator(".fresh-card", { hasText: monthName }).first();
   await expect(
-    settlement.locator(".fresh-settle-row", { hasText: "Daniel" })
+    money.locator(".fresh-money-row", { hasText: "Daniel" })
   ).toContainText("Send $6.00");
   await expect(
-    settlement.locator(".fresh-settle-row", { hasText: "Arthur" })
+    money.locator(".fresh-money-row", { hasText: "Arthur" })
   ).toContainText("Withdraw");
+  await expect(money.locator(".fresh-money-total")).toContainText(
+    "Household total"
+  );
 
-  // Other rows may already be on the list, so check the counts against what
+  // Other rows may already be on the list, so check the counters against what
   // the API actually holds rather than against the two rows seeded here.
   const grocery = await (await page.request.get("/api/grocery")).json();
   const openByPool = new Map<string, number>([
@@ -307,23 +324,27 @@ test("home reads tonight's dinner, the settlement and the open list", async () =
     const pool = g.pool ?? "house";
     openByPool.set(pool, (openByPool.get(pool) ?? 0) + 1);
   }
-  const list = page.locator(".fresh-card", { hasText: "Still to buy" });
   for (const [pool, label] of [
     ["meals", "Meals"],
     ["house", "House"],
     ["personal", "Personal"],
   ] as const) {
-    const n = openByPool.get(pool) ?? 0;
-    await expect(
-      list.locator(".fresh-settle-row", { hasText: label })
-    ).toContainText(`${n} item${n === 1 ? "" : "s"}`);
+    const counter = page.locator(`.fresh-counter[data-pool="${pool}"]`);
+    await expect(counter.locator(".fresh-counter-num")).toHaveText(
+      String(openByPool.get(pool) ?? 0)
+    );
+    await expect(counter).toContainText(label);
   }
   expect(openByPool.get("meals")).toBeGreaterThan(0);
   expect(openByPool.get("house")).toBeGreaterThan(0);
 
-  const expiring = page.locator(".fresh-card", { hasText: "Expiring soon" });
-  await expect(expiring).toContainText(ITEM_NAME);
-  await expect(expiring).toContainText("Expires tomorrow");
+  const useSoon = page.locator(".fresh-card", { hasText: "Use soon" });
+  await expect(useSoon).toContainText(ITEM_NAME);
+  await expect(useSoon).toContainText("Expires tomorrow");
+  // Owned items carry their owner's disc, not a bare grey pill.
+  await expect(
+    useSoon.locator(".fresh-row", { hasText: ITEM_NAME }).locator(".fresh-avatar")
+  ).toBeVisible();
 });
 
 test("an expense added through the fresh sheet settles Daniel at $6.00", async () => {
@@ -364,9 +385,11 @@ test("an expense added through the fresh sheet settles Daniel at $6.00", async (
 
   const row = page.locator(".fresh-row", { hasText: "Costco" }).first();
   await expect(row).toBeVisible();
-  await expect(row.locator(".alloc-summary")).toHaveText(
-    "Meals (3) $90.00 · Everyone $30.00"
-  );
+  await expect(row.locator(".fresh-split-tag").nth(0)).toHaveText("Meals 3");
+  await expect(row.locator(".fresh-split-tag").nth(1)).toHaveText("Everyone");
+  await expect(row.locator(".fresh-row-amount")).toHaveText("$120.00");
+  // The payer reads as a disc plus a name.
+  await expect(row.locator(".fresh-avatar")).toHaveText("A");
 
   const settlement = page.locator(".fresh-settlement-col");
   await expect(
@@ -376,16 +399,25 @@ test("an expense added through the fresh sheet settles Daniel at $6.00", async (
 
 test("dismissing the sheet never activates what is under it", async () => {
   await gotoTab(page, "Expenses");
-  await page.getByRole("button", { name: "Add expense" }).first().click();
-  await expect(page.locator(".fresh-sheet")).toBeVisible();
+  const row = page.locator(".fresh-row", { hasText: "Costco" }).first();
+  const rowBox = await row.boundingBox();
+  expect(rowBox).not.toBeNull();
 
-  // A point on the backdrop that sits directly over the expense list. If the
-  // click leaked through, the edit modal would open behind the sheet.
-  await page.mouse.click(900, 120);
+  await page.getByRole("button", { name: "Add expense" }).first().click();
+  const sheetBox = await page.locator(".fresh-sheet").boundingBox();
+  expect(sheetBox).not.toBeNull();
+
+  // A point on the backdrop that sits directly over the expense row, but
+  // clear of the centred dialog. If the click leaked through, the edit modal
+  // would open behind the sheet.
+  const x = rowBox!.x + 12;
+  const y = rowBox!.y + rowBox!.height / 2;
+  expect(x).toBeLessThan(sheetBox!.x);
+  await page.mouse.click(x, y);
 
   await expect(page.locator(".fresh-sheet")).toHaveCount(0);
   await expect(page.locator(".modal-bg")).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "Current" })).toHaveAttribute(
+  await expect(page.getByRole("tab", { name: "Receipts" })).toHaveAttribute(
     "aria-selected",
     "true"
   );
@@ -397,12 +429,12 @@ test("the month segment still shows the classic breakdown", async () => {
   await expect(
     page.locator(".split-group li", { hasText: "Daniel" }).first()
   ).toContainText("Share $6.00");
-  await page.getByRole("tab", { name: "Current" }).click();
+  await page.getByRole("tab", { name: "Receipts" }).click();
 });
 
 test("a grocery row can be added to the meals pool from the fresh shell", async () => {
   await gotoTab(page, "Grocery");
-  await page.getByRole("button", { name: "Add to list" }).first().click();
+  await page.getByRole("button", { name: "Add item" }).first().click();
   const sheet = page.locator(".fresh-sheet");
   await expect(sheet).toBeVisible();
 
@@ -416,20 +448,93 @@ test("a grocery row can be added to the meals pool from the fresh shell", async 
   });
 
   const meals = page.locator(".fresh-section", { hasText: "Meals" }).first();
-  await expect(
-    meals.locator(".fresh-row", { hasText: "Freshsmokesoap" })
-  ).toContainText("For Eli");
+  const added = meals.locator(".fresh-row", { hasText: "Freshsmokesoap" });
+  await expect(added).toContainText("Eli");
+  await expect(added.locator(".fresh-avatar")).toHaveText("E");
+  await expect(added.locator(".fresh-row-qty")).toHaveText("250g");
 });
 
 test("the recipes tab tallies the cooks", async () => {
   await gotoTab(page, "Recipes");
-  const week = page.locator(".fresh-section", { hasText: "This week" }).first();
-  if (TODAY_DAY >= 0) {
-    await expect(week.locator(".fresh-cook-tally")).toContainText("Eli 1");
-    await expect(week.locator(".fresh-day-row", { hasText: RECIPE_NAME })).toBeVisible();
-  } else {
-    await expect(week.locator(".fresh-cook-tally")).toContainText("No cooks yet");
+  const week = page.locator(".fresh-week", { hasText: "This week" }).first();
+  await expect(week.locator(".fresh-cook-tally")).toContainText("Eli 1");
+  await expect(
+    week.locator(".fresh-day-card", { hasText: RECIPE_NAME })
+  ).toBeVisible();
+  // Today is ringed on the strip and carries a filled dot in Eli's colour.
+  await expect(week.locator(".fresh-strip-day.today")).toHaveCount(1);
+  await expect(week.locator(".fresh-strip-dot.filled")).toHaveCount(1);
+});
+
+test("a Saturday dinner is a real slot in both shells", async () => {
+  // The week is Sunday through Saturday; seed a Saturday in NEXT week so it
+  // never collides with today's fixture recipe.
+  const satWeek = addDaysYmd(WEEK_START, 7);
+  const name = "Fresh Smoke Saturday Roast";
+  const res = await page.request.post("/api/recipes", {
+    data: { weekStart: satWeek, day: 6, assignedTo: "Minh", name, ingredients: [] },
+  });
+  expect(res.ok()).toBeTruthy();
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = page.locator(".fresh-week", { hasText: "Next week" }).first();
+  const card = week.locator(".fresh-day-card", { hasText: name });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Sat");
+  // The reused classic modal must offer all seven days and show Saturday.
+  await card.locator(".fresh-day-open, button").first().click();
+  const daySelect = page.locator(".modal select").nth(1);
+  await expect(daySelect.locator("option")).toHaveCount(7);
+  await expect(daySelect).toHaveValue("6");
+  await page.keyboard.press("Escape");
+  const list = await (await page.request.get("/api/recipes")).json();
+  for (const r of list.recipes) {
+    if (r.name === name) await page.request.delete(`/api/recipes/${encodeURIComponent(r.id)}`);
   }
+});
+
+/* ---------- phone geometry ---------- */
+
+test("on a phone the FAB clears the last row and inputs do not zoom iOS", async () => {
+  const context = await browserRef.newContext({
+    viewport: { width: 390, height: 844 },
+  });
+  await context.addInitScript(() => {
+    try {
+      window.localStorage.setItem("hh_ui", "fresh");
+    } catch {
+      /* ignore */
+    }
+  });
+  const p = await context.newPage();
+  await login(p);
+  await gotoTab(p, "Grocery");
+  await p.locator(".fresh-row").first().waitFor();
+  await scrollToBottom(p);
+
+  const fab = await p.locator(".fresh-fab").boundingBox();
+  const rows = p.locator(".fresh-row");
+  const lastRow = await rows.nth((await rows.count()) - 1).boundingBox();
+  expect(fab).not.toBeNull();
+  expect(lastRow).not.toBeNull();
+  // Nothing tappable hides under the button.
+  expect(lastRow!.y + lastRow!.height).toBeLessThanOrEqual(fab!.y);
+
+  // The bottom nav is the last thing on screen and is a full 68px of target.
+  const nav = await p.locator(".fresh-tabbar").boundingBox();
+  expect(nav!.height).toBeGreaterThanOrEqual(68);
+
+  // 16px inputs, or iOS zooms the page on focus.
+  await gotoTab(p, "Expenses");
+  await p.getByRole("button", { name: "Add expense" }).first().click();
+  await p.locator("#fx-amount").waitFor();
+  for (const sel of ["#fx-amount", "#fx-store", "#fx-date"]) {
+    const size = await p
+      .locator(sel)
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(size).toBeGreaterThanOrEqual(16);
+  }
+  await context.close();
 });
 
 /* ---------- screenshots ---------- */
@@ -442,8 +547,8 @@ const VIEWPORTS = [
 
 const SCREENS: { file: string; tab: string; phoneOnly?: boolean }[] = [
   { file: "home", tab: "Home" },
-  { file: "grocery", tab: "Grocery" },
   { file: "recipes", tab: "Recipes" },
+  { file: "grocery", tab: "Grocery" },
   { file: "expenses", tab: "Expenses" },
   { file: "inventory", tab: "Inventory" },
   { file: "passwords", tab: "Passwords" },
@@ -451,7 +556,7 @@ const SCREENS: { file: string; tab: string; phoneOnly?: boolean }[] = [
 ];
 
 test("every fresh screen is captured in both themes and all three sizes", async () => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   for (const theme of ["light", "dark"] as const) {
     for (const vp of VIEWPORTS) {
       const context = await browserRef.newContext({
@@ -473,25 +578,42 @@ test("every fresh screen is captured in both themes and all three sizes", async 
       await login(p);
       await expect(p.locator(".fresh")).toBeVisible();
 
+      const shot = async (file: string) => {
+        await p.waitForTimeout(200);
+        await p.screenshot({
+          animations: "disabled",
+          path: path.join(OUT, `${file}-${theme}-${vp.name}.png`),
+        });
+      };
+
       for (const screen of SCREENS) {
         if (screen.phoneOnly && vp.width >= 720) continue;
         await gotoTab(p, screen.tab);
-        await p.waitForTimeout(250);
-        await p.screenshot({
-          fullPage: true,
-          animations: "disabled",
-          path: path.join(OUT, `${screen.file}-${theme}-${vp.name}.png`),
-        });
+        await p.evaluate(() => window.scrollTo(0, 0));
+        await shot(screen.file);
+        // Long screens hide their worst half below the fold on a phone.
+        if (vp.width < 720) {
+          const scrollable = await p.evaluate(
+            () => document.body.scrollHeight > window.innerHeight + 40
+          );
+          if (scrollable) {
+            await scrollToBottom(p);
+            await shot(`${screen.file}-bottom`);
+            await p.evaluate(() => window.scrollTo(0, 0));
+          }
+        }
         if (screen.file === "expenses") {
           await p.getByRole("tab", { name: "Month" }).click();
           await p.locator(".monthly-card").waitFor();
-          await p.waitForTimeout(250);
-          await p.screenshot({
-            fullPage: true,
-            animations: "disabled",
-            path: path.join(OUT, `expenses-month-${theme}-${vp.name}.png`),
-          });
-          await p.getByRole("tab", { name: "Current" }).click();
+          await shot("expenses-month");
+          await p.getByRole("tab", { name: "Receipts" }).click();
+        }
+        if (screen.file === "recipes") {
+          const card = p.locator(".fresh-day-card").first();
+          if (await card.count()) {
+            await card.scrollIntoViewIfNeeded();
+            await shot("recipe-days");
+          }
         }
       }
 
@@ -499,11 +621,7 @@ test("every fresh screen is captured in both themes and all three sizes", async 
       await gotoTab(p, "Expenses");
       await p.getByRole("button", { name: "Add expense" }).first().click();
       await p.locator(".fresh-sheet").waitFor();
-      await p.waitForTimeout(250);
-      await p.screenshot({
-        animations: "disabled",
-        path: path.join(OUT, `expense-sheet-${theme}-${vp.name}.png`),
-      });
+      await shot("expense-sheet");
 
       await context.close();
     }

@@ -2,7 +2,7 @@
 
 Why this exists: the household stopped being one food-sharing group. Some
 members buy their own groceries, so a grocery receipt is no longer a
-five-way expense, and Sun-Thu no longer maps to five cooks. Rent, utilities,
+five-way expense, and the week's dinners no longer map to five cooks. Rent, utilities,
 internet, insurance and house supplies are still shared by everyone.
 
 The fix is two pieces of state, and everything else follows from them:

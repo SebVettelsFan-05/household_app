@@ -255,7 +255,7 @@ export default function EditExpenseModal({
                   title="Click to expand"
                 />
               ) : (
-                <span className="receipt-existing-icon">📄</span>
+                <span className="receipt-existing-icon btn-emoji" aria-hidden="true">📄</span>
               )}
               <div className="receipt-existing-meta">
                 <a
@@ -264,7 +264,7 @@ export default function EditExpenseModal({
                   rel="noopener noreferrer"
                   className="receipt-existing-link"
                 >
-                  Open current receipt ↗
+                  Open current receipt<span className="btn-emoji" aria-hidden="true"> ↗</span>
                 </a>
                 <p className="receipt-hint">
                   Attach a new file below to replace it.

@@ -657,6 +657,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                               target="_blank"
                               rel="noopener noreferrer"
                               className="receipt-pill"
+                              aria-label="Open receipt"
                               title={
                                 canPreviewReceipt
                                   ? "Preview receipt"
@@ -672,7 +673,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                                 });
                               }}
                             >
-                              📎
+                              <span className="btn-emoji" aria-hidden="true">📎</span>
                             </a>
                           ) : null}
                         </span>

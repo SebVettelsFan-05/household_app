@@ -1,6 +1,14 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { FreshTab } from "@/components/fresh/FreshApp";
+import {
+  IconBox,
+  IconChevronRight,
+  IconKey,
+  IconSettings,
+  IconStar,
+} from "@/components/fresh/icons";
 
 type Props = {
   onNavigate: (tab: FreshTab) => void;
@@ -17,25 +25,34 @@ export default function FreshMore({
   onOpenSettings,
   onSwitchUi,
 }: Props) {
-  const entries: { label: string; hint: string; onClick: () => void }[] = [
+  const entries: {
+    label: string;
+    hint: string;
+    icon: ReactNode;
+    onClick: () => void;
+  }[] = [
     {
       label: "Inventory",
       hint: "What the house has on hand, and what is about to go off",
+      icon: <IconBox size={22} />,
       onClick: () => onNavigate("fridge"),
     },
     {
       label: "Passwords",
       hint: "Shared account logins and numbers",
+      icon: <IconKey size={22} />,
       onClick: () => onNavigate("passwords"),
     },
     {
       label: "Household settings",
       hint: "Who shares dinners",
+      icon: <IconSettings size={22} />,
       onClick: onOpenSettings,
     },
     {
       label: "Classic look",
       hint: "Switch this device back to the original design",
+      icon: <IconStar size={22} />,
       onClick: onSwitchUi,
     },
   ];
@@ -50,11 +67,14 @@ export default function FreshMore({
             className="fresh-row"
             onClick={e.onClick}
           >
+            <span className="fresh-more-icon">{e.icon}</span>
             <span className="fresh-row-main">
               <span className="fresh-row-title">{e.label}</span>
               <span className="fresh-row-meta">{e.hint}</span>
             </span>
-            <span className="fresh-row-note">›</span>
+            <span className="fresh-chev">
+              <IconChevronRight size={20} />
+            </span>
           </button>
         ))}
       </div>

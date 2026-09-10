@@ -259,7 +259,7 @@ export default function ScanLabelModal({
               className="btn-secondary"
               onClick={captureForOcr}
             >
-              📸 Capture label (skip barcode)
+              <span className="btn-emoji" aria-hidden="true">📸</span> Capture label (skip barcode)
             </button>
           </div>
         ) : null}

@@ -14,7 +14,7 @@ type Props = {
 function weekLabel(weekStart: string): string {
   const start = parseYmd(weekStart);
   const end = new Date(start);
-  end.setDate(end.getDate() + 4); // Sun → Thu inclusive
+  end.setDate(end.getDate() + 6); // Sun to Sat inclusive
   const months = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -138,7 +138,7 @@ export default function RecipeArchiveModal({ onClose, onError }: Props) {
                           target="_blank"
                           rel="noopener noreferrer"
                         >
-                          Open recipe ↗
+                          Open recipe<span className="btn-emoji" aria-hidden="true"> ↗</span>
                         </a>
                       ) : null}
                     </div>

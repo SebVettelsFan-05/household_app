@@ -146,7 +146,7 @@ export function useRecipeWeeks({
 
   // Re-computed when `today` changes. A timer schedules itself for the next
   // household-timezone midnight so the week boundary advances live without a
-  // refresh. At Friday 00:00 Toronto time, the completed Sun-Thu cooking week
+  // refresh. At Sunday 00:00 Toronto time, the completed cooking week
   // drops into the archive and the upcoming Sunday becomes "this week".
   const today = useHouseholdToday();
   const week1 = useMemo(() => thisWeekStart(today), [today]);

@@ -3,11 +3,13 @@
 import { useMemo } from "react";
 import { useHouseholdToday } from "@/lib/useHouseholdToday";
 import type { FreshTab, RecipeSlot } from "@/components/fresh/FreshApp";
-import FreshSettlementCard from "@/components/fresh/FreshSettlementCard";
+import { Avatar } from "@/components/fresh/people";
+import { IconChevronRight } from "@/components/fresh/icons";
 import { POOL_LABELS } from "@/components/PoolChips";
-import { DAY_LONG, thisWeekStart, todayCookingDay } from "@/lib/dates";
+import { DAY_LONG, shortDayLabel, thisWeekStart, todayCookingDay } from "@/lib/dates";
 import { expiryStatus } from "@/lib/format";
-import { GROCERY_POOLS, type Item } from "@/lib/types";
+import { fmtMoney } from "@/lib/money";
+import { GROCERY_POOLS, type GroceryPool, type Item } from "@/lib/types";
 import { useMonthlySettlement } from "@/lib/useMonthlySettlement";
 import type { HouseholdData } from "@/lib/useHouseholdData";
 
@@ -15,17 +17,12 @@ type Props = {
   data: HouseholdData;
   mealGroup: string[];
   onNavigate: (tab: FreshTab) => void;
+  onOpenMonth: () => void;
   onPlanDinner: (slot: RecipeSlot) => void;
 };
 
-const POOL_ORDER = ["meals", "house", "personal"] as const;
+const POOL_ORDER: GroceryPool[] = ["meals", "house", "personal"];
 const EXPIRING_WINDOW_DAYS = 3;
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
-}
 
 /** Days until `expiry`, or null when the item carries no date. */
 function daysUntil(expiry: string): number | null {
@@ -41,6 +38,7 @@ export default function FreshHome({
   data,
   mealGroup,
   onNavigate,
+  onOpenMonth,
   onPlanDinner,
 }: Props) {
   const { settlement, loadingBills } = useMonthlySettlement(data.expenses);
@@ -67,7 +65,6 @@ export default function FreshHome({
     }
     return counts;
   }, [data.grocery]);
-  const openGrocery = data.grocery.filter((g) => !g.done).length;
 
   const expiring = useMemo(() => {
     const rows: { item: Item; days: number }[] = [];
@@ -76,169 +73,229 @@ export default function FreshHome({
       if (days === null || days > EXPIRING_WINDOW_DAYS) continue;
       rows.push({ item, days });
     }
-    return rows.sort((a, b) => a.days - b.days || a.item.name.localeCompare(b.item.name));
+    return rows.sort(
+      (a, b) => a.days - b.days || a.item.name.localeCompare(b.item.name)
+    );
   }, [data.items]);
 
-  const monthLabel = new Date().toLocaleString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
+  const monthName = new Date().toLocaleString("en-US", { month: "long" });
+  // "Sun, May 24" -> "May 24"; the long day name is written out separately.
+  const dateLine =
+    dayIndex >= 0 ? (shortDayLabel(weekStart, dayIndex).split(", ")[1] ?? "") : "";
+  const anyMovement = settlement.lines.some((l) => l.share !== l.paid);
 
   return (
     <div className="fresh-home">
-      <section className="fresh-card fresh-home-wide">
-        <div className="fresh-card-head">
-          <h2 className="fresh-h2">Tonight&apos;s dinner</h2>
-          <span className="fresh-sub">
-            {dayIndex >= 0 ? DAY_LONG[dayIndex] : "No cooking day"}
-          </span>
-        </div>
-
-        {data.recipesLoading ? (
-          <div className="fresh-skel fresh-skel-row" />
-        ) : dayIndex < 0 ? (
-          <>
-            <div className="fresh-tonight-quiet">No dinner slot today</div>
-            <p className="fresh-field-hint">
-              The shared week runs Sunday to Thursday. Next week&apos;s slots
-              are already open.
-            </p>
-          </>
-        ) : tonight && tonight.noMeal ? (
-          <>
-            <div className="fresh-tonight-quiet">No shared meal</div>
-            <p className="fresh-field-hint">
-              Tonight is marked as everyone feeding themselves.
-            </p>
-          </>
-        ) : tonight ? (
-          <>
-            <div className="fresh-tonight-dish">{tonight.name}</div>
-            <div className="fresh-tonight-line">
-              <span className="fresh-avatar" aria-hidden="true">
-                {initials(tonight.assignedTo || "?")}
-              </span>
-              <span>
-                {tonight.assignedTo
-                  ? `${tonight.assignedTo} is cooking`
-                  : "No cook picked yet"}
-              </span>
-              <span className="fresh-badge">
-                {tonight.portions > 0
-                  ? `${tonight.portions} portions`
-                  : `${mealGroup.length} in the meal group`}
-              </span>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="fresh-tonight-quiet">Nothing planned</div>
-            <p className="fresh-field-hint">
-              Pick a cook and a dish and the ingredients can go straight to the
-              grocery list.
-            </p>
-            <div className="fresh-btn-row" style={{ marginTop: 12 }}>
-              <button
-                type="button"
-                className="fresh-btn fresh-btn-primary"
-                onClick={() => onPlanDinner({ weekStart, day: dayIndex })}
-              >
-                Plan dinner
-              </button>
-            </div>
-          </>
-        )}
-
+      {/* ---- Tonight ---- */}
+      <section className="fresh-tonight">
         <button
           type="button"
-          className="fresh-block-link"
+          className="fresh-tonight-tap"
           onClick={() => onNavigate("recipes")}
         >
-          Open Recipes
+          <span className="fresh-tonight-when">
+            {dayIndex >= 0 ? `${DAY_LONG[dayIndex]} ${dateLine}` : "Tonight"}
+          </span>
+
+          {data.recipesLoading ? (
+            <span className="fresh-skel fresh-skel-line" />
+          ) : tonight && tonight.noMeal ? (
+            <span className="fresh-tonight-quiet">
+              No shared dinner tonight
+            </span>
+          ) : tonight ? (
+            <>
+              <span className="fresh-tonight-dish">{tonight.name}</span>
+              <span className="fresh-tonight-meta">
+                {tonight.assignedTo ? (
+                  <span className="fresh-person">
+                    <Avatar
+                      name={tonight.assignedTo}
+                      size={26}
+                      className="fresh-ring"
+                    />
+                    <span className="fresh-person-name">
+                      {tonight.assignedTo}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="fresh-tonight-nocook">No cook picked</span>
+                )}
+                {tonight.portions > 0 ? (
+                  <span className="fresh-pill-note">
+                    {tonight.portions} portions
+                  </span>
+                ) : (
+                  <span className="fresh-pill-note">
+                    {mealGroup.length} eating
+                  </span>
+                )}
+                {tonight.ingredients.length > 0 ? (
+                  <span className="fresh-pill-note">
+                    {tonight.ingredients.length} ingredient
+                    {tonight.ingredients.length === 1 ? "" : "s"}
+                  </span>
+                ) : null}
+              </span>
+            </>
+          ) : (
+            <span className="fresh-tonight-quiet">
+              Nothing planned for tonight
+            </span>
+          )}
         </button>
+
+        {!data.recipesLoading && !tonight && dayIndex >= 0 ? (
+          <button
+            type="button"
+            className="fresh-btn fresh-btn-primary fresh-btn-block"
+            onClick={() => onPlanDinner({ weekStart, day: dayIndex })}
+          >
+            Plan dinner
+          </button>
+        ) : null}
       </section>
 
-      <FreshSettlementCard
-        settlement={settlement}
-        title="This month"
-        subtitle={monthLabel}
-        loading={loadingBills || data.expensesLoading}
-        linkLabel="Open Expenses"
-        onLink={() => onNavigate("expenses")}
-      />
-
+      {/* ---- Money ---- */}
       <section className="fresh-card">
         <div className="fresh-card-head">
-          <h2 className="fresh-h2">Still to buy</h2>
-          <span className="fresh-sub">{openGrocery} open</span>
+          <h2 className="fresh-h2">{monthName}</h2>
+          <button
+            type="button"
+            className="fresh-head-link"
+            onClick={onOpenMonth}
+          >
+            Open month
+            <IconChevronRight size={16} />
+          </button>
         </div>
-        {data.groceryLoading ? (
-          <div className="fresh-skel fresh-skel-row" />
-        ) : openGrocery === 0 ? (
+
+        {loadingBills || data.expensesLoading ? (
+          <>
+            <div className="fresh-skel fresh-skel-row" />
+            <div className="fresh-skel fresh-skel-row" />
+            <div className="fresh-skel fresh-skel-row" />
+          </>
+        ) : !anyMovement ? (
           <div className="fresh-empty">
-            <strong>The list is clear</strong>
-            Anything the house runs out of goes on here.
+            <strong>Nothing to settle yet</strong>
+            Log a receipt or this month&apos;s bills and the split shows up
+            here.
           </div>
         ) : (
-          POOL_ORDER.map((pool) => (
-            <div className="fresh-settle-row" key={pool}>
-              <span className="fresh-settle-name">{POOL_LABELS[pool]}</span>
-              <span className="fresh-row-note">
-                {poolCounts.get(pool) ?? 0} item
-                {(poolCounts.get(pool) ?? 0) === 1 ? "" : "s"}
-              </span>
+          <>
+            <div className="fresh-money-rows">
+              {settlement.lines.map((line) => {
+                const delta = line.share - line.paid;
+                return (
+                  <button
+                    key={line.name}
+                    type="button"
+                    className="fresh-money-row"
+                    onClick={onOpenMonth}
+                  >
+                    <Avatar name={line.name} size={32} />
+                    <span className="fresh-money-name">{line.name}</span>
+                    <span
+                      className={
+                        delta > 0
+                          ? "fresh-money-amount send"
+                          : delta < 0
+                            ? "fresh-money-amount withdraw"
+                            : "fresh-money-amount even"
+                      }
+                    >
+                      {delta > 0
+                        ? `Send ${fmtMoney(delta)}`
+                        : delta < 0
+                          ? `Withdraw ${fmtMoney(-delta)}`
+                          : "Even"}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          ))
+            <div className="fresh-money-total">
+              <span>Household total</span>
+              <span className="fresh-num">{fmtMoney(settlement.grand)}</span>
+            </div>
+          </>
         )}
-        <button
-          type="button"
-          className="fresh-block-link"
-          onClick={() => onNavigate("grocery")}
-        >
-          Open Grocery
-        </button>
       </section>
 
+      {/* ---- Grocery counters ---- */}
+      <div className="fresh-counters">
+        {POOL_ORDER.map((pool) => (
+          <button
+            key={pool}
+            type="button"
+            className="fresh-counter"
+            data-pool={pool}
+            onClick={() => onNavigate("grocery")}
+          >
+            <span className="fresh-counter-num">
+              {poolCounts.get(pool) ?? 0}
+            </span>
+            <span className="fresh-counter-label">{POOL_LABELS[pool]}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ---- Use soon ---- */}
       <section className="fresh-card">
         <div className="fresh-card-head">
-          <h2 className="fresh-h2">Expiring soon</h2>
-          <span className="fresh-sub">Next 3 days</span>
+          <h2 className="fresh-h2">Use soon</h2>
+          <button
+            type="button"
+            className="fresh-head-link"
+            onClick={() => onNavigate("fridge")}
+          >
+            Inventory
+            <IconChevronRight size={16} />
+          </button>
         </div>
+
         {data.itemsLoading ? (
-          <div className="fresh-skel fresh-skel-row" />
+          <>
+            <div className="fresh-skel fresh-skel-row" />
+            <div className="fresh-skel fresh-skel-row" />
+          </>
         ) : expiring.length === 0 ? (
           <div className="fresh-empty">
             <strong>Nothing about to go off</strong>
-            Items with an expiry date show up here three days ahead.
+            Anything with an expiry date lands here three days ahead.
           </div>
         ) : (
-          expiring.slice(0, 6).map(({ item }) => {
-            const status = expiryStatus(item.expiry);
-            return (
-              <div
-                className={`fresh-settle-row ${status.cls === "expired" ? "fresh-expired" : "fresh-expiring"}`}
-                key={item.id}
-              >
-                <span className="fresh-settle-name">
-                  {item.name}
-                  {item.owner ? (
-                    <span className="fresh-badge" style={{ marginLeft: 8 }}>
-                      {item.owner}
+          <div className="fresh-rows">
+            {expiring.slice(0, 6).map(({ item }) => {
+              const status = expiryStatus(item.expiry);
+              return (
+                <div className="fresh-row" key={item.id}>
+                  <span className="fresh-row-main">
+                    <span className="fresh-row-title">{item.name}</span>
+                    <span className="fresh-row-meta">
+                      {item.owner ? (
+                        <span className="fresh-person">
+                          <Avatar name={item.owner} size={20} />
+                          <span className="fresh-person-name">
+                            {item.owner}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="fresh-row-note">Shared</span>
+                      )}
                     </span>
-                  ) : null}
-                </span>
-                <span className="fresh-row-note">{status.label}</span>
-              </div>
-            );
-          })
+                  </span>
+                  <span
+                    className={`fresh-badge${status.cls === "expired" ? " danger" : " warn"}`}
+                  >
+                    {status.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         )}
-        <button
-          type="button"
-          className="fresh-block-link"
-          onClick={() => onNavigate("fridge")}
-        >
-          Open Inventory
-        </button>
       </section>
     </div>
   );

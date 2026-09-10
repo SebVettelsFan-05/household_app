@@ -8,6 +8,8 @@ import AllocationEditor, {
   blankAllocation,
   type EditableAllocation,
 } from "@/components/AllocationEditor";
+import FreshSheet from "@/components/fresh/FreshSheet";
+import { Avatar, personColor } from "@/components/fresh/people";
 import { normalizeAllocations } from "@/lib/allocations";
 import { addExpense } from "@/lib/client";
 import {
@@ -34,10 +36,10 @@ function todayYmdLocal(): string {
 }
 
 /**
- * Full-height add sheet: amount first, then who paid, then what the receipt
- * was for. The validation and the API call are the same sequence the classic
- * add card runs, so an expense entered here is indistinguishable from one
- * entered there.
+ * Add sheet: the amount first and large, then who paid, then how the
+ * receipt splits, then the paperwork. The validation and the API call are
+ * the same sequence the classic add card runs, so an expense entered here is
+ * indistinguishable from one entered there.
  */
 export default function FreshAddExpenseSheet({
   mealGroup,
@@ -59,14 +61,6 @@ export default function FreshAddExpenseSheet({
   const [busy, setBusy] = useState(false);
 
   const totalCents = parseCents(amount) ?? 0;
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   // Object URLs need to be revoked or the browser leaks the blob.
   useEffect(() => {
@@ -141,66 +135,73 @@ export default function FreshAddExpenseSheet({
   }
 
   return (
-    <div
-      className="fresh-sheet-bg"
-      onClick={(e) => {
-        // Catch layer: only a click that lands on the backdrop itself
-        // dismisses, and it never reaches whatever is underneath.
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <FreshSheet
+      title="Add expense"
+      onClose={onClose}
+      actions={
+        <button
+          type="button"
+          className="fresh-btn fresh-btn-primary fresh-btn-block"
+          onClick={submit}
+          disabled={busy}
+        >
+          {busy ? "Uploading" : "Add expense"}
+        </button>
+      }
     >
-      <div
-        className="fresh-sheet fresh-sheet-tall"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Add expense"
-      >
-        <div className="fresh-sheet-head">
-          <h2 className="fresh-h2">Add expense</h2>
-          <button
-            type="button"
-            className="fresh-btn fresh-btn-quiet"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="fresh-field">
-          <label htmlFor="fx-amount">Amount</label>
+      <div className="fresh-field">
+        <label htmlFor="fx-amount">Amount</label>
+        <div className="fresh-amount-wrap">
+          <span className="fresh-amount-sign" aria-hidden="true">
+            $
+          </span>
           <input
             id="fx-amount"
             className="fresh-input fresh-input-amount"
             type="text"
             inputMode="decimal"
             autoComplete="off"
+            placeholder="0.00"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
-          <p className="fresh-field-hint">The receipt total, before the split.</p>
         </div>
+      </div>
 
-        <div className="fresh-field">
-          <label id="fx-paid-label">Paid by</label>
-          <div className="fresh-chips" role="group" aria-labelledby="fx-paid-label">
-            {BUYERS.map((b) => (
-              <button
-                key={b}
-                type="button"
-                className={`fresh-chip${paidBy === b ? " active" : ""}`}
-                aria-pressed={paidBy === b}
-                onClick={() => setPaidBy(b)}
-                disabled={busy}
-              >
-                {b}
-              </button>
-            ))}
-          </div>
+      <div className="fresh-field">
+        <label id="fx-paid-label">Paid by</label>
+        <div
+          className="fresh-chips"
+          role="group"
+          aria-labelledby="fx-paid-label"
+        >
+          {BUYERS.map((b) => (
+            <button
+              key={b}
+              type="button"
+              className={`fresh-chip fresh-chip-person${paidBy === b ? " active" : ""}`}
+              style={
+                paidBy === b
+                  ? {
+                      background: personColor(b),
+                      borderColor: personColor(b),
+                    }
+                  : undefined
+              }
+              aria-pressed={paidBy === b}
+              onClick={() => setPaidBy(b)}
+              disabled={busy}
+            >
+              <Avatar name={b} size={22} />
+              {b}
+            </button>
+          ))}
         </div>
+      </div>
 
-        <div className="field">
-          <label>Split</label>
+      <div className="fresh-field">
+        <label id="fx-split-label">Split</label>
+        <div role="group" aria-labelledby="fx-split-label">
           <AllocationEditor
             totalCents={totalCents}
             value={allocations}
@@ -210,81 +211,62 @@ export default function FreshAddExpenseSheet({
             disabled={busy}
           />
         </div>
+      </div>
 
+      <div className="fresh-field">
+        <label htmlFor="fx-receipt">Receipt</label>
+        <ReceiptPicker
+          inputId="fx-receipt"
+          file={receipt}
+          previewUrl={previewUrl}
+          onChange={setReceipt}
+        />
+      </div>
+
+      <div className="fresh-field">
+        <label htmlFor="fx-store">Store or source</label>
+        <input
+          id="fx-store"
+          className="fresh-input"
+          type="text"
+          placeholder="e.g. Costco"
+          autoComplete="off"
+          value={store}
+          onChange={(e) => setStore(e.target.value)}
+        />
+      </div>
+
+      <div className="fresh-field-row">
         <div className="fresh-field">
-          <label htmlFor="fx-store">Store or source</label>
+          <label htmlFor="fx-date">Date</label>
           <input
-            id="fx-store"
+            id="fx-date"
+            className="fresh-input"
+            type="date"
+            min={currentMonthStart}
+            value={occurredOn}
+            onChange={(e) => setOccurredOn(e.target.value)}
+          />
+        </div>
+        <div className="fresh-field">
+          <label htmlFor="fx-desc">Description</label>
+          <input
+            id="fx-desc"
             className="fresh-input"
             type="text"
-            placeholder="e.g. Costco"
+            placeholder="Optional"
             autoComplete="off"
-            value={store}
-            onChange={(e) => setStore(e.target.value)}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
           />
-        </div>
-
-        <div className="fresh-field-row">
-          <div className="fresh-field">
-            <label htmlFor="fx-date">Date</label>
-            <input
-              id="fx-date"
-              className="fresh-input"
-              type="date"
-              min={currentMonthStart}
-              value={occurredOn}
-              onChange={(e) => setOccurredOn(e.target.value)}
-            />
-          </div>
-          <div className="fresh-field">
-            <label htmlFor="fx-desc">Description</label>
-            <input
-              id="fx-desc"
-              className="fresh-input"
-              type="text"
-              placeholder="Optional"
-              autoComplete="off"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="field">
-          <label htmlFor="fx-receipt">Receipt</label>
-          <ReceiptPicker
-            inputId="fx-receipt"
-            file={receipt}
-            previewUrl={previewUrl}
-            onChange={setReceipt}
-          />
-        </div>
-
-        {error ? (
-          <p className="fresh-form-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        <div className="fresh-sheet-actions">
-          <button
-            type="button"
-            className="fresh-btn"
-            onClick={onClose}
-            disabled={busy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="fresh-btn fresh-btn-primary"
-            onClick={submit}
-            disabled={busy}
-          >
-            {busy ? "Uploading" : "Add expense"}
-          </button>
         </div>
       </div>
-    </div>
+
+      {error ? (
+        <p className="fresh-form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </FreshSheet>
   );
 }

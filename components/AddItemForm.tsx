@@ -190,7 +190,7 @@ export default function AddItemForm({
             onClick={() => setDictating(true)}
             title="Dictate several items at once using your phone keyboard mic"
           >
-            🎙️ Dictate
+            <span className="btn-emoji" aria-hidden="true">🎙️</span> Dictate
           </button>
           <button
             type="button"
@@ -198,7 +198,7 @@ export default function AddItemForm({
             onClick={() => setScanning(true)}
             title="Scan a barcode / label with your camera"
           >
-            📷 Scan
+            <span className="btn-emoji" aria-hidden="true">📷</span> Scan
           </button>
         </div>
       </div>

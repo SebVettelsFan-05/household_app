@@ -948,8 +948,8 @@ function validateRecipeSlot(input: {
   day?: number;
   weekStart?: string;
 }) {
-  if (typeof input.day !== "number" || input.day < 0 || input.day > 4) {
-    throw new Error("Day must be Sunday through Thursday (0–4)");
+  if (typeof input.day !== "number" || input.day < 0 || input.day > 6) {
+    throw new Error("Day must be Sunday through Saturday (0-6)");
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.weekStart))) {
     throw new Error("weekStart must be YYYY-MM-DD");
@@ -1069,8 +1069,8 @@ export async function updateRecipeRepo(
     patch.assignedTo = t;
   }
   if (input.day !== undefined) {
-    if (input.day < 0 || input.day > 4)
-      throw new Error("Day must be 0–4 (Sun–Thu)");
+    if (input.day < 0 || input.day > 6)
+      throw new Error("Day must be Sunday through Saturday (0-6)");
     patch.day = input.day;
   }
   if (input.weekStart !== undefined) {

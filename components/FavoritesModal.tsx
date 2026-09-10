@@ -51,7 +51,7 @@ export default function FavoritesModal({
       }}
     >
       <div className="modal modal-wide">
-        <h2>★ Favorite recipes</h2>
+        <h2><span className="btn-emoji" aria-hidden="true">★ </span>Favorite recipes</h2>
         {favorites.length === 0 ? (
           <div className="empty" style={{ padding: "30px 10px" }}>
             <p>No favorites yet.</p>

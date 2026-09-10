@@ -2,99 +2,203 @@
  * Fresh shell. Every rule is scoped under `.fresh` so the classic UI, which
  * owns all of globals.css, is untouched by anything in here.
  *
- * The token block at the top is deliberately the same set of names
- * globals.css defines, so the classic modals and forms reused inside this
- * shell (recipe scraping, dictation, label scanning, passwords, the monthly
- * breakdown) inherit the new colour, radius and type without being rewritten.
+ * Two token layers live in the block below. The first is the fresh
+ * vocabulary (paper, card, ink, the section washes, the person colours).
+ * The second re-points the names globals.css uses (--bg, --surface, --ink,
+ * --accent, --line, --radius) at the first, so every classic modal and form
+ * reused inside this shell (recipe scraping, dictation, label scanning,
+ * passwords, the monthly breakdown, the allocation editor) inherits the
+ * paper, the ink, the current section colour, the fonts and the radii
+ * without a single line of it being rewritten.
  */
 
 .fresh {
-  /* One cool neutral ramp, one accent. */
-  --bg: #f4f5f7;
-  --surface: #ffffff;
-  --surface-soft: #e9ebef;
-  --ink: #16181d;
-  --ink-soft: #5c6270;
-  --accent: #205ac5;
-  --accent-soft: #e3eaf8;
-  /* Text that sits on the accent. Dark mode's accent is light, so white on
-     it would fail AA. */
-  --accent-ink: #ffffff;
-  --warn: #9a5209;
-  --danger: #b3261e;
-  --line: rgba(22, 24, 29, 0.12);
-  --shadow: 0 1px 2px rgba(22, 24, 29, 0.05), 0 6px 18px rgba(22, 24, 29, 0.08);
-  --radius: 10px;
-  --fresh-font: "Geist", ui-sans-serif, system-ui, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
-  --fresh-top-h: 57px;
+  /* Surfaces */
+  --paper: #f6f1e7;
+  --card: #fffdf8;
+  --ink: #1a1714;
+  --ink-soft: #6b655c;
+  --hairline: rgba(26, 23, 20, 0.12);
+  --sunk: #ede5d6;
+  --card-shadow: 0 1px 2px rgba(26, 23, 20, 0.05),
+    0 8px 24px rgba(26, 23, 20, 0.06);
 
-  background: var(--bg);
+  /* Section washes */
+  /* Light section washes. Each is at least 4.5:1 against paper as text
+     and at least 4.5:1 under white text as a fill. */
+  --c-recipes: #c13d22;
+  --c-recipes-hero: #c13d22;
+  --c-grocery: #8a5f00;
+  --c-expenses: #136f63;
+  --c-inventory: #3f7a2e;
+  --c-passwords: #6b3fa0;
+  --c-danger: #b3261e;
+
+  /* The current screen's wash. Overridden per [data-section] below. */
+  --section: var(--ink);
+  --on-section: #fffdf8;
+
+  /* Type */
+  --font-display: "Bricolage Grotesque", "Instrument Sans", system-ui,
+    sans-serif;
+  --font-body: "Instrument Sans", system-ui, sans-serif;
+
+  /* Geometry */
+  --r-card: 18px;
+  --r-control: 14px;
+  --top-h: 64px;
+  --nav-h: 68px;
+  /* Desktop shell width: rail plus content. Wider where the screen earns a
+     second column, so the block stays centred instead of drifting right. */
+  --shell-w: 944px;
+
+  /* ---- names globals.css reads ---- */
+  --bg: var(--paper);
+  --surface: var(--card);
+  --surface-soft: var(--sunk);
+  --accent: var(--section);
+  --accent-soft: color-mix(in srgb, var(--section) 14%, var(--card));
+  --accent-ink: var(--on-section);
+  --line: var(--hairline);
+  --shadow: var(--card-shadow);
+  --radius: var(--r-control);
+  --warn: #9a5209;
+  --danger: var(--c-danger);
+
+  background: var(--paper);
   color: var(--ink);
   min-height: 100vh;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.45;
-  /* Money and counts read in columns everywhere, including inside the
-     reused classic modals. */
   font-variant-numeric: tabular-nums;
 }
 
 :root[data-theme="dark"] .fresh {
-  --bg: #101215;
-  --surface: #191c21;
-  --surface-soft: #23272e;
-  --ink: #e7e9ee;
-  --ink-soft: #9ba1ae;
-  --accent: #5a91e2;
-  --accent-soft: #1d2a3d;
-  --accent-ink: #0d1626;
+  --paper: #151311;
+  --card: #211e1a;
+  --ink: #f3ede2;
+  --ink-soft: #a39b8f;
+  --hairline: rgba(243, 237, 226, 0.12);
+  --sunk: #2c2823;
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --c-recipes: #f0694b;
+  --c-recipes-hero: #f0694b;
+  --c-grocery: #e8aa2a;
+  --c-expenses: #2fa08f;
+  --c-inventory: #7bb865;
+  --c-passwords: #9c74d6;
+  --c-danger: #e8796c;
+
+  --on-section: #151311;
   --warn: #e0a25c;
-  --danger: #ec7b72;
-  --line: rgba(231, 233, 238, 0.14);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.4);
 }
 
-/* The page background behind the shell (overscroll, short screens). */
+/* Section washes. Home and More wear plain ink. */
+.fresh[data-section="recipes"] {
+  --section: var(--c-recipes);
+  --on-section: #ffffff;
+}
+.fresh[data-section="grocery"] {
+  --section: var(--c-grocery);
+  /* White on this yellow is under 3:1, so the label goes ink instead. */
+  --on-section: #1a1714;
+}
+.fresh[data-section="expenses"] {
+  --section: var(--c-expenses);
+  --on-section: #ffffff;
+}
+.fresh[data-section="inventory"] {
+  --section: var(--c-inventory);
+  --on-section: #ffffff;
+}
+.fresh[data-section="passwords"] {
+  --section: var(--c-passwords);
+  --on-section: #ffffff;
+}
+.fresh[data-section="home"] {
+  --section: var(--ink);
+  --on-section: var(--paper);
+}
+/* Dark washes are all light enough that the label has to be dark. */
+:root[data-theme="dark"] .fresh[data-section="recipes"],
+:root[data-theme="dark"] .fresh[data-section="grocery"],
+:root[data-theme="dark"] .fresh[data-section="expenses"],
+:root[data-theme="dark"] .fresh[data-section="inventory"],
+:root[data-theme="dark"] .fresh[data-section="passwords"] {
+  --on-section: #151311;
+}
+
+/* The page behind the shell (overscroll, short screens). */
 body:has(.fresh) {
-  background: #f4f5f7;
+  background: #f6f1e7;
 }
 :root[data-theme="dark"] body:has(.fresh) {
-  background: #101215;
+  background: #151311;
 }
 
 /*
- * One typeface for the whole surface. `!important` because globals.css sets
- * the serif on a couple of dozen element-qualified selectors, and matching
- * every one of them here would be a second stylesheet to keep in sync.
+ * One body face for the whole surface. `!important` because globals.css sets
+ * its own faces on a couple of dozen element-qualified selectors; the display
+ * face is re-applied below at higher specificity.
  */
 .fresh,
 .fresh * {
-  font-family: var(--fresh-font) !important;
-  font-variation-settings: normal;
+  font-family: var(--font-body) !important;
 }
 .fresh .scan-barcode {
   font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
 }
-
-/* Hierarchy by weight and colour, not size. */
-.fresh h1,
-.fresh h2,
-.fresh h3,
+.fresh .fresh-title,
+.fresh .fresh-h2,
+.fresh .fresh-tonight-dish,
+.fresh .fresh-tonight-quiet,
+.fresh .fresh-day-dish,
+.fresh .fresh-big-money,
+.fresh .fresh-counter-num,
+.fresh .fresh-input-amount,
+.fresh .fresh-sheet-title,
 .fresh .modal h2,
 .fresh .add-card h2,
-.fresh .list-head h2,
-.fresh .split-card h2,
 .fresh .login-title {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-}
-.fresh .empty .icon {
-  font-size: 28px;
-  color: var(--ink-soft);
+  font-family: var(--font-display) !important;
+  letter-spacing: -0.015em;
 }
 
-/* No uppercase tracked labels as a rhythm. */
+/* ---------------------------------------------------------------- *
+ * Reused classic forms and modals
+ * ---------------------------------------------------------------- */
+
+.fresh .modal {
+  border-radius: 24px 24px 0 0;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  box-shadow: var(--card-shadow);
+}
+@media (min-width: 520px) {
+  .fresh .modal {
+    border-radius: var(--r-card);
+  }
+}
+.fresh .modal-bg {
+  background: rgba(26, 23, 20, 0.5);
+}
+.fresh .modal h2,
+.fresh .add-card h2 {
+  font-size: 22px;
+  font-weight: 650;
+}
+.fresh .add-card,
+.fresh .monthly-card,
+.fresh .split-card,
+.fresh .pw-card {
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-card);
+  box-shadow: var(--card-shadow);
+}
+
+/* No tracked uppercase anywhere. */
 .fresh .field label,
 .fresh .cat-pills-row label,
 .fresh .cat-group-head,
@@ -106,86 +210,222 @@ body:has(.fresh) {
 .fresh .favorite-meta,
 .fresh .archive-recipe-head,
 .fresh .manage-link,
+.fresh .alloc-remainder,
 .fresh .home-card-cta {
   text-transform: none;
   letter-spacing: normal;
 }
-.fresh .field label {
+.fresh .field label,
+.fresh .cat-pills-row label {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--ink-soft);
 }
 
-/* One radius scale. The classic sheet corners are the only hard-coded ones. */
-.fresh .modal {
-  border-radius: var(--radius) var(--radius) 0 0;
-  background: var(--bg);
-  /* In dark mode the panel and the page are close in value, so the edge has
-     to be drawn rather than implied. */
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+.fresh .field input[type="text"],
+.fresh .field input[type="number"],
+.fresh .field input[type="date"],
+.fresh .field input[type="search"],
+.fresh .field input[type="password"],
+.fresh .field input[type="url"],
+.fresh .field textarea,
+.fresh .select,
+.fresh select,
+.fresh .modal input[type="text"],
+.fresh .modal input[type="number"],
+.fresh .modal input[type="date"] {
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  font-size: 16px;
+  color: var(--ink);
 }
-@media (min-width: 520px) {
-  .fresh .modal {
-    border-radius: var(--radius);
-  }
+.fresh .field input:focus,
+.fresh .field textarea:focus,
+.fresh .select:focus,
+.fresh select:focus {
+  border-color: var(--section);
+  border-width: 2px;
+  outline: none;
 }
-.fresh .modal-bg {
-  background: rgba(16, 18, 21, 0.55);
-}
-.fresh .theme-toggle,
-.fresh .refresh-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius);
-  font-size: 15px;
-}
+
 .fresh .btn-primary,
 .fresh .btn-secondary,
 .fresh .btn-accent,
 .fresh .btn-danger {
-  border-radius: var(--radius);
-  font-weight: 600;
+  border-radius: 999px;
+  border-width: 1.5px;
+  font-weight: 700;
+  font-size: 16px;
+  min-height: 52px;
 }
 .fresh .btn-primary,
-.fresh .btn-accent,
-.fresh .alloc-chip.active,
-.fresh .pool-chip.active,
-.fresh .filter-pill.active,
-.fresh .check.checked {
-  color: var(--accent-ink);
+.fresh .btn-accent {
+  background: var(--section);
+  border-color: var(--section);
+  color: var(--on-section);
 }
 .fresh .alloc-chip,
 .fresh .pool-chip,
 .fresh .filter-pill,
-.fresh .cat-pill {
+.fresh .cat-pill,
+.fresh .scan-trigger,
+.fresh .sort-pill {
   border-radius: 999px;
+  border-width: 1.5px;
+}
+.fresh .alloc-chip,
+.fresh .pool-chip {
+  min-height: 40px;
+  font-size: 14px;
+}
+.fresh .alloc-chip.active,
+.fresh .pool-chip.active,
+.fresh .filter-pill.active,
+.fresh .cat-pill.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.fresh .check.checked {
+  color: var(--on-section);
 }
 
-/* The receipt attachment is a single large control. */
-.fresh .receipt-picker-cta {
-  display: block;
-  width: 100%;
-  text-align: center;
-  padding: 18px 14px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--accent);
+/* Emoji glyphs in the reused forms are hidden and redrawn as line icons. */
+.fresh .btn-emoji {
+  display: none !important;
+}
+.fresh .scan-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
   font-weight: 600;
 }
+.fresh .scan-trigger::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  flex: none;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+.fresh .add-card-actions .scan-trigger:nth-child(1) {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='3' width='6' height='11' rx='3'/%3E%3Cpath d='M5.5 12a6.5 6.5 0 0 0 13 0'/%3E%3Cpath d='M12 18.5V21'/%3E%3C/svg%3E");
+}
+.fresh .add-card-actions .scan-trigger:nth-child(2),
+.fresh .scan-manual {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5h3.5L8.2 6h7.6l1.7 2.5H21V19H3V8.5Z'/%3E%3Ccircle cx='12' cy='13.5' r='3.5'/%3E%3C/svg%3E");
+}
+.fresh .scan-manual::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  vertical-align: -3px;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
 
-/* Reuse of the receipt splitter: lead with the "split this receipt" tap. */
+/* The receipt attachment is one large dashed tile with a camera on it. */
+.fresh .receipt-picker-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 120px;
+  padding: 20px 14px;
+  border: 2px dashed color-mix(in srgb, var(--section) 45%, var(--hairline));
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--section) 5%, var(--card));
+  color: var(--section);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+.fresh .receipt-picker-cta::before {
+  content: "";
+  width: 32px;
+  height: 32px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5h3.5L8.2 6h7.6l1.7 2.5H21V19H3V8.5Z'/%3E%3Ccircle cx='12' cy='13.5' r='3.5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5h3.5L8.2 6h7.6l1.7 2.5H21V19H3V8.5Z'/%3E%3Ccircle cx='12' cy='13.5' r='3.5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.fresh .receipt-hint {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.fresh .receipt-preview-file,
+.fresh .receipt-existing {
+  border-radius: var(--r-control);
+}
+
 .fresh .alloc-editor {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+.fresh .alloc-line {
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-card);
+  background: var(--card);
+  padding: 12px;
+}
+.fresh .alloc-amount {
+  height: 44px;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--paper);
+  padding: 0 12px;
+}
+.fresh .alloc-amount:focus-within {
+  border-color: var(--section);
+  border-width: 2px;
+}
+.fresh .alloc-amount-sign {
+  font-size: 16px;
+}
+.fresh .alloc-amount input {
+  width: 88px;
+  font-size: 16px;
+  font-weight: 600;
 }
 .fresh .alloc-footer {
-  order: -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.fresh .alloc-split {
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 700;
+  min-height: 44px;
+  padding: 0 18px;
+}
+.fresh .alloc-remainder {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh .alloc-remainder.warn {
+  color: var(--warn);
+  font-weight: 600;
 }
 
-/* ---------- Shell ---------- */
+/* ---------------------------------------------------------------- *
+ * Shell
+ * ---------------------------------------------------------------- */
 
 .fresh-top {
   position: sticky;
@@ -195,19 +435,77 @@ body:has(.fresh) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  min-height: var(--top-h);
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1.5px solid var(--hairline);
 }
 .fresh-title {
   margin: 0;
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 30px;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--section);
 }
 .fresh-top-actions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 4px;
+  border: 1.5px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--card);
+}
+
+.fresh-icon-btn,
+.fresh .theme-toggle,
+.fresh .refresh-btn {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.fresh-icon-btn:hover,
+.fresh .theme-toggle:hover,
+.fresh .refresh-btn:hover:not(:disabled) {
+  background: var(--sunk);
+  color: var(--ink);
+}
+/* The two classic header buttons keep their glyphs for the classic UI; here
+   the glyph is suppressed and the line icon takes over. */
+.fresh .refresh-btn,
+.fresh .theme-toggle {
+  font-size: 0;
+}
+.fresh .refresh-btn::before,
+.fresh .theme-toggle::before {
+  content: "";
+  width: 20px;
+  height: 20px;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+.fresh .refresh-btn {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.6-5.9'/%3E%3Cpath d='M20.5 3.5V9h-5.5'/%3E%3C/svg%3E");
+}
+.fresh .refresh-btn[aria-busy="true"]::before {
+  display: none;
+}
+.fresh .theme-toggle {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"] .fresh .theme-toggle {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2.5v2M12 19.5v2M21.5 12h-2M4.5 12h-2M18.4 5.6 17 7M7 17l-1.4 1.4M18.4 18.4 17 17M7 7 5.6 5.6'/%3E%3C/svg%3E");
 }
 
 .fresh-body {
@@ -218,68 +516,23 @@ body:has(.fresh) {
 }
 .fresh-main {
   width: 100%;
-  max-width: 1080px;
+  max-width: 640px;
   margin: 0 auto;
-  padding: 18px 16px 104px;
-}
-
-@media (min-width: 720px) {
-  .fresh-body {
-    display: grid;
-    grid-template-columns: 216px minmax(0, 1fr);
-    align-items: start;
-  }
-  .fresh-rail {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    position: sticky;
-    top: var(--fresh-top-h);
-    align-self: start;
-    max-height: calc(100vh - var(--fresh-top-h));
-    overflow-y: auto;
-    padding: 16px 12px;
-    border-right: 1px solid var(--line);
-  }
-  .fresh-main {
-    padding: 24px 24px 56px;
-  }
-}
-
-.fresh-rail-btn {
+  padding: 20px 16px calc(156px + env(safe-area-inset-bottom));
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--ink-soft);
-  font-size: 15px;
-  font-weight: 500;
-  padding: 10px 12px;
-  border-radius: var(--radius);
+  flex-direction: column;
+  gap: 24px;
 }
-.fresh-rail-btn:hover {
-  background: var(--surface-soft);
-  color: var(--ink);
+.fresh[data-section="expenses"],
+.fresh[data-section="recipes"] {
+  --shell-w: 1240px;
 }
-.fresh-rail-btn.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
+.fresh[data-section="expenses"] .fresh-main,
+.fresh[data-section="recipes"] .fresh-main {
+  max-width: 960px;
 }
-.fresh-rail-sep {
-  height: 1px;
-  background: var(--line);
-  margin: 12px 8px;
-}
-.fresh-rail-count {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink-soft);
-}
+
+/* ---- Bottom nav (phones) ---- */
 
 .fresh-tabbar {
   position: fixed;
@@ -288,183 +541,95 @@ body:has(.fresh) {
   bottom: 0;
   z-index: 30;
   display: flex;
-  gap: 2px;
-  padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-}
-@media (min-width: 720px) {
-  .fresh-tabbar {
-    display: none;
-  }
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--card);
+  border-top: 1.5px solid var(--hairline);
 }
 .fresh-tab {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   background: none;
   border: none;
-  border-top: 2px solid transparent;
+  border-top: 3px solid transparent;
   color: var(--ink-soft);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 10px 2px 12px;
-  border-radius: 0;
-  white-space: nowrap;
+  padding: 0 2px;
+  cursor: pointer;
 }
 .fresh-tab.active {
-  color: var(--accent);
-  font-weight: 600;
-  border-top-color: var(--accent);
+  color: var(--section);
+  border-top-color: var(--section);
 }
-.fresh-tab-count {
+.fresh-tab-icon {
+  position: relative;
+  display: inline-flex;
+}
+.fresh-tab-label {
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
-
-.fresh :is(.fresh-tab, .fresh-rail-btn, .fresh-btn, .fresh-chip, .fresh-row, .fresh-icon-btn):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.fresh-tab.active .fresh-tab-label {
+  font-weight: 700;
 }
-
-/* ---------- Primitives ---------- */
-
-.fresh-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 16px;
-}
-.fresh-card-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.fresh-h2 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.fresh-sub {
-  font-size: 13px;
-  color: var(--ink-soft);
-}
-.fresh-section {
-  margin: 0 0 22px;
-}
-.fresh-section-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px 12px;
-  margin: 0 0 8px;
-}
-
-.fresh-btn {
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  background: var(--surface);
-  border-color: var(--line);
-}
-.fresh-btn:hover {
-  background: var(--surface-soft);
-}
-.fresh-btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-.fresh .alloc-amount,
-.fresh .alloc-split {
-  border-radius: 10px;
-}
-.fresh-btn-primary:hover {
-  background: var(--accent);
-  opacity: 0.92;
-}
-.fresh-btn-primary:disabled {
-  opacity: 0.5;
-}
-.fresh-btn-quiet {
-  background: transparent;
-  border-color: transparent;
-  color: var(--ink-soft);
-  font-weight: 500;
-  padding: 6px 8px;
-}
-.fresh-btn-quiet:hover {
-  background: var(--surface-soft);
-  color: var(--ink);
-}
-.fresh-btn-danger {
-  color: var(--danger);
-}
-.fresh-btn-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.fresh-chip {
-  border: 1px solid var(--line);
+.fresh-tab-count {
+  position: absolute;
+  top: -5px;
+  right: -9px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
   border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink-soft);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 7px 14px;
-}
-.fresh-chip:hover {
-  background: var(--surface-soft);
-  color: var(--ink);
-}
-.fresh-chip.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 600;
-}
-.fresh-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  background: var(--c-recipes);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
 }
 
-.fresh-seg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--surface-soft);
-  border-radius: var(--radius);
-}
-.fresh-seg-btn {
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  padding: 7px 16px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--ink-soft);
-}
-.fresh-seg-btn.active {
-  background: var(--surface);
-  color: var(--ink);
-  font-weight: 600;
+/* ---- Rail (desktop) ---- */
+
+@media (min-width: 720px) {
+  .fresh-tabbar {
+    display: none;
+  }
+  /* The rail and the content read as one centred block, rather than a rail
+     pinned to a 2560px-wide edge with the content adrift in the middle. */
+  .fresh-top {
+    padding-left: max(16px, calc((100% - var(--shell-w)) / 2));
+    padding-right: max(16px, calc((100% - var(--shell-w)) / 2));
+  }
+  .fresh-body {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    align-items: start;
+    max-width: var(--shell-w);
+    margin: 0 auto;
+  }
+  .fresh-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: sticky;
+    top: var(--top-h);
+    align-self: start;
+    max-height: calc(100vh - var(--top-h));
+    overflow-y: auto;
+    padding: 20px 14px;
+    border-right: 1.5px solid var(--hairline);
+  }
+  .fresh-main {
+    padding: 28px 32px 72px;
+  }
 }
 
-/* Rows group with hairlines, not cards. */
-.fresh-rows {
-  border-top: 1px solid var(--line);
-}
-.fresh-row {
+.fresh-rail-btn {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -472,29 +637,272 @@ body:has(.fresh) {
   text-align: left;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--line);
-  padding: 12px 6px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 11px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.fresh-rail-btn:hover {
+  background: var(--sunk);
+  color: var(--ink);
+}
+.fresh-rail-btn.active {
+  background: color-mix(in srgb, var(--section) 14%, var(--card));
+  color: var(--section);
+}
+.fresh-rail-label {
+  flex: 1;
+  min-width: 0;
+}
+.fresh-rail-sep {
+  height: 1.5px;
+  background: var(--hairline);
+  margin: 14px 10px;
+}
+.fresh-rail-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--c-recipes);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.fresh :is(
+    .fresh-tab,
+    .fresh-rail-btn,
+    .fresh-btn,
+    .fresh-chip,
+    .fresh-row,
+    .fresh-icon-btn,
+    .fresh-seg-btn,
+    .fresh-strip-day,
+    .fresh-counter,
+    .fresh-fab,
+    .fresh-text-btn
+  ):focus-visible {
+  outline: 2px solid var(--section);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- *
+ * Primitives
+ * ---------------------------------------------------------------- */
+
+.fresh-card {
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-card);
+  box-shadow: var(--card-shadow);
+  padding: 18px 16px;
+}
+.fresh-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.fresh-h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.fresh-sub {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh-head-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 6px 0;
+  color: var(--section);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fresh-section {
+  margin: 0;
+}
+.fresh-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0 0 10px;
+}
+.fresh-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.fresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  padding: 0 20px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--card);
+  cursor: pointer;
+}
+.fresh-btn:hover {
+  background: var(--sunk);
+}
+.fresh-btn-small {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+.fresh-btn-primary {
+  min-height: 52px;
+  background: var(--section);
+  border-color: var(--section);
+  color: var(--on-section);
+}
+.fresh-btn-primary:hover {
+  background: color-mix(in srgb, var(--section) 92%, #000);
+  border-color: color-mix(in srgb, var(--section) 92%, #000);
+}
+.fresh-btn-primary:active {
+  background: color-mix(in srgb, var(--section) 92%, #000);
+}
+.fresh-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.fresh-btn-block {
+  width: 100%;
+}
+.fresh-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.fresh-text-btn {
+  background: none;
+  border: none;
+  padding: 10px 6px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fresh-text-btn:hover {
+  color: var(--ink);
+}
+.fresh-text-btn:disabled {
+  opacity: 0.5;
+}
+
+.fresh-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fresh-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 1.5px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--card);
   color: var(--ink);
   font-size: 15px;
+  font-weight: 600;
+  padding: 0 16px;
+  cursor: pointer;
+}
+.fresh-chip:hover {
+  border-color: var(--ink-soft);
+}
+.fresh-chip.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.fresh-chip[data-pool="meals"].active {
+  background: var(--c-recipes);
+  border-color: var(--c-recipes);
+  color: #fff;
+}
+.fresh-chip[data-pool="personal"].active {
+  background: var(--ink-soft);
+  border-color: var(--ink-soft);
+  color: var(--paper);
+}
+.fresh-chip-person {
+  padding-left: 6px;
+}
+.fresh-chip-person.active {
+  color: #fff;
+}
+
+.fresh-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--sunk);
+  border-radius: 999px;
+  align-self: flex-start;
+}
+.fresh-seg-btn {
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.fresh-seg-btn.active {
+  background: var(--section);
+  color: var(--on-section);
+  font-weight: 700;
+}
+
+/* Rows: hairline separated, 64px tall, whole row tappable. */
+.fresh-rows {
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--hairline);
+  padding: 10px 0;
+  color: var(--ink);
+  font-size: 16px;
+  cursor: pointer;
 }
 .fresh-row:hover {
-  background: var(--surface-soft);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
 }
 .fresh-row-main {
   flex: 1;
   min-width: 0;
-}
-.fresh-row-title {
   display: block;
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-.fresh-row-meta {
-  display: block;
-  margin-top: 2px;
-  font-size: 13px;
-  color: var(--ink-soft);
-  overflow-wrap: anywhere;
 }
 button.fresh-row-main {
   background: none;
@@ -502,467 +910,984 @@ button.fresh-row-main {
   padding: 0;
   text-align: left;
   color: inherit;
-  font-size: inherit;
-  font-weight: inherit;
+  font: inherit;
+  cursor: pointer;
 }
-.fresh-row-amount {
+.fresh-row-title {
+  display: block;
+  font-size: 16px;
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fresh-row-desc {
+  display: block;
+  margin-top: 1px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+.fresh-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 5px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh-row-store {
+  font-weight: 600;
+}
+.fresh-row-warn {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warn);
+}
+.fresh-row-qty,
+.fresh-row-amount {
+  flex: none;
+  font-size: 16px;
+  font-weight: 700;
   white-space: nowrap;
 }
 .fresh-row-note {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-soft);
   white-space: nowrap;
 }
-.fresh-group-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 14px 6px 6px;
+.fresh-chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--ink-soft);
+}
+.fresh-date-head {
+  padding: 4px 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.fresh-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.fresh-person-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+.fresh-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fresh-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
   font-size: 13px;
   font-weight: 600;
+  background: var(--sunk);
+  color: var(--ink-soft);
+}
+.fresh-badge.warn {
+  background: color-mix(in srgb, var(--warn) 16%, var(--card));
+  color: var(--warn);
+}
+.fresh-badge.danger {
+  background: color-mix(in srgb, var(--c-danger) 16%, var(--card));
+  color: var(--c-danger);
+}
+.fresh-pill-note {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink-soft);
+}
+
+.fresh-pool-tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--ink);
+}
+.fresh-pool-tag[data-pool="meals"] {
+  background: var(--c-recipes);
+}
+.fresh-pool-tag[data-pool="personal"] {
+  background: var(--ink-soft);
+}
+.fresh-pool-tag[data-pool="soon"] {
+  background: var(--warn);
+}
+.fresh-pool-tag[data-pool="bought"] {
+  background: var(--c-expenses);
+}
+:root[data-theme="dark"] .fresh .fresh-pool-tag {
+  color: var(--paper);
+}
+
+.fresh-split-tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1.5px solid var(--ink);
+  color: var(--ink);
+}
+.fresh-split-tag[data-kind="meals"] {
+  border-color: var(--c-recipes);
+  color: var(--c-recipes);
+}
+.fresh-split-tag[data-kind="personal"] {
+  border-color: var(--ink-soft);
   color: var(--ink-soft);
 }
 
 .fresh-empty {
-  padding: 22px 6px;
+  padding: 24px 4px;
   color: var(--ink-soft);
-  font-size: 14px;
+  font-size: 15px;
 }
 .fresh-empty strong {
   display: block;
   color: var(--ink);
-  font-size: 15px;
+  font-size: 18px;
+  font-weight: 700;
   margin-bottom: 4px;
 }
 .fresh-error {
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--danger);
-  font-size: 14px;
-  background: var(--surface);
+  padding: 16px;
+  border: 1.5px solid var(--c-danger);
+  border-radius: var(--r-card);
+  color: var(--c-danger);
+  font-size: 15px;
+  background: var(--card);
 }
 .fresh-form-error {
-  margin: 10px 0 0;
-  color: var(--danger);
-  font-size: 13px;
+  margin: 12px 0 0;
+  color: var(--c-danger);
+  font-size: 14px;
+  font-weight: 600;
 }
 .fresh-field-hint {
-  margin: 4px 0 0;
-  font-size: 13px;
+  margin: 6px 0 0;
+  font-size: 14px;
   color: var(--ink-soft);
 }
 
-/* Skeletons match the layout they stand in for. */
 .fresh-skel {
-  background: var(--surface-soft);
-  border-radius: var(--radius);
-  height: 14px;
+  background: var(--sunk);
+  border-radius: var(--r-control);
+  height: 16px;
   margin: 10px 0;
 }
+.fresh-skel-line {
+  width: 60%;
+  height: 26px;
+}
 .fresh-skel-row {
-  height: 46px;
-  margin: 8px 0;
+  height: 56px;
 }
 .fresh-skel-card {
-  height: 130px;
+  height: 140px;
+  border-radius: var(--r-card);
+  margin-bottom: 14px;
 }
 
-.fresh-avatar {
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.fresh-badge {
-  display: inline-block;
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
-  font-weight: 500;
-  background: var(--surface-soft);
-  color: var(--ink-soft);
-}
-.fresh-badge-warn {
-  background: color-mix(in srgb, var(--warn) 16%, var(--surface) 84%);
-  color: var(--warn);
-}
-
+/* FAB: sits above the nav and clear of the last row. */
 .fresh-fab {
   position: fixed;
   right: 16px;
-  bottom: calc(74px + env(safe-area-inset-bottom));
+  bottom: calc(var(--nav-h) + 16px + env(safe-area-inset-bottom));
   z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
   border: none;
-  border-radius: var(--radius);
-  padding: 14px 20px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-size: 15px;
-  font-weight: 600;
-  box-shadow: var(--shadow);
+  border-radius: 999px;
+  padding: 0 22px;
+  background: var(--section);
+  color: var(--on-section);
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(26, 23, 20, 0.22);
   white-space: nowrap;
+  cursor: pointer;
+}
+.fresh-fab:hover {
+  background: color-mix(in srgb, var(--section) 92%, #000);
 }
 @media (min-width: 720px) {
   .fresh-fab {
-    right: 24px;
-    bottom: 24px;
+    right: max(32px, calc((100% - var(--shell-w)) / 2 + 32px));
+    bottom: 32px;
   }
 }
 
-/* ---------- Sheets ---------- */
+/* ---------------------------------------------------------------- *
+ * Sheets
+ * ---------------------------------------------------------------- */
 
 .fresh-sheet-bg {
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgba(16, 18, 21, 0.55);
+  background: rgba(26, 23, 20, 0.5);
   display: flex;
   align-items: flex-end;
   justify-content: center;
 }
 .fresh-sheet {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 520px;
-  max-height: 94vh;
+  max-height: 92vh;
+  background: var(--paper);
+  border: 1.5px solid var(--hairline);
+  box-shadow: var(--card-shadow);
+  border-radius: 24px 24px 0 0;
+}
+.fresh-sheet-grip {
+  width: 36px;
+  height: 4px;
+  flex: none;
+  margin: 10px auto 2px;
+  border-radius: 999px;
+  background: var(--hairline);
+}
+.fresh-sheet-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px 12px;
+  border-bottom: 1.5px solid var(--hairline);
+}
+.fresh-sheet-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--section);
+}
+.fresh-sheet-head .fresh-icon-btn {
+  border: 1.5px solid var(--hairline);
+}
+.fresh-sheet-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-  border-radius: var(--radius) var(--radius) 0 0;
-  padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+  padding: 16px;
 }
-.fresh-sheet-tall {
-  min-height: 92vh;
+.fresh-sheet-actions {
+  flex: none;
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1.5px solid var(--hairline);
+  background: var(--card);
 }
 @media (min-width: 520px) {
   .fresh-sheet-bg {
     align-items: center;
-    padding: 20px;
+    padding: 24px;
   }
-  .fresh-sheet,
-  .fresh-sheet-tall {
-    border-radius: var(--radius);
-    min-height: 0;
+  .fresh-sheet {
+    border-radius: var(--r-card);
+    max-height: 88vh;
   }
-}
-.fresh-sheet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.fresh-sheet-head h2 {
-  margin: 0;
-}
-.fresh-sheet-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 18px;
-}
-.fresh-sheet-actions .fresh-btn-primary {
-  flex: 1;
+  .fresh-sheet-grip {
+    display: none;
+  }
+  .fresh-sheet-actions {
+    padding-bottom: 16px;
+  }
 }
 
-/* ---------- Forms ---------- */
+/* ---------------------------------------------------------------- *
+ * Fresh form fields
+ * ---------------------------------------------------------------- */
 
 .fresh-field {
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 .fresh-field > label {
   display: block;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--ink-soft);
-  margin-bottom: 6px;
+  margin-bottom: 7px;
 }
 .fresh-input {
   width: 100%;
   min-width: 0;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 11px 13px;
+  height: 52px;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  padding: 0 14px;
   font-size: 16px;
   color: var(--ink);
 }
 .fresh-input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-  border-color: var(--accent);
+  border-color: var(--section);
+  border-width: 2px;
+  outline: none;
+}
+.fresh-amount-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--card);
+  padding: 0 16px;
+}
+.fresh-amount-wrap:focus-within {
+  border-color: var(--section);
+  border-width: 2px;
+}
+.fresh-amount-sign {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ink-soft);
 }
 .fresh-input-amount {
-  font-size: 30px;
-  font-weight: 600;
-  padding: 12px 14px;
-  letter-spacing: -0.01em;
+  height: 72px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
-.fresh-field-narrow .fresh-input {
-  max-width: 360px;
+.fresh-input-amount:focus {
+  border: none;
+  outline: none;
 }
 .fresh-field-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 .fresh-field-row .fresh-field {
   min-width: 0;
 }
-
-/* ---------- Home ---------- */
-
-.fresh-home {
-  display: grid;
-  align-items: start;
-  gap: 16px;
-}
-@media (min-width: 900px) {
-  .fresh-home {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .fresh-home-wide {
-    grid-column: 1 / -1;
-  }
-}
-.fresh-block-link {
-  margin-top: 12px;
-  background: none;
-  border: none;
-  padding: 4px 0;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 600;
-}
-.fresh-block-link:hover {
-  text-decoration: underline;
-}
-
-.fresh-tonight-dish {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  overflow-wrap: anywhere;
-}
-.fresh-tonight-line {
+.fresh-search {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  flex-wrap: wrap;
 }
-.fresh-tonight-quiet {
-  font-size: 18px;
-  font-weight: 600;
+.fresh-search > svg {
+  position: absolute;
+  left: 14px;
   color: var(--ink-soft);
+  pointer-events: none;
+}
+.fresh-search .fresh-input {
+  padding-left: 44px;
 }
 
-.fresh-settle-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--line);
-}
-.fresh-settle-row:last-of-type {
-  border-bottom: none;
-}
-.fresh-settle-name {
-  font-weight: 500;
-}
-.fresh-settle-amount {
-  font-weight: 600;
-  white-space: nowrap;
-}
-.fresh-settle-send .fresh-settle-amount {
-  color: var(--warn);
-}
-.fresh-settle-receive .fresh-settle-amount {
-  color: var(--accent);
-}
-.fresh-settle-even .fresh-settle-amount {
-  color: var(--ink-soft);
-  font-weight: 500;
-}
-.fresh-settle-parts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  font-size: 13px;
-  color: var(--ink-soft);
-  padding: 0 0 9px;
-  border-bottom: 1px solid var(--line);
-}
+/* ---------------------------------------------------------------- *
+ * Home
+ * ---------------------------------------------------------------- */
 
-/* ---------- Expenses ---------- */
-
-.fresh-expenses {
+.fresh-home {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-}
-.fresh-expenses > .fresh-settlement-col {
-  order: -1;
-}
-@media (min-width: 1000px) {
-  .fresh-expenses {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 330px;
-    align-items: start;
-    gap: 22px;
-  }
-  .fresh-expenses > .fresh-settlement-col {
-    order: 0;
-    position: sticky;
-    top: calc(var(--fresh-top-h) + 24px);
-  }
-}
-.fresh-expenses-main {
-  min-width: 0;
-}
-.fresh-row.locked {
-  opacity: 0.62;
-}
-.fresh .monthly-card {
-  box-shadow: none;
+  gap: 24px;
 }
 
-/* ---------- Recipes ---------- */
+/*
+ * The hero. A solid block of the Recipes wash with paper text on it, so the
+ * first thing on the screen is the loudest thing on the screen.
+ *
+ * Contrast, measured: paper #F6F1E7 on the light tone #D9482B is 3.80:1 and
+ * on the dark tone #F0694B (where paper is the near-black #151311) it is
+ * 6.03:1. The light tone clears AA-large for the 30px display line but not
+ * AA-normal for the small ones; see the note in the handoff. Paper is used on
+ * both tones - on #D9482B ink would be 4.17:1, also short of 4.5, and worse
+ * looking.
+ */
+.fresh-tonight {
+  border: none;
+  border-radius: var(--r-card);
+  background: var(--c-recipes-hero);
+  color: var(--paper);
+  box-shadow: 0 2px 4px rgba(26, 23, 20, 0.1),
+    0 14px 30px color-mix(in srgb, var(--c-recipes-hero) 34%, transparent);
+  padding: 20px 18px;
+}
+.fresh-tonight-tap {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.fresh-tonight-when {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--paper);
+  opacity: 0.92;
+  margin-bottom: 6px;
+}
+.fresh-tonight-dish,
+.fresh-tonight-quiet {
+  display: block;
+  font-size: 30px;
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--paper);
+  overflow-wrap: anywhere;
+}
+.fresh-tonight-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 14px;
+  font-size: 15px;
+}
+.fresh-tonight-nocook {
+  color: var(--paper);
+  opacity: 0.8;
+  font-weight: 600;
+}
+.fresh-tonight .fresh-person-name {
+  color: var(--paper);
+}
+/* A 2px paper ring keeps the cook's disc off the wash it sits on. */
+.fresh-ring {
+  box-shadow: 0 0 0 2px var(--paper);
+}
+.fresh-tonight .fresh-pill-note {
+  background: transparent;
+  border: 1.5px solid color-mix(in srgb, var(--paper) 60%, transparent);
+  color: var(--paper);
+}
+.fresh-tonight .fresh-skel {
+  background: color-mix(in srgb, var(--paper) 25%, transparent);
+}
+/* Inverted: paper plate, wash-coloured label. */
+.fresh-tonight .fresh-btn-primary {
+  margin-top: 18px;
+  background: var(--paper);
+  border-color: var(--paper);
+  color: var(--c-recipes-hero);
+}
+.fresh-tonight .fresh-btn-primary:hover {
+  background: color-mix(in srgb, var(--paper) 92%, #000);
+  border-color: color-mix(in srgb, var(--paper) 92%, #000);
+}
+.fresh-tonight .fresh-btn-primary:focus-visible {
+  outline-color: var(--paper);
+}
+
+.fresh-money-rows {
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-money-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  background: none;
+  border: none;
+  border-bottom: 1.5px solid var(--hairline);
+  padding: 8px 0;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.fresh-money-row:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+.fresh-money-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.fresh-money-amount {
+  flex: none;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fresh-money-amount.send {
+  color: var(--c-recipes);
+}
+.fresh-money-amount.withdraw {
+  color: var(--c-expenses);
+}
+.fresh-money-amount.even {
+  color: var(--ink-soft);
+}
+.fresh-money-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.fresh-money-total .fresh-num {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.fresh-counters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.fresh-counter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-left: 4px solid var(--ink);
+  border-radius: var(--r-card);
+  box-shadow: var(--card-shadow);
+  padding: 14px 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.fresh-counter[data-pool="meals"] {
+  border-left-color: var(--c-recipes);
+}
+.fresh-counter[data-pool="personal"] {
+  border-left-color: var(--ink-soft);
+}
+.fresh-counter-num {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.fresh-counter-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* ---------------------------------------------------------------- *
+ * Recipes
+ * ---------------------------------------------------------------- */
+
+.fresh-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.fresh-strip-column {
+  display: none;
+}
+.fresh-recipes-tools {
+  margin-top: -6px;
+}
+.fresh-strip-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 2px;
+  min-height: 64px;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.fresh-strip-day.today {
+  border-color: var(--section);
+  border-width: 2px;
+  color: var(--section);
+}
+.fresh-strip-letter {
+  font-size: 12px;
+  font-weight: 700;
+}
+.fresh-strip-num {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.fresh-strip-day.today .fresh-strip-num {
+  color: var(--section);
+}
+.fresh-strip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: transparent;
+}
+.fresh-strip-dot.hollow {
+  border: 1.5px solid var(--ink-soft);
+}
 
 .fresh-weeks {
   display: grid;
-  gap: 22px;
+  gap: 28px;
 }
-@media (min-width: 900px) {
-  .fresh-weeks {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 26px;
-  }
+.fresh-week {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
-.fresh-day-row {
+.fresh-week[data-active="false"] {
+  display: none;
+}
+.fresh-week-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--line);
-  padding-right: 6px;
-}
-.fresh-day-open {
-  display: flex;
-  align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  background: transparent;
-  border: none;
-  padding: 12px 6px;
-  color: var(--ink);
-  font-size: 15px;
-}
-.fresh-day-open:hover {
-  background: var(--surface-soft);
-}
-.fresh-day-name {
-  flex-shrink: 0;
-  width: 66px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-soft);
-}
-.fresh-day-abbr,
-.fresh-day-date {
-  display: block;
-}
-.fresh-day-date {
-  font-weight: 400;
-  font-size: 12px;
 }
 .fresh-cook-tally {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   justify-content: flex-end;
 }
-.fresh-day-quiet {
-  color: var(--ink-soft);
+.fresh-tally {
+  position: relative;
+  display: inline-flex;
 }
-.fresh-day-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 4px;
+.fresh-tally-count {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  border: 1.5px solid var(--paper);
 }
 
-/* ---------- Grocery ---------- */
-
-.fresh-grocery {
+.fresh-days {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 12px;
 }
-@media (min-width: 1000px) {
-  .fresh-grocery {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    align-items: start;
-    gap: 24px;
-  }
+.fresh-day-when {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
 }
+.fresh-day-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-left: 6px solid var(--cook, var(--ink-soft));
+  border-radius: var(--r-card);
+  box-shadow: var(--card-shadow);
+  padding: 14px 16px;
+}
+.fresh-day-card-tap {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.fresh-day-dish {
+  display: block;
+  margin-top: 3px;
+  font-size: 22px;
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.fresh-day-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 10px;
+  font-size: 15px;
+}
+.fresh-day-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.fresh-day-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 2px dashed var(--hairline);
+  border-radius: var(--r-card);
+  padding: 8px 12px 8px 16px;
+  min-height: 64px;
+}
+.fresh-day-add {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 0;
+  color: inherit;
+  cursor: pointer;
+}
+.fresh-day-add-text {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--section);
+}
+.fresh-day-off {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-card);
+  background: var(--sunk);
+  padding: 8px 12px 8px 16px;
+  min-height: 64px;
+}
+.fresh-day-off .fresh-day-when {
+  flex: none;
+}
+.fresh-day-off-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* ---------------------------------------------------------------- *
+ * Grocery
+ * ---------------------------------------------------------------- */
+
 .fresh-check {
-  flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  flex: none;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
-  border: 1.5px solid var(--line);
-  background: var(--surface);
-  color: var(--accent);
-  font-size: 14px;
-  line-height: 1;
+  border: 2px solid var(--hairline);
+  background: var(--card);
+  color: var(--on-section);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+}
+.fresh-check:hover {
+  border-color: var(--section);
 }
 .fresh-check.checked {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--section);
+  background: var(--section);
 }
 .fresh-row.done .fresh-row-title {
   text-decoration: line-through;
   color: var(--ink-soft);
 }
-.fresh-side-note {
-  font-size: 13px;
+
+/* ---------------------------------------------------------------- *
+ * Expenses
+ * ---------------------------------------------------------------- */
+
+.fresh-expenses {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+/* On a phone the settlement belongs to the Month segment, above the bills. */
+.fresh-expenses[data-segment="receipts"] > .fresh-settlement-col {
+  display: none;
+}
+.fresh-expenses[data-segment="month"] > .fresh-settlement-col {
+  order: -1;
+}
+.fresh-expenses-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (min-width: 900px) {
+  .fresh-expenses {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: start;
+    gap: 24px;
+  }
+  .fresh-expenses[data-segment="receipts"] > .fresh-settlement-col,
+  .fresh-expenses[data-segment="month"] > .fresh-settlement-col {
+    display: block;
+    order: 0;
+    position: sticky;
+    top: calc(var(--top-h) + 24px);
+  }
+}
+.fresh-row.locked {
+  opacity: 0.6;
+}
+.fresh .monthly-card {
+  box-shadow: var(--card-shadow);
+}
+
+.fresh-settle-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 14px;
+}
+.fresh-settle-total-label {
+  font-size: 14px;
+  font-weight: 600;
   color: var(--ink-soft);
-  margin: 0 0 8px;
 }
-
-/* ---------- Inventory ---------- */
-
-.fresh-owner {
+.fresh-big-money {
+  font-size: 36px;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--section);
+}
+.fresh-settle-card .fresh-settle-row:first-of-type {
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-settle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  background: none;
+  border: none;
+  border-bottom: 1.5px solid var(--hairline);
+  padding: 8px 0;
   color: var(--ink);
-  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
 }
-.fresh-expiring .fresh-row-note {
-  color: var(--warn);
-  font-weight: 500;
+.fresh-settle-row:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
 }
-.fresh-expired .fresh-row-note {
-  color: var(--danger);
+.fresh-settle-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
   font-weight: 600;
 }
+.fresh-settle-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  padding: 4px 0 12px 42px;
+  border-bottom: 1.5px solid var(--hairline);
+}
 
-/* ---------- More ---------- */
+/* ---------------------------------------------------------------- *
+ * More
+ * ---------------------------------------------------------------- */
 
-.fresh-more {
-  max-width: 520px;
+.fresh-more-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--sunk);
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- *
+ * Wide layout tweaks
+ * ---------------------------------------------------------------- */
+
+@media (min-width: 720px) {
+  .fresh-seg-weeks,
+  .fresh-strip-phone {
+    display: none;
+  }
+  .fresh-strip-column {
+    display: grid;
+  }
+  .fresh-week[data-active="false"] {
+    display: flex;
+  }
+  .fresh-weeks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+  .fresh-counters {
+    gap: 16px;
+  }
+}
+
+/* Reused classic views (Passwords, modals) inside the fresh shell: every
+   text input is at least 16px so iOS does not zoom, and controls stay in
+   the 18 / 14 / pill radius family. */
+.fresh input:not([type="checkbox"]):not([type="radio"]),
+.fresh select,
+.fresh textarea {
+  font-size: 16px;
+  border-radius: 14px;
+}
+.fresh .password-item,
+.fresh .password-modal,
+.fresh .shared-account-card {
+  border-radius: 18px;
+}
+.fresh .password-small-btn,
+.fresh .password-field-toolbar button {
+  border-radius: 999px;
 }

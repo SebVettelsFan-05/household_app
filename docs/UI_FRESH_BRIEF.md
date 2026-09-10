@@ -1,89 +1,162 @@
-# Fresh UI brief
+# Fresh UI: design spec
 
-Design read: redesign-overhaul of a private five-person household utility,
-used mostly on phones by people who open it while standing in a kitchen or
-a checkout line, occasionally on a laptop at month end. Functional first.
-The visual change should be unmistakable next to the classic look, but
-nothing about it may cost a tap.
+This replaces the first attempt, which read as a generic grey SaaS dashboard.
+The app is a shared kitchen board for five friends in one house, used
+mostly on phones while cooking, shopping, or settling up. It should feel
+warm, bold and tactile, like a well-made paper planner, not like admin
+software. Everything below is a decision, not a suggestion. Where a detail
+is not specified, choose the option with more character and more contrast,
+never the quieter one.
 
-Dials: variance 4, motion 2 (Arthur's Windows machines have OS animation
-off, so `prefers-reduced-motion` is set and transitions never render;
-nothing may depend on one), density 6.
+## Palette
 
-## Non-negotiables (from tasteskill, filtered for a product UI)
+Light: paper `#F6F1E7` page, card `#FFFDF8`, ink `#1A1714`, ink-soft
+`#6B655C`, hairline `rgba(26,23,20,0.12)`.
+Dark: page `#151311`, card `#211E1A`, ink `#F3EDE2`, ink-soft `#A39B8F`,
+hairline `rgba(243,237,226,0.12)`.
 
-- Typography: not Inter, not DM Sans (classic uses it). Use Geist from
-  Google Fonts with a real system fallback stack; tabular numerals
-  (`font-variant-numeric: tabular-nums`) everywhere money or counts appear.
-  Hierarchy through weight and colour, not size. Body 15-16px, line-height
-  1.45.
-- Colour: one cool neutral ramp (zinc/slate family, never warm cream) and
-  exactly one accent, used for primary actions, active nav and focus rings.
-  Not green (classic is green), not purple. Saturation under 80 percent.
-  Warn and danger tones are semantic, not decorative. Full dark mode via
-  `:root[data-theme="dark"]` tokens, both modes screenshot-checked.
-- Shape: one radius scale for the whole surface (10px on controls and
-  panels, full pill on chips only). No mixed systems.
-- Cards only where elevation means something (tonight's dinner, the
-  settlement card). Everything else groups with hairlines and whitespace.
-  Shadows tinted to the background hue, never pure black.
-- Forms: label above input, helper text below, error text below in the
-  danger tone. No placeholder-as-label. Every button label readable against
-  its background (WCAG AA). Primary CTA fits on one line.
-- States: skeleton loaders that match the final layout, composed empty
-  states that say how to fill them, inline errors in forms, toasts only for
-  transient confirmations.
-- Banned: em-dashes and en-dashes as separators anywhere in the UI; more
-  than one middle-dot per line; decorative status dots; eyebrows above
-  every heading; uppercase tracked labels as a rhythm; glows; gradients;
-  emoji as icons; hand-rolled SVG illustrations; "Elevate / Seamless"
-  copy; centred hero blocks. Icons: Phosphor (inline SVG paths copied from
-  the set are fine) or none. No icon fonts.
-- Dismissal of any popover or sheet uses a catch layer element, never a
-  window click listener. A dismiss click must never activate what is under it.
+Section colours, each used as that screen's wash (header title colour,
+active tab, primary button, focus ring, selected chip):
 
-## Structure
+| Screen    | Light     | Dark      |
+|-----------|-----------|-----------|
+| Home      | ink       | ink       |
+| Recipes   | `#C13D22` | `#F0694B` |
+| Grocery   | `#8A5F00` | `#E8AA2A` |
+| Expenses  | `#136F63` | `#2FA08F` |
+| Inventory | `#3F7A2E` | `#7BB865` |
+| Passwords | `#6B3FA0` | `#9C74D6` |
 
-- Mobile (under 720px): bottom tab bar, five tabs (Home, Grocery, Recipes,
-  Expenses, More) where More holds Inventory, Passwords, Household settings
-  and the Classic-look switch. Content max-width 100 percent with 16px
-  gutters. Primary action per screen is a fixed bottom-right button above
-  the tab bar.
-- Desktop (720px and up): left rail with the same destinations plus
-  household settings, content column max 1080px, and two-column layouts
-  where they pay off: Expenses (list left, month settlement right),
-  Recipes (this week left, next week right), Grocery (open list left,
-  bought and inventory conflicts right).
-- Home is a real dashboard, not a menu: tonight's dinner (cook, dish,
-  portions, or "No shared meal", or "Nothing planned" with a one-tap plan
-  action), this month's settlement in one line per person (send or
-  withdraw amount, tone by direction), open grocery counts by pool, items
-  expiring within three days. Every block links to its tab.
-- Expenses: the add flow is a full-height sheet on mobile. Amount first
-  and large, then paid-by chips, then the allocation chips
-  (Everyone / Meals / Personal / Custom) with the "Split receipt" control
-  right under the amount so a mixed receipt is one extra tap. Receipt
-  capture is a single large control. Settlement card shows per-person send
-  or withdraw with the house/meals/bills/rent breakdown revealed inline.
-- Recipes: day rows, not a grid of equal cards. Each row: day, cook avatar
-  initials, dish, portions, ingredient count, and the cook-count tally in
-  the week header. A no-meal day is a quiet row.
-- Grocery: grouped by pool first (Meals, House, Personal) then by
-  category, with the requester on each line. Pool filter chips at the top.
-- Inventory: owner badge, expiring-soon section pinned at the top.
+Every light value is at least 4.5:1 as text on paper and under white text
+as a fill; do not lighten them.
 
-## Engineering constraints
+Person colours, fixed forever, used for avatar discs (initial letter, white
+on colour) wherever a name appears: Arthur `#2F5BEA`, Daniel `#BD5609`,
+Eli `#C23A78`, Ibrahim `#177A52`, Minh `#6A3DE8`. A name is always shown
+as disc + name, never a bare grey pill.
 
-- Both UIs share one data layer: extract the fetch and state logic from
-  `app/page.tsx` into a hook, and have both shells consume it.
-- The new shell lives under `components/fresh/` with its stylesheet in
-  `app/fresh.css`, every rule scoped under a `.fresh` root class so it
-  cannot leak into the classic UI. Classic modals with heavy logic
-  (recipe scraping, dictation, label scanning, passwords) are reused
-  inside the fresh shell; scope token overrides under `.fresh` so they
-  inherit the new type, colour and radius.
-- UI choice persists per device in localStorage under `hh_ui`
-  ("fresh" or "classic"), default fresh, switchable from both UIs.
-- Everything must work at 390x844, 1920x1080 and 2560x1400 at 1.5x
-  device scale factor. Screenshots of every screen in both modes and both
-  themes go under `smoke/out/fresh/` and must be read, not just produced.
+Pool tags: Meals in the Recipes colour, House in ink, Personal in the
+person's colour. Money direction: send in the Recipes colour, withdraw in
+the Expenses colour, tabular numerals always.
+
+## Type
+
+Google Fonts link in `app/layout.tsx`:
+`Bricolage+Grotesque:opsz,wght@12..96,400..800` for display and
+`Instrument+Sans:wght@400;500;600;700` for everything else. Fallbacks:
+`"Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif`.
+
+- Screen title: Bricolage 30px/1.05, weight 700, letter-spacing -0.02em,
+  section colour.
+- Card title / dish name: Bricolage 22px, weight 650.
+- Big money (amount input, settlement total): Bricolage 36px weight 700,
+  tabular.
+- Body: Instrument Sans 16px/1.45. Secondary: 14px ink-soft. Labels above
+  inputs: 13px weight 600 ink-soft, sentence case, never uppercase.
+- No tracked uppercase labels anywhere. No middle dots as separators;
+  separate with spacing or line breaks. No em or en dashes.
+
+## Surfaces and controls
+
+- One radius family: cards 18px, inputs and buttons 14px, chips and
+  avatars full pill. Never 8px anywhere.
+- Cards: card colour, 1.5px hairline border, shadow
+  `0 1px 2px rgba(26,23,20,0.05), 0 8px 24px rgba(26,23,20,0.06)` (dark:
+  black at 0.4/0.5).
+- Primary button: 52px tall, full width in sheets, pill, section colour
+  background, white label 16px weight 700. Secondary: ink outline 1.5px on
+  card colour. Pressed state: background darkens 8 percent (no transforms
+  needed, animations are off on the owner's machine).
+- Chips (paid-by, split, pool, filters): 40px tall pills, 1.5px ink outline;
+  selected = ink background with paper text, or the section colour when
+  the chip carries that meaning. Chips wrap, never scroll horizontally,
+  except the 7-day strip.
+- Inputs: 52px tall, 1.5px border, 14px radius, card background, 16px text
+  (prevents iOS zoom), focus border in section colour 2px.
+- Sheets (mobile): bottom sheet with a 36x4 drag handle, 24px top radius,
+  header row with title and Close, scrollable body, sticky action row.
+  Desktop: centred dialog 520px. Dismiss through a catch layer element.
+- Rows in lists: 64px minimum, 16px gutters, hairline between rows, whole
+  row tappable with a chevron at the right. Tap targets at least 44px.
+- Icons: a small inline SVG set drawn once in `components/fresh/icons.tsx`,
+  24px, 2px stroke, round caps and joins: home, pot, cart, receipt, box,
+  key, plus, check, chevron-right, chevron-left, camera, mic, calendar,
+  settings, refresh, moon, sun, x. No emoji anywhere in the fresh shell;
+  the reused classic modals may be patched to accept an icon slot or
+  their emoji hidden with CSS and replaced by text.
+
+## Layout
+
+Mobile (under 720px): sticky top bar 64px with the screen title left and a
+pill cluster right (refresh, theme, settings). Bottom nav 68px plus safe
+area, five items with icon over label, active in the section colour with
+a 3px top indicator. Content has 16px gutters and 24px between blocks.
+Primary action: pill FAB bottom-right above the nav, icon plus label
+("Add expense"), section colour. Last content block ends with enough
+padding to clear the nav and the FAB.
+
+Desktop (720px and up): left rail 240px with the same items plus Household
+settings and Classic look, content column max 960px. Two columns only on
+Expenses (receipts left, settlement right) and Recipes (this week, next
+week). Everything else one column at 640px max.
+
+## Screens
+
+Home. First block is the Tonight card in the Recipes wash: day and date as
+a small line, dish name in display type, cook as disc plus name, portions
+and ingredient count, whole card tappable. If today has no dinner planned:
+"Nothing planned for tonight" with a primary "Plan dinner" button. If a
+no-meal day: "No shared dinner tonight" in ink-soft. Second block: Money,
+titled "September" (current month), one row per person with disc, name and
+the send or withdraw amount coloured by direction, then a footer line with
+the household total. Tapping opens Expenses on Month. Third block: three
+tappable counters side by side for Meals, House and Personal open grocery
+counts, each with its pool colour as a 4px left bar. Fourth: Use soon,
+items expiring within 3 days with an owner disc when owned and a day badge.
+
+Recipes. Under the title, a segmented control This week / Next week. Below
+it a 7-day strip (S M T W T F S) with the date number under each letter;
+today is ringed; a planned day shows a filled dot in the cook's colour, a
+no-meal day a hollow dot. Below, one block per day in order. Planned day:
+card with a 6px left bar in the cook's colour, day name and date small,
+dish name in display type, disc plus cook name, "3 portions", "6
+ingredients", and a small secondary button "Add to grocery". Unplanned
+day: dashed-outline row "Add dinner" with a quiet "No meal" text button at
+the right. No-meal day: a muted row "No shared dinner" with "Plan" at the
+right. Section header on the right shows the week's cook tally as person
+discs with a count badge. Favorites and Archive as two secondary buttons
+under the strip.
+
+Grocery. Filter chips All / Meals / House / Personal. Then sections by pool
+in the order Meals, House, Personal, each with its tag and count. Rows: a
+28px circular checkbox, name, quantity in grams right-aligned in tabular
+numerals, second line with store and requester disc. Checked rows move to
+a Bought section at the bottom with a primary "Move n to inventory"
+button. FAB "Add item" opens the sheet, which reuses the classic add form
+logic with the fresh field styles (scan and dictate become icon buttons
+with labels).
+
+Expenses. Segmented Receipts / Month. Receipts: rows grouped by date with
+a small date heading, each row store and description, payer disc, split
+as small tags (Meals 3, Everyone, Personal), amount right in tabular bold.
+Add sheet order: amount as a huge input with a $ prefix, paid-by as a row
+of disc chips (disc plus name, selected fills in the person colour), split
+chips with the split-receipt expander directly below, receipt as a large
+dashed tile with the camera icon, then store, date, description. Month:
+the settlement card first (one row per person, send or withdraw, tap a
+row to reveal house/meals/bills/rent), then the reused bills editor.
+
+Inventory. Search field, category chips, Use soon pinned when non-empty,
+then rows grouped by category with quantity, expiry badge and owner disc.
+
+More (mobile only): Inventory, Passwords, Household settings, Classic look,
+each a row with icon and chevron.
+
+## Rules that stand
+
+- Animations are off on the owner's Windows machines; nothing may depend
+  on a transition or keyframe.
+- Every screen must work at 390x844, 1920x1080 and 2560x1400 at 1.5 scale,
+  light and dark. Screenshots go in `smoke/out/fresh/` and get read.
+- Both UIs share the data hook; classic stays untouched apart from the
+  shared-kitchen fields.

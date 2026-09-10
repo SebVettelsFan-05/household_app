@@ -16,7 +16,7 @@ import {
   type Recipe,
   type RecipeIngredient,
 } from "@/lib/types";
-import { DAY_LONG, shortDayLabel } from "@/lib/dates";
+import { COOKING_DAYS, DAY_LONG, shortDayLabel } from "@/lib/dates";
 import { findFavoriteMatch, isFavoriteMatch } from "@/lib/favoriteMatch";
 import IngredientList from "./IngredientList";
 
@@ -379,7 +379,7 @@ export default function RecipeModal({
               value={day}
               onChange={(e) => setDay(Number(e.target.value))}
             >
-              {[0, 1, 2, 3, 4].map((d) => (
+              {COOKING_DAYS.map((d) => (
                 <option key={d} value={d}>
                   {DAY_LONG[d]}
                 </option>
@@ -537,7 +537,8 @@ export default function RecipeModal({
                 : "Save this recipe to favorites"
             }
           >
-            {isFavorited ? "★ Favorited" : "☆ Favorite"}
+            <span className="btn-emoji" aria-hidden="true">{isFavorited ? "★ " : "☆ "}</span>
+            {isFavorited ? "Favorited" : "Favorite"}
           </button>
           <button
             type="button"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Avatar } from "@/components/fresh/people";
 import { fmtMoney } from "@/lib/money";
 import type { PersonLine, Settlement } from "@/lib/settlement";
 
@@ -10,9 +11,6 @@ type Props = {
   // Month label, e.g. "September 2026".
   subtitle?: string;
   loading?: boolean;
-  // Optional "go to the tab this belongs to" action.
-  linkLabel?: string;
-  onLink?: () => void;
 };
 
 function parts(line: PersonLine): { label: string; cents: number }[] {
@@ -25,23 +23,21 @@ function parts(line: PersonLine): { label: string; cents: number }[] {
 }
 
 /**
- * Per-person send / withdraw against the joint account, with the pool
- * breakdown revealed inline. Read-only: the numbers are edited on the
- * month view, this is the answer to "what do I owe".
+ * Per-person send / withdraw against the joint account. Read-only: the
+ * numbers are edited on the month view, this is the answer to "what do I
+ * owe". Tapping a row opens that person's pool breakdown underneath it.
  */
 export default function FreshSettlementCard({
   settlement,
   title,
   subtitle,
   loading = false,
-  linkLabel,
-  onLink,
 }: Props) {
-  const [showParts, setShowParts] = useState(false);
+  const [openName, setOpenName] = useState<string | null>(null);
   const anyMovement = settlement.lines.some((l) => l.share !== l.paid);
 
   return (
-    <section className="fresh-card">
+    <section className="fresh-card fresh-settle-card">
       <div className="fresh-card-head">
         <h2 className="fresh-h2">{title}</h2>
         {subtitle ? <span className="fresh-sub">{subtitle}</span> : null}
@@ -56,62 +52,60 @@ export default function FreshSettlementCard({
       ) : !anyMovement ? (
         <div className="fresh-empty">
           <strong>Nothing to settle yet</strong>
-          Log an expense or a month&apos;s bills and the split shows up here.
+          Log a receipt or this month&apos;s bills and the split shows up here.
         </div>
       ) : (
-        settlement.lines.map((line) => {
-          const delta = line.share - line.paid;
-          const tone =
-            delta > 0
-              ? "fresh-settle-send"
-              : delta < 0
-                ? "fresh-settle-receive"
-                : "fresh-settle-even";
-          return (
-            <div key={line.name}>
-              <div className={`fresh-settle-row ${tone}`}>
-                <span className="fresh-settle-name">{line.name}</span>
-                <span className="fresh-settle-amount">
-                  {delta > 0
-                    ? `Send ${fmtMoney(delta)}`
-                    : delta < 0
-                      ? `Withdraw ${fmtMoney(-delta)}`
-                      : "Even"}
-                </span>
-              </div>
-              {showParts ? (
-                <div className="fresh-settle-parts">
-                  <span>Paid {fmtMoney(line.paid)}</span>
-                  <span>Share {fmtMoney(line.share)}</span>
-                  {parts(line).map((p) => (
-                    <span key={p.label}>
-                      {p.label} {fmtMoney(p.cents)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          );
-        })
-      )}
+        <>
+          <div className="fresh-settle-total">
+            <span className="fresh-settle-total-label">Settling</span>
+            <span className="fresh-big-money">{fmtMoney(settlement.grand)}</span>
+          </div>
 
-      <div className="fresh-btn-row">
-        {anyMovement && !loading ? (
-          <button
-            type="button"
-            className="fresh-block-link"
-            onClick={() => setShowParts((v) => !v)}
-            aria-expanded={showParts}
-          >
-            {showParts ? "Hide breakdown" : "Show breakdown"}
-          </button>
-        ) : null}
-        {linkLabel && onLink ? (
-          <button type="button" className="fresh-block-link" onClick={onLink}>
-            {linkLabel}
-          </button>
-        ) : null}
-      </div>
+          {settlement.lines.map((line) => {
+            const delta = line.share - line.paid;
+            const open = openName === line.name;
+            return (
+              <div key={line.name}>
+                <button
+                  type="button"
+                  className="fresh-settle-row"
+                  aria-expanded={open}
+                  onClick={() => setOpenName(open ? null : line.name)}
+                >
+                  <Avatar name={line.name} size={30} />
+                  <span className="fresh-settle-name">{line.name}</span>
+                  <span
+                    className={
+                      delta > 0
+                        ? "fresh-money-amount send"
+                        : delta < 0
+                          ? "fresh-money-amount withdraw"
+                          : "fresh-money-amount even"
+                    }
+                  >
+                    {delta > 0
+                      ? `Send ${fmtMoney(delta)}`
+                      : delta < 0
+                        ? `Withdraw ${fmtMoney(-delta)}`
+                        : "Even"}
+                  </span>
+                </button>
+                {open ? (
+                  <div className="fresh-settle-parts">
+                    <span>Paid {fmtMoney(line.paid)}</span>
+                    <span>Share {fmtMoney(line.share)}</span>
+                    {parts(line).map((p) => (
+                      <span key={p.label}>
+                        {p.label} {fmtMoney(p.cents)}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </>
+      )}
     </section>
   );
 }

@@ -291,7 +291,7 @@ export function ReceiptPicker({
             />
           ) : (
             <div className="receipt-preview-file">
-              <span className="receipt-file-icon">📄</span>
+              <span className="receipt-file-icon btn-emoji" aria-hidden="true">📄</span>
               <span>{file.name}</span>
             </div>
           )}

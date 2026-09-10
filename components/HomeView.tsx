@@ -27,7 +27,7 @@ const SECTIONS: {
     id: "recipes",
     title: "Recipes",
     blurb:
-      "Dinner schedule for whoever is in the meal group, Sunday to Thursday. Pick the cook, log the recipe, and push the ingredients to the grocery list.",
+      "Dinner schedule for whoever is in the meal group, any day of the week. Pick the cook, log the recipe, and push the ingredients to the grocery list.",
   },
   {
     id: "expenses",

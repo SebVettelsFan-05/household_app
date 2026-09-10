@@ -41,10 +41,9 @@ function addDays(d, n) {
   x.setDate(x.getDate() + n);
   return x;
 }
-// Sunday anchor of the active cooking week (Fri/Sat roll to next Sunday).
+// Sunday anchor of the current cooking week (Sunday to Saturday).
 function weekStartFor(d) {
-  const dow = d.getDay();
-  return addDays(d, dow >= 5 ? 7 - dow : -dow);
+  return addDays(d, -d.getDay());
 }
 
 // A 1x1 PNG so receipt uploads pass validation against the stub.
@@ -130,6 +129,9 @@ async function main() {
     { weekStart: week1, day: 3, assignedTo: "Minh", name: "Bun cha", servings: 4, portions: 3,
       ingredients: [ING("Pork shoulder", 500, "Meat"), ING("Rice vermicelli", 300, "Pantry"), ING("Fish sauce", 60, "Condiments"), ING("Lettuce", 150, "Veggies"), ING("Herbs", 60, "Veggies"), ING("Garlic", 20, "Veggies")] },
     { weekStart: week1, day: 4, assignedTo: "Arthur", name: "Leftovers night", servings: 3, portions: 3, ingredients: [] },
+    { weekStart: week1, day: 5, assignedTo: "Eli", name: "Friday pizza night", servings: 4, portions: 3,
+      ingredients: [ING("Pizza dough", 600, "Bakery"), ING("Mozzarella", 250, "Dairy"), ING("Passata", 400, "Pantry"), ING("Basil", 20, "Veggies")] },
+    { weekStart: week1, day: 6, noMeal: true },
     { weekStart: week2, day: 0, assignedTo: "Minh", name: "Mapo tofu", servings: 4, portions: 3,
       ingredients: [ING("Firm tofu", 700, "Plant Proteins"), ING("Ground pork", 250, "Meat"), ING("Doubanjiang", 40, "Condiments"), ING("Scallions", 40, "Veggies"), ING("Rice", 300, "Pantry")] },
     { weekStart: week2, day: 2, assignedTo: "Eli", name: "Lemon orzo with roasted veg", servings: 4, portions: 3,

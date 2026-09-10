@@ -70,7 +70,7 @@ export const recipes = pgTable("recipes", {
   id: uuid("id").primaryKey().defaultRandom(),
   // Sunday of the week this recipe belongs to (yyyy-mm-dd).
   weekStart: date("week_start").notNull(),
-  // 0 = Sunday, 1 = Monday, … 4 = Thursday. (No Fri/Sat — household doesn't cook.)
+  // 0 = Sunday through 6 = Saturday.
   day: integer("day").notNull(),
   assignedTo: text("assigned_to").notNull(),
   name: text("name").notNull(),

@@ -248,7 +248,7 @@ export default function DictateItemsModal(props: Props) {
       }}
     >
       <div className="modal modal-wide">
-        <h2>🎙️ Dictate {targetLabel} items</h2>
+        <h2><span className="btn-emoji" aria-hidden="true">🎙️</span> Dictate {targetLabel} items</h2>
         <p className="scan-hint" style={{ marginTop: -4 }}>
           Tap the mic on your keyboard and read off products with their
           weights. We&apos;ll detect each item from its weight, so you
