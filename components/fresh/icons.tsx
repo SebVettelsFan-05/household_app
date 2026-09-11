@@ -233,6 +233,16 @@ export function IconMore(p: IconProps) {
   );
 }
 
+export function IconLink(p: IconProps) {
+  return svg(
+    <>
+      <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1.5 1.5" />
+      <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1.5-1.5" />
+    </>,
+    p
+  );
+}
+
 export function IconSearch(p: IconProps) {
   return svg(
     <>

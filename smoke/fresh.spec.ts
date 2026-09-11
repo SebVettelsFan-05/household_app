@@ -485,10 +485,36 @@ async function classicSettlement(p: Page): Promise<Record<string, number>> {
 }
 
 test("the fresh month and the classic breakdown settle to the same numbers", async () => {
+  // A fixed bill fronted by one person (the household's Internet convention)
+  // must credit that person in full even though the row no longer says so.
+  await page.request.put("/api/settings/recurring_fixed", {
+    data: {
+      value: [
+        {
+          id: "fixed-mainstay-internet",
+          name: "Internet",
+          protected: true,
+          paidBy: "Arthur",
+          activeFrom: "2026-05",
+          schedule: [{ from: "2026-05", cents: 8999 }],
+          overrides: {},
+        },
+      ],
+    },
+  });
+  await page.reload();
   await gotoTab(page, "Expenses");
   await page.getByRole("tab", { name: "Month" }).click();
   await page.locator(".fresh-month").waitFor();
   await page.locator(".fresh-month .fresh-settle-row").first().waitFor();
+  const internetRow = page.locator(".fresh-month .fresh-bill-row", { hasText: "Internet" });
+  await expect(internetRow).toBeVisible();
+  await expect(internetRow).not.toContainText("Paid by");
+  const arthur = page.locator(".fresh-month .fresh-settle-row", { hasText: "Arthur" });
+  await arthur.click();
+  // $120 receipt plus the $89.99 Internet bill fronted by Arthur.
+  await expect(arthur.locator("xpath=..")).toContainText("Paid $209.99");
+  await arthur.click();
   const fresh = await freshSettlement(page);
   expect(Object.keys(fresh).length).toBeGreaterThan(0);
 
@@ -532,6 +558,7 @@ test("the fresh month and the classic breakdown settle to the same numbers", asy
   const classic = await classicSettlement(page);
   expect(fresh).toEqual(classic);
 
+  await page.request.put("/api/settings/recurring_fixed", { data: { value: [] } });
   await page.evaluate(() => window.localStorage.setItem("hh_ui", "fresh"));
   await page.reload();
   await expect(page.locator(".fresh")).toBeVisible();

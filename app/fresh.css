@@ -2357,3 +2357,25 @@ button.fresh-row-main {
   height: 9px;
   margin-right: 0;
 }
+
+.fresh-day-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1.5px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--section);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.fresh-day-card-link:hover {
+  border-color: var(--section);
+}

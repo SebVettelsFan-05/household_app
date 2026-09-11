@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { RecipeSlot } from "@/components/fresh/FreshApp";
 import { Avatar, personColor } from "@/components/fresh/people";
-import { IconArchive, IconCart, IconStar } from "@/components/fresh/icons";
+import { IconArchive, IconLink, IconStar } from "@/components/fresh/icons";
 import AddRecipeToGroceryModal from "@/components/AddRecipeToGroceryModal";
 import FavoritesModal from "@/components/FavoritesModal";
 import RecipeArchiveModal from "@/components/RecipeArchiveModal";
@@ -182,22 +182,6 @@ export default function FreshRecipes({
           }
         : { mode: "new", initial: blankFields(weekStart, day, mealGroup.length) }
     );
-  }
-
-  function pushToGrocery(recipe: Recipe) {
-    if (recipe.ingredients.length === 0) {
-      data.showToast("That recipe has no ingredients yet");
-      return;
-    }
-    setAddingToGrocery({
-      recipeName: recipe.name,
-      ingredients: recipe.ingredients,
-      defaultAddedBy: recipe.assignedTo,
-      servings: recipe.servings ?? 0,
-      portions: recipe.portions ?? 0,
-      // Nothing to write back into: the recipe editor is not open here.
-      onCategoriesReviewed: () => {},
-    });
   }
 
   const weeks = [
@@ -421,16 +405,17 @@ export default function FreshRecipes({
                             ) : null}
                           </span>
                         </button>
-                        {recipe.ingredients.length > 0 ? (
+                        {recipe.link ? (
                           <div className="fresh-day-card-actions">
-                            <button
-                              type="button"
-                              className="fresh-btn fresh-btn-small"
-                              onClick={() => pushToGrocery(recipe)}
+                            <a
+                              className="fresh-day-card-link"
+                              href={recipe.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
                             >
-                              <IconCart size={16} />
-                              Add to grocery
-                            </button>
+                              <IconLink size={16} />
+                              {recipe.link.replace(/^https?:\/\/(www\.)?/, "").slice(0, 48)}
+                            </a>
                           </div>
                         ) : null}
                       </article>

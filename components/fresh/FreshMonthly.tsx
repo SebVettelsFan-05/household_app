@@ -254,11 +254,6 @@ export default function FreshMonthly({ expenses, onToast }: Props) {
               <div className="fresh-bill-row" key={r.id}>
                 <span className="fresh-bill-name">
                   {r.name}
-                  {r.paidBy ? (
-                    <span className="fresh-bill-note">
-                      Paid by {r.paidBy}
-                    </span>
-                  ) : null}
                   {overridden ? (
                     <span className="fresh-bill-note">
                       Just this month
