@@ -414,7 +414,9 @@ export default function FreshRecipes({
                               rel="noopener noreferrer"
                             >
                               <IconLink size={16} />
-                              {recipe.link.replace(/^https?:\/\/(www\.)?/, "").slice(0, 48)}
+                              <span className="fresh-day-card-link-text">
+                                {recipe.link.replace(/^https?:\/\/(www\.)?/, "").slice(0, 48)}
+                              </span>
                             </a>
                           </div>
                         ) : null}

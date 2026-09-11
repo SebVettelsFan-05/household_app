@@ -191,13 +191,14 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
               <Avatar name={item.addedBy} size={20} />
               <span className="fresh-person-name">{item.addedBy}</span>
             </span>
+            {haveQty ? (
+              <span className="fresh-row-warn">
+                have {haveQty.num}
+                {haveQty.unit}
+                <span className="sr-only"> in the inventory already</span>
+              </span>
+            ) : null}
           </span>
-          {haveQty ? (
-            <span className="fresh-row-warn">
-              Already have {haveQty.num}
-              {haveQty.unit}
-            </span>
-          ) : null}
         </button>
         <span className="fresh-row-qty fresh-num">
           {qty.num}

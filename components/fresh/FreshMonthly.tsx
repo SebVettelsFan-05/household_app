@@ -112,12 +112,12 @@ export default function FreshMonthly({ expenses, onToast }: Props) {
                   </button>
                 ) : null}
                 <span className="fresh-trip-main">
-                  <span className="fresh-trip-when">
+                  <span className="fresh-trip-title">
                     {fmtTripDate(t.occurredOn) || "No date"}
                   </span>
-                  <span className="fresh-trip-desc">
-                    {t.description || "Untitled"}
-                  </span>
+                  {t.description ? (
+                    <span className="fresh-trip-desc">{t.description}</span>
+                  ) : null}
                   <span className="fresh-trip-tags">
                     {t.allocations.map((a, i) => (
                       <span
