@@ -108,7 +108,13 @@ export function computeSettlement(input: SettlementInput): Settlement {
     map.set(name, (map.get(name) ?? 0) + cents);
   };
 
+  // Lines with the same participants are pooled for the month and split
+  // once, rather than split receipt by receipt. Both are cent-exact, but
+  // pooling keeps the rounding remainder to a single cent per person per
+  // month instead of letting it accumulate across dozens of receipts (and
+  // it matches what the old five-way formula showed for past months).
   let sharedExpenses = 0;
+  const pools = new Map<string, { cents: number; participants: string[]; meals: boolean }>();
   for (const e of input.expenses) {
     for (const a of e.allocations) {
       if (a.kind === "personal") continue;
@@ -116,10 +122,17 @@ export function computeSettlement(input: SettlementInput): Settlement {
       if (participants.length === 0) continue;
       sharedExpenses += a.amountCents;
       bump(paid, e.paidBy, a.amountCents);
-      const target = a.kind === "meals" ? meals : house;
-      for (const [name, cents] of splitCents(a.amountCents, participants)) {
-        bump(target, name, cents);
-      }
+      const isMeals = a.kind === "meals";
+      const key = `${isMeals ? "m" : "h"}|${participants.join("|")}`;
+      const pool = pools.get(key);
+      if (pool) pool.cents += a.amountCents;
+      else pools.set(key, { cents: a.amountCents, participants, meals: isMeals });
+    }
+  }
+  for (const pool of pools.values()) {
+    const target = pool.meals ? meals : house;
+    for (const [name, cents] of splitCents(pool.cents, pool.participants)) {
+      bump(target, name, cents);
     }
   }
 

@@ -90,6 +90,13 @@ Send/withdraw against the joint account is unchanged: `share − paid`.
 Sum of shares equals sum of paid plus what the joint account itself must
 collect (rent and bills nobody fronted), to the cent.
 
+Lines with the same participants are pooled for the month and split once,
+so the rounding remainder is at most one cent per person per month rather
+than accumulating across receipts. Against the household's real history
+this keeps every past month within one cent of what the old five-way
+formula displayed (verified on a restored copy, see
+`docs/BACKUP_RESTORE.md`).
+
 Per-person lines expose `house`, `meals`, `bills`, `rent` sub-totals so the
 settlement card can show why shares differ.
 

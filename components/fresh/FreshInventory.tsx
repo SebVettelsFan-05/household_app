@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AddItemForm from "@/components/AddItemForm";
 import EditModal from "@/components/EditModal";
 import FreshSheet from "@/components/fresh/FreshSheet";
@@ -20,7 +20,7 @@ const EXPIRING_WINDOW_DAYS = 3;
 
 const SORT_OPTIONS: { value: SortMode; label: string }[] = [
   { value: "newest", label: "Newest" },
-  { value: "name", label: "A–Z" },
+  { value: "name", label: "A to Z" },
   { value: "quantity", label: "Qty" },
   { value: "expiry", label: "Expiry" },
 ];
@@ -63,7 +63,9 @@ function daysUntil(expiry: string): number | null {
 
 export default function FreshInventory({ data, onManageCategories }: Props) {
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<string>("all");
+  // Additive category filter: an empty set shows everything, each chip
+  // toggles its membership (matches the classic FilterRow).
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [sortMode, setSortMode] = useState<SortMode>("name");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -85,14 +87,30 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
       .filter((name) => present.has(name));
   }, [data.items, data.categories]);
 
+  const showingAll = selected.size === 0;
+  function toggleCategory(name: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+  useEffect(() => {
+    if (selected.size === 0) return;
+    const live = new Set(categoryChips);
+    if ([...selected].every((c) => live.has(c))) return;
+    setSelected(new Set([...selected].filter((c) => live.has(c))));
+  }, [categoryChips, selected]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return data.items.filter((i) => {
-      if (category !== "all" && i.category !== category) return false;
+      if (selected.size > 0 && !selected.has(i.category)) return false;
       if (term && !i.name.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [data.items, search, category]);
+  }, [data.items, search, selected]);
 
   // Pinned at the top: anything already gone off, or going off inside three
   // days. Everything else groups by category underneath.
@@ -193,23 +211,32 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
       <div className="fresh-chips" role="group" aria-label="Category filter">
         <button
           type="button"
-          className={`fresh-chip${category === "all" ? " active" : ""}`}
-          aria-pressed={category === "all"}
-          onClick={() => setCategory("all")}
+          className={`fresh-chip${showingAll ? " active" : ""}`}
+          aria-pressed={showingAll}
+          onClick={() => setSelected(new Set())}
+          title="Clear category filters"
         >
           All
         </button>
-        {categoryChips.map((name) => (
-          <button
-            key={name}
-            type="button"
-            className={`fresh-chip${category === name ? " active" : ""}`}
-            aria-pressed={category === name}
-            onClick={() => setCategory(name)}
-          >
-            {name}
-          </button>
-        ))}
+        {categoryChips.map((name) => {
+          const active = selected.has(name);
+          return (
+            <button
+              key={name}
+              type="button"
+              className={`fresh-chip fresh-chip-cat${active ? " active" : ""}`}
+              aria-pressed={active}
+              onClick={() => toggleCategory(name)}
+            >
+              <span
+                className="fresh-cat-dot"
+                style={{ background: colorFor(name) }}
+                aria-hidden="true"
+              />
+              {name}
+            </button>
+          );
+        })}
       </div>
 
       <div

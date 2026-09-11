@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AddGroceryForm from "@/components/AddGroceryForm";
 import EditGroceryModal from "@/components/EditGroceryModal";
 import FreshSheet from "@/components/fresh/FreshSheet";
@@ -36,7 +36,9 @@ function byStoreThenNewest(a: GroceryItem, b: GroceryItem): number {
 }
 
 export default function FreshGrocery({ data, onManageCategories }: Props) {
-  const [category, setCategory] = useState<string>("all");
+  // Additive category filter: an empty set shows everything, each chip
+  // toggles its membership (matches the classic FilterRow).
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -73,9 +75,29 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
     return [...known, ...unknown];
   }, [open, categoryOrder]);
 
+  const showingAll = selected.size === 0;
+  function toggleCategory(name: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+  // Drop a selected category once nothing in the list carries it any more,
+  // so the filter can never hide everything behind a chip that is gone.
+  useEffect(() => {
+    if (selected.size === 0) return;
+    const live = new Set(categoryChips);
+    if ([...selected].every((c) => live.has(c))) return;
+    setSelected(new Set([...selected].filter((c) => live.has(c))));
+  }, [categoryChips, selected]);
+
   const groups = useMemo(() => {
     const visible =
-      category === "all" ? open : open.filter((g) => g.category === category);
+      selected.size === 0
+        ? open
+        : open.filter((g) => selected.has(g.category));
     const buckets = new Map<string, GroceryItem[]>();
     for (const name of categoryChips) buckets.set(name, []);
     for (const g of visible) {
@@ -86,7 +108,7 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
     return Array.from(buckets.entries())
       .filter(([, items]) => items.length > 0)
       .map(([name, items]) => ({ name, items: items.sort(byStoreThenNewest) }));
-  }, [open, category, categoryChips]);
+  }, [open, selected, categoryChips]);
 
   // Somebody is about to buy what the house already has. Shown on the row
   // itself rather than in a side list, so it is read while shopping.
@@ -190,23 +212,32 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
       <div className="fresh-chips" role="group" aria-label="Category filter">
         <button
           type="button"
-          className={`fresh-chip${category === "all" ? " active" : ""}`}
-          aria-pressed={category === "all"}
-          onClick={() => setCategory("all")}
+          className={`fresh-chip${showingAll ? " active" : ""}`}
+          aria-pressed={showingAll}
+          onClick={() => setSelected(new Set())}
+          title="Clear category filters"
         >
           All
         </button>
-        {categoryChips.map((name) => (
-          <button
-            key={name}
-            type="button"
-            className={`fresh-chip${category === name ? " active" : ""}`}
-            aria-pressed={category === name}
-            onClick={() => setCategory(name)}
-          >
-            {name}
-          </button>
-        ))}
+        {categoryChips.map((name) => {
+          const active = selected.has(name);
+          return (
+            <button
+              key={name}
+              type="button"
+              className={`fresh-chip fresh-chip-cat${active ? " active" : ""}`}
+              aria-pressed={active}
+              onClick={() => toggleCategory(name)}
+            >
+              <span
+                className="fresh-cat-dot"
+                style={{ background: colorFor(name) }}
+                aria-hidden="true"
+              />
+              {name}
+            </button>
+          );
+        })}
       </div>
 
       {data.groceryLoading ? (

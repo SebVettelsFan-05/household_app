@@ -44,3 +44,6 @@ next-env.d.ts
 /smoke/out/
 /test-results/
 /playwright-report/
+
+# Local database dumps of the live DB (never commit)
+/backups/

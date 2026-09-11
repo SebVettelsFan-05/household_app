@@ -209,6 +209,18 @@ test("a name that left the roster still settles for that month", () => {
   assert.equal(s.grand, 20500);
 });
 
+test("lines with the same participants pool before rounding", () => {
+  const line = (paidBy: string) => ({
+    paidBy,
+    amountCents: 3,
+    allocations: [{ kind: "house" as const, amountCents: 3, splitAmong: [...M] }],
+  });
+  const s = computeSettlement({ members: M, expenses: [line("Arthur"), line("Eli"), line("Minh")], bills: [], rent: {} });
+  // 9 cents over five people: 2,2,2,2,1, not 3,3,3,0,0.
+  assert.deepEqual(s.lines.map((l) => l.share), [2, 2, 2, 2, 1]);
+  assert.equal(s.lines.reduce((x, l) => x + l.share, 0), 9);
+});
+
 test("legacy rows settle exactly like the old five-way split", () => {
   const s = computeSettlement({
     members: M,

@@ -628,17 +628,23 @@ test("the fresh list groups its rows under category headings", async () => {
   await expect(added.locator(".fresh-avatar")).toHaveText("E");
   await expect(added.locator(".fresh-row-qty")).toHaveText("250g");
 
-  // The chip row filters by category, and hides the other groups.
+  // The chip row is an additive filter like classic's: chips stack, a
+  // second tap removes one, and All clears the set.
   await page.locator(".fresh-chip", { hasText: "Pantry" }).first().click();
   await expect(page.locator(".fresh-section .fresh-h2")).toHaveText(["Pantry"]);
+  await page.locator(".fresh-chip", { hasText: "Meat" }).first().click();
+  await expect(page.locator(".fresh-section .fresh-h2")).toHaveText(["Meat", "Pantry"]);
+  await page.locator(".fresh-chip", { hasText: "Pantry" }).first().click();
+  await expect(page.locator(".fresh-section .fresh-h2")).toHaveText(["Meat"]);
   await page.locator(".fresh-chip", { hasText: "All" }).first().click();
+  await expect(page.locator(".fresh-chip", { hasText: "All" }).first()).toHaveAttribute("aria-pressed", "true");
 });
 
 test("the inventory sorts without losing its category groups", async () => {
   await gotoTab(page, "Inventory");
   const groups = page.locator(".fresh-section .fresh-h2");
   await expect(groups.first()).toBeVisible();
-  for (const label of ["Newest", "Qty", "Expiry", "A\u2013Z"]) {
+  for (const label of ["Newest", "Qty", "Expiry", "A to Z"]) {
     await page.getByRole("button", { name: label, exact: true }).click();
     await expect(groups.first()).toBeVisible();
   }

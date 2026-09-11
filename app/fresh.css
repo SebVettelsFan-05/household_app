@@ -2350,3 +2350,10 @@ button.fresh-row-main {
 .fresh-chip-person.active .fresh-avatar {
   box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.7);
 }
+
+/* Category filter chips carry the category colour like classic's pills. */
+.fresh-chip-cat .fresh-cat-dot {
+  width: 9px;
+  height: 9px;
+  margin-right: 0;
+}
