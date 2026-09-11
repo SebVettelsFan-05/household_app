@@ -63,41 +63,6 @@ export function mergeAddedBy(existing: string, incoming: string): string {
     .join(", ");
 }
 
-/** Does `list` (a merged "Arthur, Eli" value) already include `name`? */
-export function addedByIncludes(list: string, name: string): boolean {
-  const key = name.trim().toLowerCase();
-  if (!key) return false;
-  return list
-    .split(",")
-    .some((part) => part.trim().toLowerCase() === key);
-}
-
-/** First requester of a merged "addedBy" value ("Arthur, Eli" → "Arthur"). */
-export function firstAddedBy(list: string): string {
-  for (const part of String(list ?? "").split(",")) {
-    const trimmed = part.trim();
-    if (trimmed) return trimmed;
-  }
-  return "";
-}
-
-/**
- * Whether an incoming grocery request may merge into an existing open row.
- * Same normalized name and same pool are always required; a `personal`
- * request additionally has to come from someone already on the row, so
- * Eli's chicken never absorbs Minh's. Names are compared pre-normalized by
- * the caller (both sides go through `normalizeName`).
- */
-export function groceryRowsMerge(
-  incoming: { norm: string; pool: string; addedBy: string },
-  existing: { norm: string; pool: string; addedBy: string }
-): boolean {
-  if (incoming.norm !== existing.norm) return false;
-  if (incoming.pool !== existing.pool) return false;
-  if (incoming.pool !== "personal") return true;
-  return addedByIncludes(existing.addedBy, incoming.addedBy);
-}
-
 export function isProtectedCategory(name: string): boolean {
   const lc = name.toLowerCase();
   if (lc === FALLBACK_CATEGORY.toLowerCase()) return true;

@@ -4,11 +4,11 @@ import { useMemo, useState } from "react";
 import AddItemForm from "@/components/AddItemForm";
 import EditModal from "@/components/EditModal";
 import FreshSheet from "@/components/fresh/FreshSheet";
-import { Avatar } from "@/components/fresh/people";
 import { IconPlus, IconSearch } from "@/components/fresh/icons";
+import { buildColorLookup } from "@/lib/categoryColors";
 import { expiryStatus, fmtQty } from "@/lib/format";
 import { sortCategories } from "@/lib/normalize";
-import type { Item } from "@/lib/types";
+import type { Item, SortMode } from "@/lib/types";
 import type { HouseholdData } from "@/lib/useHouseholdData";
 
 type Props = {
@@ -17,6 +17,30 @@ type Props = {
 };
 
 const EXPIRING_WINDOW_DAYS = 3;
+
+const SORT_OPTIONS: { value: SortMode; label: string }[] = [
+  { value: "newest", label: "Newest" },
+  { value: "name", label: "A–Z" },
+  { value: "quantity", label: "Qty" },
+  { value: "expiry", label: "Expiry" },
+];
+
+/** Same orders the classic inventory offers. */
+function sortItems(arr: Item[], mode: SortMode): Item[] {
+  const copy = arr.slice();
+  if (mode === "name") return copy.sort((a, b) => a.name.localeCompare(b.name));
+  if (mode === "quantity") return copy.sort((a, b) => b.quantity - a.quantity);
+  if (mode === "newest") {
+    return copy.sort((a, b) => (b.added || "").localeCompare(a.added || ""));
+  }
+  // expiry — soonest first; missing expiries sink to the bottom.
+  return copy.sort((a, b) => {
+    if (!a.expiry && !b.expiry) return 0;
+    if (!a.expiry) return 1;
+    if (!b.expiry) return -1;
+    return a.expiry.localeCompare(b.expiry);
+  });
+}
 
 /** "Sep 22" rather than the raw ISO the shared helper falls back to. */
 function farExpiryLabel(expiry: string): string {
@@ -40,12 +64,18 @@ function daysUntil(expiry: string): number | null {
 export default function FreshInventory({ data, onManageCategories }: Props) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("all");
+  const [sortMode, setSortMode] = useState<SortMode>("name");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
   const editing = editingId
     ? (data.items.find((i) => i.id === editingId) ?? null)
     : null;
+
+  const colorFor = useMemo(
+    () => buildColorLookup(data.categories),
+    [data.categories]
+  );
 
   // Only categories that actually hold something, in the household's order.
   const categoryChips = useMemo(() => {
@@ -96,15 +126,16 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
     }
     return Array.from(buckets.entries())
       .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
-      .map(([name, items]) => ({
-        name,
-        items: items.sort((a, b) => a.name.localeCompare(b.name)),
-      }));
+      .map(([name, items]) => ({ name, items: sortItems(items, sortMode) }));
     // expiringIds is derived from `expiring`, which is memoised on `filtered`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, data.categories, expiring]);
+  }, [filtered, data.categories, expiring, sortMode]);
 
-  function row(item: Item) {
+  /**
+   * `withCategory` is on only in the Use soon block, which mixes categories.
+   * Inside a category group the heading already says it.
+   */
+  function row(item: Item, withCategory = false) {
     const qty = fmtQty(item.quantity);
     const status = expiryStatus(item.expiry);
     const expiryLabel =
@@ -119,14 +150,9 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
         <span className="fresh-row-main">
           <span className="fresh-row-title">{item.name}</span>
           <span className="fresh-row-meta">
-            {item.owner ? (
-              <span className="fresh-person">
-                <Avatar name={item.owner} size={20} />
-                <span className="fresh-person-name">{item.owner}</span>
-              </span>
-            ) : (
-              <span className="fresh-row-note">Shared</span>
-            )}
+            {withCategory ? (
+              <span className="fresh-row-note">{item.category}</span>
+            ) : null}
             {expiryLabel ? (
               <span
                 className={`fresh-badge${
@@ -186,6 +212,24 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
         ))}
       </div>
 
+      <div
+        className="fresh-seg fresh-seg-sm"
+        role="group"
+        aria-label="Sort inventory"
+      >
+        {SORT_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            className={`fresh-seg-btn${o.value === sortMode ? " active" : ""}`}
+            aria-pressed={o.value === sortMode}
+            onClick={() => setSortMode(o.value)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
       {data.itemsLoading ? (
         <div>
           <div className="fresh-skel fresh-skel-row" />
@@ -212,17 +256,27 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
                 </span>
                 <span className="fresh-sub">{expiring.length}</span>
               </div>
-              <div className="fresh-rows">{expiring.map((r) => row(r.item))}</div>
+              <div className="fresh-rows">
+                {expiring.map((r) => row(r.item, true))}
+              </div>
             </section>
           ) : null}
 
           {groups.map((g) => (
             <section className="fresh-section" key={g.name}>
               <div className="fresh-section-head">
-                <h2 className="fresh-h2">{g.name}</h2>
+                <h2 className="fresh-h2">
+                  <span
+                    className="fresh-cat-dot"
+                    style={{ background: colorFor(g.name) }}
+                  />
+                  {g.name}
+                </h2>
                 <span className="fresh-sub">{g.items.length}</span>
               </div>
-              <div className="fresh-rows">{g.items.map(row)}</div>
+              <div className="fresh-rows">
+                {g.items.map((item) => row(item))}
+              </div>
             </section>
           ))}
         </>

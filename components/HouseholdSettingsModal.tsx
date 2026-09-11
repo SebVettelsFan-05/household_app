@@ -180,10 +180,12 @@ export default function HouseholdSettingsModal({
 
       <div className="field">
         <label>{mode === "fresh" ? "Meal group" : "Shares dinners"}</label>
-        <p className="settings-hint">
-          People who share dinners. Used as the default for meal groceries
-          and the cook list.
-        </p>
+        {mode === "fresh" ? null : (
+          <p className="settings-hint">
+            People who share dinners. Used as the default for meal groceries
+            and the cook list.
+          </p>
+        )}
         <PersonCheckList
           people={BUYERS}
           selected={members}
@@ -193,6 +195,11 @@ export default function HouseholdSettingsModal({
           itemClassName="settings-person"
           ariaLabel="Shares dinners"
         />
+        {mode === "fresh" ? (
+          <p className="settings-hint">
+            Default for meal groceries and the cook list.
+          </p>
+        ) : null}
         {members.length === 0 ? (
           <p className="settings-hint">
             Nobody selected, so meals default to everyone.

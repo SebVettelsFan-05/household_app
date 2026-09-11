@@ -422,9 +422,6 @@ export default function FreshMonthly({ expenses, onToast }: Props) {
           Total for {ymLabel(month)}
         </span>
         <span className="fresh-big-money">{fmtMoney(view.grandTotal)}</span>
-        <p className="fresh-field-hint">
-          Personal items on receipts are excluded
-        </p>
       </section>
 
       <FreshSettlementCard

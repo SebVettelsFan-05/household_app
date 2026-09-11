@@ -22,10 +22,30 @@ const TINY_PNG = Buffer.from(
   "base64"
 );
 const RECEIPT_PATH = path.join(OUT, "receipt.png");
+const HOUSEHOLD_TZ = "America/Toronto";
 const RECIPE_NAME = "Smoke Green Curry";
 const ITEM_NAME = "Smokeyogurt";
+// The recipe's only ingredient. The suite hand-adds it to the grocery list
+// first, then pushes the recipe onto the same row to prove they merge.
+const INGREDIENT_NAME = "Coconut milk";
 
 let page: Page;
+
+/** Sunday anchor of the cooking week today falls in (mirrors lib/dates.ts). */
+function activeWeekStart(): string {
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: HOUSEHOLD_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const [y, m, d] = today.split("-").map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  utc.setUTCDate(utc.getUTCDate() - utc.getUTCDay());
+  return utc.toISOString().slice(0, 10);
+}
+
+const WEEK_START = activeWeekStart();
 
 /** Desktop + mobile screenshot of the current state. */
 async function shot(name: string) {
@@ -75,15 +95,19 @@ async function resetFixtures() {
   for (const g of gBody.grocery ?? []) {
     // "Chickens" merges with "Chicken" server-side, so clear the whole family
     // or a leftover row silently absorbs this run's add.
-    if (String(g.name).toLowerCase().startsWith("chicken")) {
+    const name = String(g.name).toLowerCase();
+    if (name.startsWith("chicken") || name.startsWith("coconut")) {
       await page.request.delete(`/api/grocery?id=${encodeURIComponent(g.id)}`);
     }
   }
 
+  // This week's slots have to start empty: the suite asserts the cook tally,
+  // and anything already planned (the local seed, an earlier run) would add
+  // cooks to it.
   const recipes = await page.request.get("/api/recipes");
   const rBody = await recipes.json();
   for (const r of rBody.recipes ?? []) {
-    if (r.noMeal || r.name === RECIPE_NAME) {
+    if (r.noMeal || r.name === RECIPE_NAME || r.weekStart === WEEK_START) {
       await page.request.delete(`/api/recipes/${encodeURIComponent(r.id)}`);
     }
   }
@@ -202,36 +226,32 @@ test("the monthly settlement charges Daniel $6 and credits Arthur $120", async (
   await shot("05-settlement");
 });
 
-test("the same name in two pools stays two grocery rows", async () => {
+test("a grocery row lands under its category, with no pool tag", async () => {
   await gotoTab("Grocery");
   await expect(page.getByRole("heading", { name: "Add to list" })).toBeVisible();
 
-  const chickens = page
-    .locator(".grocery-row")
-    .filter({ has: page.locator(".grocery-name", { hasText: /^Chicken$/ }) });
-
-  await page.locator("#g-name").fill("Chicken");
-  await page.locator("#g-qty").fill("500");
-  await page.locator(".pool-chips").getByRole("button", { name: "Meals" }).click();
+  await page.locator("#g-name").fill(INGREDIENT_NAME);
+  await page.locator("#g-qty").fill("200");
+  await page.locator(".cat-pills").getByRole("button", { name: "Pantry", exact: true }).click();
   await page.locator("#g-by").selectOption("Arthur");
   await page.getByRole("button", { name: "Add to list" }).click();
-  await expect(chickens).toHaveCount(1);
 
-  await page.locator("#g-name").fill("Chicken");
-  await page.locator("#g-qty").fill("300");
-  await page.locator(".pool-chips").getByRole("button", { name: "Personal" }).click();
-  await page.locator("#g-by").selectOption("Eli");
-  await page.getByRole("button", { name: "Add to list" }).click();
+  const rows = page
+    .locator(".grocery-row")
+    .filter({ has: page.locator(".grocery-name", { hasText: INGREDIENT_NAME }) });
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("For Arthur");
 
-  // Two separate rows: the same name in two pools must not merge.
-  await expect(chickens).toHaveCount(2);
+  // Grouped by item category, and the row carries no pool badge any more.
+  const group = page
+    .locator(".cat-group")
+    .filter({ has: page.locator(".cat-group-name", { hasText: "Pantry" }) });
   await expect(
-    chickens.filter({ hasText: "For Arthur" }).locator(".pool-badge.meals")
-  ).toHaveText("Meals");
-  await expect(
-    chickens.filter({ hasText: "For Eli" }).locator(".pool-badge.personal")
-  ).toHaveText("Personal");
-  await shot("06-grocery-pools");
+    group.locator(".grocery-name", { hasText: INGREDIENT_NAME })
+  ).toHaveCount(1);
+  await expect(page.locator(".pool-badge")).toHaveCount(0);
+  await expect(page.locator(".pool-chips")).toHaveCount(0);
+  await shot("06-grocery-category");
 });
 
 test("a slot can be marked as no shared meal", async () => {
@@ -266,7 +286,7 @@ test("a recipe records its cook, servings and portions", async () => {
   await page.locator("#r-servings").fill("5");
   await page.locator("#r-portions").fill("3");
 
-  await page.locator(".ingredient-add .ingredient-name").fill("Coconut milk");
+  await page.locator(".ingredient-add .ingredient-name").fill(INGREDIENT_NAME);
   await page.locator(".ingredient-add .ingredient-qty").fill("500");
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await shot("08-recipe-form");
@@ -277,7 +297,7 @@ test("a recipe records its cook, servings and portions", async () => {
   await shot("09-recipe-card");
 });
 
-test("pushing a recipe to the grocery list scales the weights", async () => {
+test("a recipe push scales the weights and merges into the row already there", async () => {
   await page.locator(".recipe-card", { hasText: RECIPE_NAME }).click();
   await page.getByRole("button", { name: "Add to grocery" }).click();
   await expect(page.getByRole("heading", { name: "Add to grocery list" })).toBeVisible();
@@ -287,34 +307,42 @@ test("pushing a recipe to the grocery list scales the weights", async () => {
   );
   // 500 g for 5 servings becomes 300 g for 3.
   await expect(page.locator(".ing-add-qty").first()).toHaveText("300g");
-  await expect(
-    page.locator(".pool-chips .pool-chip.active")
-  ).toHaveText("Meals");
   await shot("10-recipe-grocery");
 
-  // Escape closes the grocery picker first, then the recipe modal behind it.
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Add 1 item" }).click();
   await expect(page.locator(".ing-add-list")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.locator(".modal-bg")).toHaveCount(0);
+
+  // One row, not two: the pushed ingredient tops up the hand-added row
+  // (200 g + 300 g) instead of opening a second line for the same thing.
+  await gotoTab("Grocery");
+  const rows = page
+    .locator(".grocery-row")
+    .filter({ has: page.locator(".grocery-name", { hasText: INGREDIENT_NAME }) });
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().locator(".item-qty")).toHaveText("500g");
+  await shot("10b-grocery-merged");
 });
 
-test("an inventory item can belong to one person", async () => {
+test("an inventory item lands in its category group, with no owner", async () => {
   await gotoTab("Inventory");
   await page.locator("#name").fill(ITEM_NAME);
   await page.locator("#qty").fill("500");
-  await page.locator("#owner").selectOption("Eli");
+  await page.locator(".cat-pills").getByRole("button", { name: "Dairy", exact: true }).click();
   await page.getByRole("button", { name: "Add to inventory" }).click();
 
   const row = page.locator(".item", { hasText: ITEM_NAME });
   await expect(row).toHaveCount(1);
-  await expect(row.locator(".owner-badge")).toHaveText("Eli's");
+  // Nothing belongs to anybody any more: no owner badge, no owner picker.
+  await expect(page.locator(".owner-badge")).toHaveCount(0);
+  await expect(page.locator("#owner")).toHaveCount(0);
 
-  await page.locator(".filter-row").first().getByRole("button", { name: "Shared" }).click();
-  await expect(row).toHaveCount(0);
-  await page.locator(".filter-row").first().getByRole("button", { name: "Personal" }).click();
-  await expect(row).toHaveCount(1);
-  await shot("11-inventory-owner");
+  const group = page
+    .locator(".cat-group")
+    .filter({ has: page.locator(".cat-group-name", { hasText: "Dairy" }) });
+  await expect(group.locator(".item-name", { hasText: ITEM_NAME })).toHaveCount(1);
+  await shot("11-inventory-category");
 });
 
 test("the edit modal seeds the saved split", async () => {

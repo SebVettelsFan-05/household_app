@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import AddGroceryForm from "@/components/AddGroceryForm";
 import EditGroceryModal from "@/components/EditGroceryModal";
 import GroceryItemRow from "@/components/GroceryItemRow";
-import { POOL_LABELS } from "@/components/PoolChips";
 import {
   clearGrocery,
   moveDoneGroceryToInventory,
@@ -12,13 +11,7 @@ import {
 } from "@/lib/client";
 import { buildColorLookup, getCategoryColor } from "@/lib/categoryColors";
 import { sortCategories } from "@/lib/normalize";
-import {
-  GROCERY_POOLS,
-  type CategoryDef,
-  type GroceryItem,
-  type GroceryPool,
-  type Item,
-} from "@/lib/types";
+import type { CategoryDef, GroceryItem, Item } from "@/lib/types";
 
 type SortMode = "store" | "name";
 const SORT_MODES: SortMode[] = ["store", "name"];
@@ -54,8 +47,6 @@ export default function GroceryView({
   const [busy, setBusy] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("store");
   const [hideDone, setHideDone] = useState(false);
-  // Client-side only: which pool the list is showing.
-  const [poolFilter, setPoolFilter] = useState<GroceryPool | "all">("all");
 
   const colorFor = useMemo(() => buildColorLookup(categories), [categories]);
 
@@ -102,11 +93,7 @@ export default function GroceryView({
     const order = sortCategories(categories).map((c) => c.name);
     const buckets = new Map<string, GroceryItem[]>();
     for (const name of order) buckets.set(name, []);
-    const byPool =
-      poolFilter === "all"
-        ? grocery
-        : grocery.filter((g) => (g.pool ?? "house") === poolFilter);
-    const visible = hideDone ? byPool.filter((g) => !g.done) : byPool;
+    const visible = hideDone ? grocery.filter((g) => !g.done) : grocery;
     for (const g of visible) {
       if (!buckets.has(g.category)) buckets.set(g.category, []);
       buckets.get(g.category)!.push(g);
@@ -114,7 +101,7 @@ export default function GroceryView({
     return Array.from(buckets.entries())
       .filter(([, list]) => list.length > 0)
       .map(([name, list]) => ({ name, items: list.sort(comparator) }));
-  }, [grocery, sortMode, categories, hideDone, poolFilter]);
+  }, [grocery, sortMode, categories, hideDone]);
 
   function cycleSort() {
     setSortMode(
@@ -243,28 +230,6 @@ export default function GroceryView({
             Clear list
           </button>
         </div>
-      </div>
-
-      <div className="filter-row">
-        <button
-          type="button"
-          className={`filter-pill${poolFilter === "all" ? " active" : ""}`}
-          onClick={() => setPoolFilter("all")}
-          aria-pressed={poolFilter === "all"}
-        >
-          All
-        </button>
-        {GROCERY_POOLS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            className={`filter-pill${poolFilter === p ? " active" : ""}`}
-            onClick={() => setPoolFilter(p)}
-            aria-pressed={poolFilter === p}
-          >
-            {POOL_LABELS[p]}
-          </button>
-        ))}
       </div>
 
       <div className="list-hint">Tap the circle to check off, or the row to edit</div>

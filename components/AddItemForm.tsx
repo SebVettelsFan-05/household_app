@@ -3,7 +3,6 @@
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { IconCamera, IconMic } from "@/components/fresh/icons";
 import DictateItemsModal from "@/components/DictateItemsModal";
-import PersonPicker from "@/components/PersonPicker";
 import ScanLabelModal, {
   type ScanResult,
 } from "@/components/ScanLabelModal";
@@ -46,8 +45,6 @@ export default function AddItemForm({
   const [qty, setQty] = useState("");
   const [exp, setExp] = useState("");
   const [cat, setCat] = useState<Category>(FALLBACK_CATEGORY);
-  // "" means shared household food.
-  const [owner, setOwner] = useState("");
   const [busy, setBusy] = useState(false);
   // Same idea as the grocery form — once you tap a pill, we stop overriding
   // your choice until the form submits.
@@ -160,7 +157,6 @@ export default function AddItemForm({
         expiry: exp || undefined,
         category: submitCategory,
         categoryReviewed: userPickedCat,
-        owner: owner || undefined,
       });
       const msg = res.merged
         ? `Added ${res.addedQty}g to existing "${res.mergedInto}"`
@@ -172,9 +168,6 @@ export default function AddItemForm({
       setCat(FALLBACK_CATEGORY);
       setScanSuggestion(null);
       setUserPickedCat(false);
-      // Items are shared by default; leaving an owner selected would quietly
-      // mark the next thing added as somebody's personal food.
-      setOwner("");
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -302,14 +295,6 @@ export default function AddItemForm({
           />
         </div>
       </div>
-      <PersonPicker
-        id="owner"
-        label="Belongs to"
-        value={owner}
-        onChange={setOwner}
-        emptyLabel="Shared"
-        emptyIsChoice
-      />
       {embedded ? (
         <div className="fresh-form-submit">{submitButton}</div>
       ) : (

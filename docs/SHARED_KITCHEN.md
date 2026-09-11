@@ -50,18 +50,18 @@ Invariants, enforced server-side in `lib/allocations.ts`:
 `{ members: string[] }`. Empty or missing means "everyone", so the app
 degrades to the old five-way model.
 
-### grocery_items.pool `TEXT NOT NULL DEFAULT 'house'`
+### grocery_items.pool `TEXT NOT NULL DEFAULT 'house'` and items.owner `TEXT NULL`
 
-`"house" | "meals" | "personal"`. Recipe pushes are `meals`. The merge on
-add is scoped to the pool, and for `personal` also to the requester, so
-someone's own chicken never merges with the dinner chicken. Moving a done
-row to inventory carries `personal` across as the item owner.
+Both columns exist but are **unused**. Grocery and inventory went back to
+the original model: one shared list and one shared shelf, grouped and
+sorted by item category, with no per-pool or per-person tagging. Nothing in
+the UI sets either field, so every grocery row is `house` and every item's
+owner is empty. Merging ignores both — a grocery request merges into any
+open row with the same normalized name, and an inventory add merges into
+any row with the same normalized name. The columns stay because dropping
+them is not additive; the API still accepts the fields.
 
-### items.owner `TEXT NULL`
-
-Empty means shared. An owned item does not count as "already in inventory"
-for a meals/house grocery request; it counts only for a `personal` request
-by the same person.
+Per-person accounting lives entirely in expense allocations (above).
 
 ### recipes: `portions INTEGER NULL`, `servings INTEGER NULL`, `no_meal BOOLEAN NOT NULL DEFAULT FALSE`; favorite_recipes: `servings INTEGER NULL`
 

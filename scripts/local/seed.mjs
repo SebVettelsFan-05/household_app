@@ -153,9 +153,9 @@ async function main() {
     { name: "Jasmine rice", quantity: 4500, category: "Pantry" },
     { name: "Olive oil", quantity: 900, category: "Pantry" },
     { name: "Frozen peas", quantity: 750, category: "Frozen" },
-    { name: "Greek yogurt", quantity: 500, category: "Dairy", expiry: ymd(addDays(now, 1)), owner: "Daniel" },
-    { name: "Chicken breast", quantity: 800, category: "Meat", expiry: ymd(addDays(now, 3)), owner: "Ibrahim" },
-    { name: "Oat milk", quantity: 1000, category: "Beverages", expiry: ymd(addDays(now, 9)), owner: "Eli" },
+    { name: "Greek yogurt", quantity: 500, category: "Dairy", expiry: ymd(addDays(now, 1)) },
+    { name: "Chicken breast", quantity: 800, category: "Meat", expiry: ymd(addDays(now, 3)) },
+    { name: "Oat milk", quantity: 1000, category: "Beverages", expiry: ymd(addDays(now, 9)) },
     { name: "Dish soap", quantity: 700, category: "Other" },
     { name: "Sourdough", quantity: 600, category: "Bakery", expiry: ymd(addDays(now, 2)) },
   ];
@@ -163,16 +163,16 @@ async function main() {
 
   // Grocery --------------------------------------------------------------
   const grocery = [
-    { name: "Chicken thighs", quantity: 600, category: "Meat", addedBy: "Arthur", pool: "meals", store: "Costco" },
-    { name: "Panko", quantity: 120, category: "Pantry", addedBy: "Arthur", pool: "meals", store: "T&T" },
-    { name: "Pork shoulder", quantity: 500, category: "Meat", addedBy: "Minh", pool: "meals", store: "T&T" },
-    { name: "Rice vermicelli", quantity: 300, category: "Pantry", addedBy: "Minh", pool: "meals", store: "T&T" },
-    { name: "Avocado", quantity: 300, category: "Fruits", addedBy: "Eli", pool: "meals", store: "No Frills" },
-    { name: "Toilet paper", quantity: 2400, category: "Other", addedBy: "Daniel", pool: "house", store: "Costco" },
-    { name: "Dishwasher tabs", quantity: 800, category: "Other", addedBy: "Arthur", pool: "house", store: "Costco" },
-    { name: "Paper towels", quantity: 1200, category: "Other", addedBy: "Ibrahim", pool: "house", store: "Costco" },
-    { name: "Chicken breast", quantity: 1000, category: "Meat", addedBy: "Ibrahim", pool: "personal", store: "Costco" },
-    { name: "Protein bars", quantity: 600, category: "Snacks", addedBy: "Daniel", pool: "personal" },
+    { name: "Chicken thighs", quantity: 600, category: "Meat", addedBy: "Arthur", store: "Costco" },
+    { name: "Panko", quantity: 120, category: "Pantry", addedBy: "Arthur", store: "T&T" },
+    { name: "Pork shoulder", quantity: 500, category: "Meat", addedBy: "Minh", store: "T&T" },
+    { name: "Rice vermicelli", quantity: 300, category: "Pantry", addedBy: "Minh", store: "T&T" },
+    { name: "Avocado", quantity: 300, category: "Fruits", addedBy: "Eli", store: "No Frills" },
+    { name: "Toilet paper", quantity: 2400, category: "Other", addedBy: "Daniel", store: "Costco" },
+    { name: "Dishwasher tabs", quantity: 800, category: "Other", addedBy: "Arthur", store: "Costco" },
+    { name: "Paper towels", quantity: 1200, category: "Other", addedBy: "Ibrahim", store: "Costco" },
+    { name: "Chicken breast", quantity: 1000, category: "Meat", addedBy: "Ibrahim", store: "Costco" },
+    { name: "Protein bars", quantity: 600, category: "Snacks", addedBy: "Daniel" },
   ];
   for (const g of grocery) await call("POST", "/api/grocery", { ...g, categoryReviewed: true });
 

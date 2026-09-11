@@ -35,7 +35,12 @@ const RECEIPT_PATH = path.join(OUT, "receipt.png");
 
 const RECIPE_NAME = "Fresh Smoke Laksa";
 const ITEM_NAME = "Freshsmokemilk";
-const GROCERY_NAMES = ["Freshsmokechicken", "Freshsmokesoap"];
+// [0] and [1] are seeded through the API; [2] is typed into the add sheet.
+const GROCERY_NAMES = [
+  "Freshsmokechicken",
+  "Freshsmokesoap",
+  "Freshsmokerice",
+];
 
 let page: Page;
 let browserRef: Browser;
@@ -132,8 +137,8 @@ async function seedFixtures(api: APIRequestContext) {
       name: GROCERY_NAMES[0],
       quantity: 500,
       category: "Meat",
+      categoryReviewed: true,
       addedBy: "Arthur",
-      pool: "meals",
     },
   });
   await api.post("/api/grocery", {
@@ -141,8 +146,8 @@ async function seedFixtures(api: APIRequestContext) {
       name: GROCERY_NAMES[1],
       quantity: 300,
       category: "Other",
+      categoryReviewed: true,
       addedBy: "Daniel",
-      pool: "house",
     },
   });
 
@@ -164,7 +169,6 @@ async function seedFixtures(api: APIRequestContext) {
       quantity: 750,
       expiry: addDaysYmd(TODAY, 1),
       category: "Dairy",
-      owner: "Minh",
     },
   });
 }
@@ -268,7 +272,12 @@ test("a device with no stored choice lands on the fresh shell", async () => {
 });
 
 test("the look switches to classic and back, and sticks", async () => {
-  await page.locator(".fresh-rail button", { hasText: "Classic look" }).click();
+  // The only way out of the fresh shell is the settings sheet.
+  await page.getByRole("button", { name: "Household settings" }).first().click();
+  await page
+    .locator(".fresh-sheet")
+    .getByRole("button", { name: "Classic", exact: true })
+    .click();
   await expect(page.locator(".wrap")).toBeVisible();
   await expect(page.locator(".tab-bar")).toBeVisible();
   expect(
@@ -311,40 +320,29 @@ test("home reads tonight's dinner, the money block and the open list", async () 
     "Household total"
   );
 
-  // Other rows may already be on the list, so check the counters against what
+  // Other rows may already be on the list, so check the count against what
   // the API actually holds rather than against the two rows seeded here.
   const grocery = await (await page.request.get("/api/grocery")).json();
-  const openByPool = new Map<string, number>([
-    ["meals", 0],
-    ["house", 0],
-    ["personal", 0],
-  ]);
-  for (const g of grocery.grocery ?? []) {
-    if (g.done) continue;
-    const pool = g.pool ?? "house";
-    openByPool.set(pool, (openByPool.get(pool) ?? 0) + 1);
-  }
-  for (const [pool, label] of [
-    ["meals", "Meals"],
-    ["house", "House"],
-    ["personal", "Personal"],
-  ] as const) {
-    const counter = page.locator(`.fresh-counter[data-pool="${pool}"]`);
-    await expect(counter.locator(".fresh-counter-num")).toHaveText(
-      String(openByPool.get(pool) ?? 0)
-    );
-    await expect(counter).toContainText(label);
-  }
-  expect(openByPool.get("meals")).toBeGreaterThan(0);
-  expect(openByPool.get("house")).toBeGreaterThan(0);
+  const openCount = (grocery.grocery ?? []).filter(
+    (g: { done: boolean }) => !g.done
+  ).length;
+  expect(openCount).toBeGreaterThan(0);
+  const toBuy = page.locator(".fresh-counter");
+  await expect(toBuy).toHaveCount(1);
+  await expect(toBuy.locator(".fresh-counter-num")).toHaveText(
+    String(openCount)
+  );
+  await expect(toBuy).toContainText("Still to buy");
+  // Up to four of the names, so the card says what is actually missing.
+  await expect(toBuy.locator(".fresh-counter-names")).toBeVisible();
 
   const useSoon = page.locator(".fresh-card", { hasText: "Use soon" });
   await expect(useSoon).toContainText(ITEM_NAME);
   await expect(useSoon).toContainText("Expires tomorrow");
-  // Owned items carry their owner's disc, not a bare grey pill.
+  // No owner disc: inventory is shared household food again.
   await expect(
     useSoon.locator(".fresh-row", { hasText: ITEM_NAME }).locator(".fresh-avatar")
-  ).toBeVisible();
+  ).toHaveCount(0);
 });
 
 test("an expense added through the fresh sheet settles Daniel at $6.00", async () => {
@@ -428,6 +426,10 @@ test("the month segment renders the fresh month view", async () => {
   await expect(page.locator(".fresh-month")).toBeVisible();
   // No classic chrome leaks into it.
   await expect(page.locator(".monthly-card")).toHaveCount(0);
+  // Personal receipt lines are gone from the model's copy.
+  await expect(page.locator(".fresh-month")).not.toContainText(
+    "Personal items"
+  );
   await expect(
     page.locator(".fresh-month .fresh-settle-row", { hasText: "Daniel" })
   ).toContainText("Send $6.00");
@@ -524,6 +526,9 @@ test("the fresh month and the classic breakdown settle to the same numbers", asy
   await page.getByRole("button", { name: "Monthly", exact: true }).click();
   await page.locator(".monthly-card").waitFor();
   await page.locator(".split-card").waitFor();
+  await expect(page.locator(".monthly-card")).not.toContainText(
+    "Personal items"
+  );
   const classic = await classicSettlement(page);
   expect(fresh).toEqual(classic);
 
@@ -584,15 +589,30 @@ test("the rail sits in the same place on every section", async () => {
   await gotoTab(page, "Expenses");
 });
 
-test("a grocery row can be added to the meals pool from the fresh shell", async () => {
+test("the fresh list groups its rows under category headings", async () => {
   await gotoTab(page, "Grocery");
+  // The seeded rows sit under the category they were filed in.
+  const meat = page
+    .locator(".fresh-section")
+    .filter({ has: page.locator(".fresh-h2", { hasText: "Meat" }) });
+  await expect(
+    meat.locator(".fresh-row", { hasText: GROCERY_NAMES[0] })
+  ).toHaveCount(1);
+  // Each heading carries the category's colour dot.
+  await expect(meat.locator(".fresh-cat-dot")).toBeVisible();
+  // Nothing is tagged by pool any longer.
+  await expect(page.locator(".fresh-pool-tag[data-pool=\"meals\"]")).toHaveCount(0);
+
   await page.getByRole("button", { name: "Add item" }).first().click();
   const sheet = page.locator(".fresh-sheet");
   await expect(sheet).toBeVisible();
 
-  await sheet.locator("#g-name").fill("Freshsmokesoap");
+  await sheet.locator("#g-name").fill(GROCERY_NAMES[2]);
   await sheet.locator("#g-qty").fill("250");
-  await sheet.locator(".pool-chips").getByRole("button", { name: "Meals" }).click();
+  await sheet
+    .locator(".cat-pills")
+    .getByRole("button", { name: "Pantry", exact: true })
+    .click();
   // "Added by" is a row of person discs in the fresh shell, not a <select>.
   await sheet.locator(".fresh-chip-person", { hasText: "Eli" }).click();
   await sheet.getByRole("button", { name: "Add to list" }).click();
@@ -600,11 +620,28 @@ test("a grocery row can be added to the meals pool from the fresh shell", async 
     timeout: 15_000,
   });
 
-  const meals = page.locator(".fresh-section", { hasText: "Meals" }).first();
-  const added = meals.locator(".fresh-row", { hasText: "Freshsmokesoap" });
+  const pantry = page
+    .locator(".fresh-section")
+    .filter({ has: page.locator(".fresh-h2", { hasText: "Pantry" }) });
+  const added = pantry.locator(".fresh-row", { hasText: GROCERY_NAMES[2] });
   await expect(added).toContainText("Eli");
   await expect(added.locator(".fresh-avatar")).toHaveText("E");
   await expect(added.locator(".fresh-row-qty")).toHaveText("250g");
+
+  // The chip row filters by category, and hides the other groups.
+  await page.locator(".fresh-chip", { hasText: "Pantry" }).first().click();
+  await expect(page.locator(".fresh-section .fresh-h2")).toHaveText(["Pantry"]);
+  await page.locator(".fresh-chip", { hasText: "All" }).first().click();
+});
+
+test("the inventory sorts without losing its category groups", async () => {
+  await gotoTab(page, "Inventory");
+  const groups = page.locator(".fresh-section .fresh-h2");
+  await expect(groups.first()).toBeVisible();
+  for (const label of ["Newest", "Qty", "Expiry", "A\u2013Z"]) {
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await expect(groups.first()).toBeVisible();
+  }
 });
 
 test("the recipes tab tallies the cooks", async () => {
@@ -676,6 +713,14 @@ test("on a phone the FAB clears the last row and inputs do not zoom iOS", async 
   // The bottom nav is the last thing on screen and is a full 68px of target.
   const nav = await p.locator(".fresh-tabbar").boundingBox();
   expect(nav!.height).toBeGreaterThanOrEqual(68);
+
+  // More is settings + destinations only; the look lives in settings now.
+  await p.locator(".fresh-tabbar button", { hasText: "More" }).first().click();
+  await expect(p.locator(".fresh-more")).toBeVisible();
+  await expect(p.locator(".fresh-more")).not.toContainText("Classic look");
+  await expect(
+    p.locator(".fresh-row", { hasText: "Household settings" })
+  ).toContainText("Appearance, look and household preferences");
 
   // 16px inputs, or iOS zooms the page on focus.
   await gotoTab(p, "Expenses");

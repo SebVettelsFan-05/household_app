@@ -3,16 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import ModalFrame from "@/components/ModalFrame";
 import PersonPicker from "@/components/PersonPicker";
-import PoolChips from "@/components/PoolChips";
 import { bulkAddGrocery } from "@/lib/client";
 import { fmtQty } from "@/lib/format";
-import { inventoryItemCounts } from "@/lib/inventoryMatch";
 import { normalizeName } from "@/lib/normalize";
 import {
   FALLBACK_CATEGORY,
   type CategoryDef,
   type GroceryItem,
-  type GroceryPool,
   type Item,
   type RecipeIngredient,
 } from "@/lib/types";
@@ -79,8 +76,6 @@ export default function AddRecipeToGroceryModal({
   );
   const [addedBy, setAddedBy] = useState<string>(defaultAddedBy);
   const [store, setStore] = useState<string>("");
-  // Recipe ingredients are dinner shopping by definition.
-  const [pool, setPool] = useState<GroceryPool>("meals");
   const [busy, setBusy] = useState(false);
 
   // Weights in the recipe are for `servings` people; we are cooking for
@@ -134,12 +129,10 @@ export default function AddRecipeToGroceryModal({
   }, [categories, draftIngredients]);
 
   const fridgeIndex = useMemo(() => {
-    const map = new Map<string, Item[]>();
+    const map = new Map<string, Item>();
     for (const it of fridgeItems) {
       const key = normalizeName(it.name);
-      const list = map.get(key);
-      if (list) list.push(it);
-      else map.set(key, [it]);
+      if (!map.has(key)) map.set(key, it);
     }
     return map;
   }, [fridgeItems]);
@@ -147,12 +140,9 @@ export default function AddRecipeToGroceryModal({
   const matches = useMemo(
     () =>
       draftIngredients.map(
-        (ing) =>
-          (fridgeIndex.get(normalizeName(ing.name)) ?? []).find((it) =>
-            inventoryItemCounts(it, pool, addedBy)
-          ) ?? null
+        (ing) => fridgeIndex.get(normalizeName(ing.name)) ?? null
       ),
-    [draftIngredients, fridgeIndex, pool, addedBy]
+    [draftIngredients, fridgeIndex]
   );
 
   function toggle(i: number) {
@@ -211,7 +201,6 @@ export default function AddRecipeToGroceryModal({
           categoryReviewed: ingredient.categoryReviewed === true,
           store: store || undefined,
           addedBy,
-          pool,
         })),
       });
       const reviewedCount = toAdd.filter(
@@ -353,11 +342,6 @@ export default function AddRecipeToGroceryModal({
             </div>
           );
         })}
-      </div>
-
-      <div className="field">
-        <label>Pool</label>
-        <PoolChips value={pool} onChange={setPool} disabled={busy} />
       </div>
 
       <div className="field-row">

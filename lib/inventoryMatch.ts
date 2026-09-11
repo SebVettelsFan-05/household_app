@@ -1,17 +1,15 @@
-import type { GroceryPool, Item } from "./types";
+import { normalizeName } from "./normalize";
 
 /**
- * Whether an inventory item answers a grocery request for the same name.
- * Shared food (no owner) always counts; somebody's own food only counts for
- * their own personal request, so Eli's chicken never suppresses the "buy
- * chicken" warning for the house or the meal group.
+ * The inventory row that answers a grocery request for `name`, if there is
+ * one. Plain name match — inventory is shared household food, so anything on
+ * the shelf counts against buying more of it.
  */
-export function inventoryItemCounts(
-  item: Pick<Item, "owner">,
-  pool: GroceryPool,
-  requester: string
-): boolean {
-  const owner = (item.owner || "").trim();
-  if (!owner) return true;
-  return pool === "personal" && owner === requester.trim();
+export function findInventoryMatch<T extends { name: string }>(
+  items: T[],
+  name: string
+): T | null {
+  const norm = normalizeName(name);
+  if (!norm) return null;
+  return items.find((i) => normalizeName(i.name) === norm) ?? null;
 }

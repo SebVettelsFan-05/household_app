@@ -45,9 +45,7 @@ import {
   EXPENSE_FALLBACK,
   FALLBACK_CATEGORY,
   MAINSTAY_CATEGORIES,
-  firstAddedBy,
   formatDate,
-  groceryRowsMerge,
   isProtectedCategory,
   mergeAddedBy,
   normalizeName,
@@ -69,7 +67,11 @@ function rowToItem(r: typeof itemsTable.$inferSelect): Item {
   };
 }
 
-/** "" (shared) or one of the household members. Anything else is rejected. */
+/**
+ * "" (shared) or one of the household members. Anything else is rejected.
+ * The UI no longer sets an owner — the column is dormant, see
+ * docs/SHARED_KITCHEN.md — but the API still accepts one.
+ */
 function validateOwner(input: string | undefined): string {
   const owner = String(input ?? "").trim();
   if (!owner) return "";
@@ -77,6 +79,7 @@ function validateOwner(input: string | undefined): string {
   return owner;
 }
 
+/** Dormant like `owner`: stored, never used to scope anything. */
 function validatePool(input: string | undefined): GroceryPool {
   const pool = String(input ?? "").trim() || "house";
   if (!(GROCERY_POOLS as readonly string[]).includes(pool)) {
@@ -288,13 +291,10 @@ export async function addItemRepo(
   const expiry = input.expiry ? input.expiry : null;
   const owner = validateOwner(input.owner);
 
-  // Merging is scoped by owner: somebody's personal yoghurt must never fold
-  // into the shared one (or into another person's).
+  // One shelf, one row per thing: the merge is a plain normalized-name match.
   const all = await db.select().from(itemsTable);
   const normNew = normalizeName(trimmedName);
-  const existing = all.find(
-    (it) => normalizeName(it.name) === normNew && (it.owner || "") === owner
-  );
+  const existing = all.find((it) => normalizeName(it.name) === normNew);
 
   if (existing) {
     let mergedExpiry: string | null = existing.expiry;
@@ -434,19 +434,13 @@ export async function addGroceryRepo(
   const pool = validatePool(input.pool);
   const canonicalName = titleCaseName(trimmedName);
 
-  // Case-insensitive merge against open (not-done) rows, scoped to the pool
-  // (and, for `personal`, to the requester). Done rows are left alone —
-  // those represent items already bought, so the user is asking for more of
-  // the same and we open a fresh line for it.
+  // Case-insensitive merge against open (not-done) rows. Done rows are left
+  // alone — those represent items already bought, so the user is asking for
+  // more of the same and we open a fresh line for it.
   const all = await db.select().from(groceryTable);
   const normNew = normalizeName(canonicalName);
   const existing = all.find(
-    (g) =>
-      !g.done &&
-      groceryRowsMerge(
-        { norm: normNew, pool, addedBy },
-        { norm: normalizeName(g.name), pool: g.pool, addedBy: g.addedBy }
-      )
+    (g) => !g.done && normalizeName(g.name) === normNew
   );
 
   if (existing) {
@@ -585,28 +579,21 @@ export async function moveDoneGroceryToItemsRepo(): Promise<{
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const inventoryRows = await db.select().from(itemsTable);
 
-  // Cache existing inventory by normalized name *and owner* so consecutive
-  // moves merge into the same row instead of inserting duplicates, while a
-  // personal row still never lands on the shared item (or someone else's).
-  const key = (norm: string, owner: string) => `${owner}|${norm}`;
+  // Cache existing inventory by normalized name so consecutive moves merge
+  // into the same row instead of inserting duplicates.
   const byNorm = new Map<string, typeof itemsTable.$inferSelect>();
-  for (const r of inventoryRows) {
-    byNorm.set(key(normalizeName(r.name), r.owner || ""), r);
-  }
+  for (const r of inventoryRows) byNorm.set(normalizeName(r.name), r);
 
   for (const g of done) {
     const name = String(g.name ?? "").trim();
     if (!name) continue;
-    // A personal request becomes that person's own item. `addedBy` can be a
-    // merged list; the first requester owns it.
-    const owner = g.pool === "personal" ? firstAddedBy(g.addedBy) : "";
     const category = pickCategory(g.category, validCats);
     const groceryCategoryValid = validCats.some(
       (valid) => valid.toLowerCase() === g.category.toLowerCase()
     );
     const categoryReviewed = g.categoryReviewed && groceryCategoryValid;
     const norm = normalizeName(name);
-    const existing = byNorm.get(key(norm, owner));
+    const existing = byNorm.get(norm);
     if (existing) {
       const nextQty = existing.quantity + (g.quantity || 0);
       const replaceCategory = shouldReplaceStoredCategory(
@@ -634,13 +621,12 @@ export async function moveDoneGroceryToItemsRepo(): Promise<{
         .values({
           name,
           quantity: g.quantity || 0,
-          // Inventory items don't currently carry store/addedBy.
+          // Inventory items don't currently carry store/addedBy/owner.
           category,
           categoryReviewed,
-          owner: owner || null,
         })
         .returning();
-      if (inserted) byNorm.set(key(norm, owner), inserted);
+      if (inserted) byNorm.set(norm, inserted);
     }
   }
 
@@ -709,19 +695,14 @@ export async function bulkAddGroceryRepo(
   // Coalesce repeated ingredient names before touching the database. Besides
   // issuing fewer writes, this lets us validate the final summed quantity up
   // front and keeps duplicate category review semantics deterministic.
-  // Scoped the same way the DB merge is: pool, plus requester on `personal`.
-  const coalesceKey = (row: (typeof preparedRows)[number]) =>
-    row.pool === "personal"
-      ? `personal|${row.addedBy.toLowerCase()}|${row.norm}`
-      : `${row.pool}|${row.norm}`;
   const preparedByNorm = new Map<
     string,
     (typeof preparedRows)[number]
   >();
   for (const row of preparedRows) {
-    const existing = preparedByNorm.get(coalesceKey(row));
+    const existing = preparedByNorm.get(row.norm);
     if (!existing) {
-      preparedByNorm.set(coalesceKey(row), { ...row });
+      preparedByNorm.set(row.norm, { ...row });
       continue;
     }
     existing.quantity = requirePositiveIntegerQuantity(
@@ -738,9 +719,7 @@ export async function bulkAddGroceryRepo(
   const prepared = [...preparedByNorm.values()];
 
   // Snapshot the current rows once so we can match against existing open
-  // entries (same merge rule as addGroceryRepo). Matching is a scan rather
-  // than a map lookup because the `personal` rule is a membership test on
-  // the row's requester list, not key equality.
+  // entries by normalized name (same merge rule as addGroceryRepo).
   const existingRows = await db.select().from(groceryTable);
   const openRows = existingRows
     .filter((r) => !r.done)
@@ -752,19 +731,15 @@ export async function bulkAddGroceryRepo(
       category: r.category,
       categoryReviewed: r.categoryReviewed,
       addedBy: r.addedBy,
-      pool: r.pool,
       changed: false,
     }));
 
   // Fold everything into the in-memory snapshot first, so every combined
   // quantity is validated before the first write and a late integer
-  // overflow cannot partially commit earlier recipe ingredients. Two
-  // prepared rows can legitimately land on the same open row (two people's
-  // personal requests on a row they both already share), so accumulating
-  // rather than emitting per-input updates is what keeps the sum right.
+  // overflow cannot partially commit earlier recipe ingredients.
   const toInsert: Array<typeof groceryTable.$inferInsert> = [];
   for (const input of prepared) {
-    const target = openRows.find((o) => groceryRowsMerge(input, o));
+    const target = openRows.find((o) => o.norm === input.norm);
     if (!target) {
       toInsert.push({
         name: input.name,

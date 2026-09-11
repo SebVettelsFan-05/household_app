@@ -278,7 +278,6 @@ body:has(.fresh) {
   color: var(--on-section);
 }
 .fresh .alloc-chip,
-.fresh .pool-chip,
 .fresh .filter-pill,
 .fresh .cat-pill,
 .fresh .scan-trigger,
@@ -286,13 +285,11 @@ body:has(.fresh) {
   border-radius: 999px;
   border-width: 1.5px;
 }
-.fresh .alloc-chip,
-.fresh .pool-chip {
+.fresh .alloc-chip {
   min-height: 40px;
   font-size: 14px;
 }
 .fresh .alloc-chip.active,
-.fresh .pool-chip.active,
 .fresh .filter-pill.active,
 .fresh .cat-pill.active {
   background: var(--ink);
@@ -859,16 +856,6 @@ body:has(.fresh) {
   border-color: var(--ink);
   color: var(--paper);
 }
-.fresh-chip[data-pool="meals"].active {
-  background: var(--c-recipes);
-  border-color: var(--c-recipes);
-  color: #fff;
-}
-.fresh-chip[data-pool="personal"].active {
-  background: var(--ink-soft);
-  border-color: var(--ink-soft);
-  color: var(--paper);
-}
 .fresh-chip-person {
   padding-left: 6px;
 }
@@ -899,6 +886,11 @@ body:has(.fresh) {
   background: var(--section);
   color: var(--on-section);
   font-weight: 700;
+}
+.fresh-seg-sm .fresh-seg-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 14px;
 }
 
 /* Rows: hairline separated, 64px tall, whole row tappable. */
@@ -1041,6 +1033,15 @@ button.fresh-row-main {
   color: var(--ink-soft);
 }
 
+.fresh-cat-dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  margin-right: 9px;
+  vertical-align: middle;
+}
+
 .fresh-pool-tag {
   display: inline-block;
   border-radius: 999px;
@@ -1049,12 +1050,6 @@ button.fresh-row-main {
   font-weight: 700;
   color: #fff;
   background: var(--ink);
-}
-.fresh-pool-tag[data-pool="meals"] {
-  background: var(--c-recipes);
-}
-.fresh-pool-tag[data-pool="personal"] {
-  background: var(--ink-soft);
 }
 .fresh-pool-tag[data-pool="soon"] {
   background: var(--warn);
@@ -1562,11 +1557,6 @@ button.fresh-row-main {
   font-size: 18px;
 }
 
-.fresh-counters {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
 .fresh-counter {
   display: flex;
   flex-direction: column;
@@ -1581,12 +1571,6 @@ button.fresh-row-main {
   color: var(--ink);
   cursor: pointer;
 }
-.fresh-counter[data-pool="meals"] {
-  border-left-color: var(--c-recipes);
-}
-.fresh-counter[data-pool="personal"] {
-  border-left-color: var(--ink-soft);
-}
 .fresh-counter-num {
   font-size: 30px;
   line-height: 1;
@@ -1599,6 +1583,19 @@ button.fresh-row-main {
   font-weight: 600;
   color: var(--ink-soft);
 }
+.fresh-counter-wide {
+  text-align: left;
+  padding: 16px 16px;
+}
+.fresh-counter-names {
+  font-size: 14px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
 
 /* ---------------------------------------------------------------- *
  * Recipes
@@ -2136,9 +2133,6 @@ button.fresh-row-main {
   flex-direction: column;
   gap: 2px;
 }
-.fresh-month-total .fresh-field-hint {
-  margin-top: 6px;
-}
 
 /* ---------------------------------------------------------------- *
  * More
@@ -2174,9 +2168,6 @@ button.fresh-row-main {
   .fresh-weeks {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 24px;
-  }
-  .fresh-counters {
-    gap: 16px;
   }
 }
 

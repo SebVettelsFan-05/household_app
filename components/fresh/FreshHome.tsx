@@ -5,11 +5,10 @@ import { useHouseholdToday } from "@/lib/useHouseholdToday";
 import type { FreshTab, RecipeSlot } from "@/components/fresh/FreshApp";
 import { Avatar } from "@/components/fresh/people";
 import { IconChevronRight } from "@/components/fresh/icons";
-import { POOL_LABELS } from "@/components/PoolChips";
 import { DAY_LONG, shortDayLabel, thisWeekStart, todayCookingDay } from "@/lib/dates";
 import { expiryStatus } from "@/lib/format";
 import { fmtMoney } from "@/lib/money";
-import { GROCERY_POOLS, type GroceryPool, type Item } from "@/lib/types";
+import type { Item } from "@/lib/types";
 import { useMonthlySettlement } from "@/lib/useMonthlySettlement";
 import type { HouseholdData } from "@/lib/useHouseholdData";
 
@@ -21,7 +20,6 @@ type Props = {
   onPlanDinner: (slot: RecipeSlot) => void;
 };
 
-const POOL_ORDER: GroceryPool[] = ["meals", "house", "personal"];
 const EXPIRING_WINDOW_DAYS = 3;
 
 /** Days until `expiry`, or null when the item carries no date. */
@@ -56,15 +54,10 @@ export default function FreshHome({
     [data.recipes, weekStart, dayIndex]
   );
 
-  const poolCounts = useMemo(() => {
-    const counts = new Map<string, number>(GROCERY_POOLS.map((p) => [p, 0]));
-    for (const g of data.grocery) {
-      if (g.done) continue;
-      const pool = g.pool ?? "house";
-      counts.set(pool, (counts.get(pool) ?? 0) + 1);
-    }
-    return counts;
-  }, [data.grocery]);
+  const toBuy = useMemo(
+    () => data.grocery.filter((g) => !g.done),
+    [data.grocery]
+  );
 
   const expiring = useMemo(() => {
     const rows: { item: Item; days: number }[] = [];
@@ -223,23 +216,24 @@ export default function FreshHome({
         )}
       </section>
 
-      {/* ---- Grocery counters ---- */}
-      <div className="fresh-counters">
-        {POOL_ORDER.map((pool) => (
-          <button
-            key={pool}
-            type="button"
-            className="fresh-counter"
-            data-pool={pool}
-            onClick={() => onNavigate("grocery")}
-          >
-            <span className="fresh-counter-num">
-              {poolCounts.get(pool) ?? 0}
-            </span>
-            <span className="fresh-counter-label">{POOL_LABELS[pool]}</span>
-          </button>
-        ))}
-      </div>
+      {/* ---- Still to buy ---- */}
+      <button
+        type="button"
+        className="fresh-counter fresh-counter-wide"
+        onClick={() => onNavigate("grocery")}
+      >
+        <span className="fresh-counter-num">{toBuy.length}</span>
+        <span className="fresh-counter-label">Still to buy</span>
+        {toBuy.length > 0 ? (
+          <span className="fresh-counter-names">
+            {toBuy
+              .slice(0, 4)
+              .map((g) => g.name)
+              .join(", ")}
+            {toBuy.length > 4 ? "…" : ""}
+          </span>
+        ) : null}
+      </button>
 
       {/* ---- Use soon ---- */}
       <section className="fresh-card">
@@ -274,16 +268,7 @@ export default function FreshHome({
                   <span className="fresh-row-main">
                     <span className="fresh-row-title">{item.name}</span>
                     <span className="fresh-row-meta">
-                      {item.owner ? (
-                        <span className="fresh-person">
-                          <Avatar name={item.owner} size={20} />
-                          <span className="fresh-person-name">
-                            {item.owner}
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="fresh-row-note">Shared</span>
-                      )}
+                      <span className="fresh-row-note">{item.category}</span>
                     </span>
                   </span>
                   <span

@@ -4,13 +4,12 @@ import { KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { IconCamera, IconMic } from "@/components/fresh/icons";
 import DictateItemsModal from "@/components/DictateItemsModal";
 import PersonPicker from "@/components/PersonPicker";
-import PoolChips from "@/components/PoolChips";
 import ScanLabelModal, {
   type ScanResult,
 } from "@/components/ScanLabelModal";
 import { addGrocery } from "@/lib/client";
 import { fmtQty } from "@/lib/format";
-import { inventoryItemCounts } from "@/lib/inventoryMatch";
+import { findInventoryMatch } from "@/lib/inventoryMatch";
 import {
   guessCategoryOrFallback,
   storedCategoryWeight,
@@ -21,7 +20,6 @@ import {
   type Category,
   type CategoryDef,
   type GroceryItem,
-  type GroceryPool,
   type Item,
 } from "@/lib/types";
 import CategoryPills from "./CategoryPills";
@@ -54,7 +52,6 @@ export default function AddGroceryForm({
   const [cat, setCat] = useState<Category>(FALLBACK_CATEGORY);
   const [store, setStore] = useState("");
   const [addedBy, setAddedBy] = useState<string>("");
-  const [pool, setPool] = useState<GroceryPool>("house");
   const [busy, setBusy] = useState(false);
   // Once the user taps a category pill, we stop overriding their choice as
   // they keep typing. Reset on submit so the next entry auto-suggests again.
@@ -146,19 +143,10 @@ export default function AddGroceryForm({
   ]);
 
   // Soft warning: if the typed name matches something already in the fridge.
-  // Somebody's own food only answers their own personal request.
-  const fridgeMatch = useMemo(() => {
-    const trimmed = name.trim();
-    if (!trimmed) return null;
-    const norm = normalizeName(trimmed);
-    return (
-      fridgeItems.find(
-        (i) =>
-          normalizeName(i.name) === norm &&
-          inventoryItemCounts(i, pool, addedBy)
-      ) ?? null
-    );
-  }, [name, fridgeItems, pool, addedBy]);
+  const fridgeMatch = useMemo(
+    () => findInventoryMatch(fridgeItems, name),
+    [name, fridgeItems]
+  );
 
   async function submit() {
     const trimmed = name.trim();
@@ -198,7 +186,6 @@ export default function AddGroceryForm({
         categoryReviewed: userPickedCat,
         store: store.trim() || undefined,
         addedBy,
-        pool,
       });
       onResult(res.grocery, "Added to list");
       setName("");
@@ -207,7 +194,7 @@ export default function AddGroceryForm({
       setCat(FALLBACK_CATEGORY);
       setScanSuggestion(null);
       // Reset auto-suggest control so the next entry's name drives the
-      // category again. Keep addedBy and the pool for repeated entries.
+      // category again. Keep only addedBy for fast repeated entries.
       setUserPickedCat(false);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -350,11 +337,6 @@ export default function AddGroceryForm({
             onKeyDown={onEnter}
           />
         </div>
-      </div>
-
-      <div className="field">
-        <label>Pool</label>
-        <PoolChips value={pool} onChange={setPool} disabled={busy} />
       </div>
 
       <PersonPicker

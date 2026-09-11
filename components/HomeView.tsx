@@ -21,7 +21,7 @@ const SECTIONS: {
     id: "grocery",
     title: "Grocery",
     blurb:
-      "One list, three pools: house supplies, meal-group groceries, and personal items. Adding something already in inventory will warn you so we don't double-buy.",
+      "Shared shopping list. Adding something already in inventory will warn you so we don't double-buy.",
   },
   {
     id: "recipes",

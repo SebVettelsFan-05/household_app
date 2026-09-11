@@ -54,11 +54,6 @@ export default function FridgeView({
   // the "All" pill empties the set.
   const [filterCats, setFilterCats] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
-  // Per-person filters would be a long row with no notion of "me", so this
-  // is just shared food vs food that belongs to somebody.
-  const [ownerFilter, setOwnerFilter] = useState<"all" | "shared" | "personal">(
-    "all"
-  );
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Prune the selection when categories disappear (deleted from manage),
@@ -97,16 +92,10 @@ export default function FridgeView({
       filterCats.size === 0
         ? items
         : items.filter((i) => filterCats.has(i.category));
-    const byOwner =
-      ownerFilter === "all"
-        ? byCat
-        : byCat.filter((i) =>
-            ownerFilter === "shared" ? !i.owner : Boolean(i.owner)
-          );
     const term = search.trim().toLowerCase();
-    if (!term) return byOwner;
-    return byOwner.filter((i) => i.name.toLowerCase().includes(term));
-  }, [items, filterCats, search, ownerFilter]);
+    if (!term) return byCat;
+    return byCat.filter((i) => i.name.toLowerCase().includes(term));
+  }, [items, filterCats, search]);
 
   const sorted = useMemo(
     () => sortItems(filtered, sortMode),
@@ -180,20 +169,6 @@ export default function FridgeView({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-      </div>
-
-      <div className="filter-row">
-        {(["all", "shared", "personal"] as const).map((f) => (
-          <button
-            key={f}
-            type="button"
-            className={`filter-pill${ownerFilter === f ? " active" : ""}`}
-            onClick={() => setOwnerFilter(f)}
-            aria-pressed={ownerFilter === f}
-          >
-            {f === "all" ? "All" : f === "shared" ? "Shared" : "Personal"}
-          </button>
-        ))}
       </div>
 
       <FilterRow

@@ -35,7 +35,6 @@ import type {
   UpdateExpenseCategoryResponse,
   ListSharedAccountsResponse,
   AllocationKind,
-  GroceryPool,
   MealGroup,
 } from "./types";
 import { isBuyer, MEAL_GROUP_KEY } from "./types";
@@ -76,8 +75,6 @@ export type AddInput = {
   expiry?: string;
   category?: string;
   categoryReviewed?: boolean;
-  // Member name for personal food; "" or omitted means shared.
-  owner?: string;
 };
 
 export async function addItem(input: AddInput) {
@@ -154,8 +151,6 @@ export type AddGroceryInput = {
   categoryReviewed?: boolean;
   store?: string;
   addedBy: string;
-  // Defaults to "house" server-side when omitted.
-  pool?: GroceryPool;
 };
 
 export async function addGrocery(input: AddGroceryInput) {
@@ -175,7 +170,6 @@ export type UpdateGroceryInput = {
   categoryReviewed?: boolean;
   store?: string;
   addedBy?: string;
-  pool?: GroceryPool;
   done?: boolean;
 };
 
@@ -234,7 +228,6 @@ export type BulkGroceryInput = {
     categoryReviewed?: boolean;
     store?: string;
     addedBy: string;
-    pool?: GroceryPool;
   }>;
 };
 

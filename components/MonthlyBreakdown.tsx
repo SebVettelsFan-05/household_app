@@ -392,10 +392,6 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
         <span>Total for {ymLabel(month)}</span>
         <strong>{fmtMoney(grandTotal)}</strong>
       </div>
-      <p className="monthly-total-note">
-        Personal items on receipts are excluded
-      </p>
-
       {grandTotal > 0 ? (
         <SplitCard
           title={`Settlement for ${ymLabel(month)}`}

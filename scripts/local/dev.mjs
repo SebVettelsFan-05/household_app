@@ -25,8 +25,11 @@ export const LOCAL_ENV = {
 
 const CONTAINER = "household-dev-pg";
 
+// No shell: with `shell: true` on Windows, spawnSync joins args unquoted, so
+// any argument containing spaces (the psql -c command) gets split apart.
 function sh(cmd, args, opts = {}) {
-  return spawnSync(cmd, args, { encoding: "utf8", shell: process.platform === "win32", ...opts });
+  const exe = process.platform === "win32" && !cmd.endsWith(".exe") ? `${cmd}.exe` : cmd;
+  return spawnSync(exe, args, { encoding: "utf8", ...opts });
 }
 
 export function ensurePostgres() {

@@ -15,7 +15,8 @@ export type Item = {
   added: string;
   category: Category;
   categoryReviewed: boolean;
-  // Member name when the item is somebody's personal food; "" when shared.
+  // Dormant: inventory is shared household food and the UI never sets this.
+  // The column and the API field are kept, see docs/SHARED_KITCHEN.md.
   owner: string;
 };
 
@@ -27,9 +28,8 @@ export function isBuyer(name: string): name is Buyer {
 }
 
 /**
- * Which pool a grocery request belongs to. Drives merge scoping on add,
- * the default expense split when the trip is logged, and the owner an item
- * gets when it moves into inventory.
+ * Dormant: every grocery row is household shopping and the UI never sets
+ * this. Stored rows default to "house"; see docs/SHARED_KITCHEN.md.
  */
 export const GROCERY_POOLS = ["house", "meals", "personal"] as const;
 export type GroceryPool = (typeof GROCERY_POOLS)[number];

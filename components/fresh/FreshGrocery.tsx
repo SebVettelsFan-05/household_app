@@ -6,12 +6,12 @@ import EditGroceryModal from "@/components/EditGroceryModal";
 import FreshSheet from "@/components/fresh/FreshSheet";
 import { Avatar } from "@/components/fresh/people";
 import { IconCheck, IconPlus } from "@/components/fresh/icons";
-import { POOL_LABELS } from "@/components/PoolChips";
 import { moveDoneGroceryToInventory, updateGrocery } from "@/lib/client";
+import { buildColorLookup } from "@/lib/categoryColors";
 import { fmtQty } from "@/lib/format";
-import { inventoryItemCounts } from "@/lib/inventoryMatch";
-import { normalizeName, sortCategories } from "@/lib/normalize";
-import { type GroceryItem, type GroceryPool } from "@/lib/types";
+import { findInventoryMatch } from "@/lib/inventoryMatch";
+import { sortCategories } from "@/lib/normalize";
+import { type GroceryItem } from "@/lib/types";
 import type { HouseholdData } from "@/lib/useHouseholdData";
 
 type Props = {
@@ -19,11 +19,24 @@ type Props = {
   onManageCategories: () => void;
 };
 
-// Dinner first: the meal group's list is the one that has a deadline.
-const POOL_ORDER: GroceryPool[] = ["meals", "house", "personal"];
+/**
+ * Classic's default order inside a category: by store, then newest first.
+ * Rows with no store sink below the ones that name where to buy them.
+ */
+function byStoreThenNewest(a: GroceryItem, b: GroceryItem): number {
+  const sa = (a.store || "").trim();
+  const sb = (b.store || "").trim();
+  if (sa && sb) {
+    const cmp = sa.localeCompare(sb);
+    if (cmp !== 0) return cmp;
+  } else if (sa || sb) {
+    return sa ? -1 : 1;
+  }
+  return (b.added || "").localeCompare(a.added || "");
+}
 
 export default function FreshGrocery({ data, onManageCategories }: Props) {
-  const [poolFilter, setPoolFilter] = useState<GroceryPool | "all">("all");
+  const [category, setCategory] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -36,41 +49,51 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
     () => sortCategories(data.categories).map((c) => c.name),
     [data.categories]
   );
+  const colorFor = useMemo(
+    () => buildColorLookup(data.categories),
+    [data.categories]
+  );
 
-  const open = data.grocery.filter((g) => !g.done);
-  const done = data.grocery.filter((g) => g.done);
+  const open = useMemo(
+    () => data.grocery.filter((g) => !g.done),
+    [data.grocery]
+  );
+  const done = useMemo(
+    () => data.grocery.filter((g) => g.done),
+    [data.grocery]
+  );
+
+  // Only categories the list actually holds, in the household's order.
+  const categoryChips = useMemo(() => {
+    const present = new Set(open.map((g) => g.category));
+    const known = categoryOrder.filter((name) => present.has(name));
+    const unknown = Array.from(present)
+      .filter((name) => !categoryOrder.includes(name))
+      .sort((a, b) => a.localeCompare(b));
+    return [...known, ...unknown];
+  }, [open, categoryOrder]);
 
   const groups = useMemo(() => {
     const visible =
-      poolFilter === "all"
-        ? open
-        : open.filter((g) => (g.pool ?? "house") === poolFilter);
-    const rank = (name: string) => {
-      const i = categoryOrder.indexOf(name);
-      return i === -1 ? categoryOrder.length : i;
-    };
-    return POOL_ORDER.map((pool) => ({
-      pool,
-      items: visible
-        .filter((g) => (g.pool ?? "house") === pool)
-        .sort(
-          (a, b) =>
-            rank(a.category) - rank(b.category) || a.name.localeCompare(b.name)
-        ),
-    })).filter((g) => g.items.length > 0);
-  }, [open, poolFilter, categoryOrder]);
+      category === "all" ? open : open.filter((g) => g.category === category);
+    const buckets = new Map<string, GroceryItem[]>();
+    for (const name of categoryChips) buckets.set(name, []);
+    for (const g of visible) {
+      const list = buckets.get(g.category);
+      if (list) list.push(g);
+      else buckets.set(g.category, [g]);
+    }
+    return Array.from(buckets.entries())
+      .filter(([, items]) => items.length > 0)
+      .map(([name, items]) => ({ name, items: items.sort(byStoreThenNewest) }));
+  }, [open, category, categoryChips]);
 
   // Somebody is about to buy what the house already has. Shown on the row
   // itself rather than in a side list, so it is read while shopping.
   const conflicts = useMemo(() => {
     const map = new Map<string, number>();
     for (const g of open) {
-      const norm = normalizeName(g.name);
-      const match = data.items.find(
-        (i) =>
-          normalizeName(i.name) === norm &&
-          inventoryItemCounts(i, g.pool ?? "house", g.addedBy)
-      );
+      const match = findInventoryMatch(data.items, g.name);
       if (match) map.set(g.id, match.quantity);
     }
     return map;
@@ -164,25 +187,24 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
 
   return (
     <>
-      <div className="fresh-chips" role="group" aria-label="Pool filter">
+      <div className="fresh-chips" role="group" aria-label="Category filter">
         <button
           type="button"
-          className={`fresh-chip${poolFilter === "all" ? " active" : ""}`}
-          aria-pressed={poolFilter === "all"}
-          onClick={() => setPoolFilter("all")}
+          className={`fresh-chip${category === "all" ? " active" : ""}`}
+          aria-pressed={category === "all"}
+          onClick={() => setCategory("all")}
         >
           All
         </button>
-        {POOL_ORDER.map((p) => (
+        {categoryChips.map((name) => (
           <button
-            key={p}
+            key={name}
             type="button"
-            className={`fresh-chip${poolFilter === p ? " active" : ""}`}
-            data-pool={p}
-            aria-pressed={poolFilter === p}
-            onClick={() => setPoolFilter(p)}
+            className={`fresh-chip${category === name ? " active" : ""}`}
+            aria-pressed={category === name}
+            onClick={() => setCategory(name)}
           >
-            {POOL_LABELS[p]}
+            {name}
           </button>
         ))}
       </div>
@@ -200,16 +222,19 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
       ) : groups.length === 0 ? (
         <div className="fresh-empty">
           <strong>Nothing to buy</strong>
-          Add what the house is out of, and say which pool it belongs to so the
-          receipt splits itself later.
+          Add what the house is out of and it lands under its category here.
         </div>
       ) : (
         groups.map((group) => (
-          <section className="fresh-section" key={group.pool}>
+          <section className="fresh-section" key={group.name}>
             <div className="fresh-section-head">
-              <span className="fresh-pool-tag" data-pool={group.pool}>
-                {POOL_LABELS[group.pool]}
-              </span>
+              <h2 className="fresh-h2">
+                <span
+                  className="fresh-cat-dot"
+                  style={{ background: colorFor(group.name) }}
+                />
+                {group.name}
+              </h2>
               <span className="fresh-sub">
                 {group.items.length} item{group.items.length === 1 ? "" : "s"}
               </span>
@@ -227,7 +252,9 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
             </span>
             <span className="fresh-sub">{done.length}</span>
           </div>
-          <div className="fresh-rows">{done.map(row)}</div>
+          <div className="fresh-rows">
+            {done.slice().sort(byStoreThenNewest).map(row)}
+          </div>
           <button
             type="button"
             className="fresh-btn fresh-btn-primary fresh-btn-block"

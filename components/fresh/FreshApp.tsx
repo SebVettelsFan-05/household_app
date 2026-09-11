@@ -170,13 +170,10 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
             type="button"
             className="fresh-rail-btn"
             onClick={() => setSettingsOpen(true)}
+            title="Appearance, look and household preferences"
           >
             <IconSettings size={22} />
             <span className="fresh-rail-label">Household settings</span>
-          </button>
-          <button type="button" className="fresh-rail-btn" onClick={onSwitchUi}>
-            <IconMore size={22} />
-            <span className="fresh-rail-label">Classic look</span>
           </button>
         </nav>
 
@@ -219,7 +216,6 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
             <FreshMore
               onNavigate={setTab}
               onOpenSettings={() => setSettingsOpen(true)}
-              onSwitchUi={onSwitchUi}
             />
           )}
         </main>

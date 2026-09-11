@@ -1,6 +1,5 @@
 "use client";
 
-import { POOL_LABELS } from "@/components/PoolChips";
 import { fmtQty } from "@/lib/format";
 import type { GroceryItem } from "@/lib/types";
 
@@ -50,11 +49,6 @@ export default function GroceryItemRow({
             ) : null}
             <span className="dot" />
             <span>For {item.addedBy}</span>
-            {item.pool && item.pool !== "house" ? (
-              <span className={`pool-badge ${item.pool}`}>
-                {POOL_LABELS[item.pool]}
-              </span>
-            ) : null}
           </div>
         </div>
         <div className="item-qty">

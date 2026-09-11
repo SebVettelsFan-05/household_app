@@ -7,24 +7,18 @@ import {
   IconChevronRight,
   IconKey,
   IconSettings,
-  IconStar,
 } from "@/components/fresh/icons";
 
 type Props = {
   onNavigate: (tab: FreshTab) => void;
   onOpenSettings: () => void;
-  onSwitchUi: () => void;
 };
 
 /**
  * Phone-only overflow. The desktop rail lists these destinations directly,
  * so this screen only ever shows under 720px.
  */
-export default function FreshMore({
-  onNavigate,
-  onOpenSettings,
-  onSwitchUi,
-}: Props) {
+export default function FreshMore({ onNavigate, onOpenSettings }: Props) {
   const entries: {
     label: string;
     hint: string;
@@ -45,15 +39,9 @@ export default function FreshMore({
     },
     {
       label: "Household settings",
-      hint: "Who shares dinners",
+      hint: "Appearance, look and household preferences",
       icon: <IconSettings size={22} />,
       onClick: onOpenSettings,
-    },
-    {
-      label: "Classic look",
-      hint: "Switch this device back to the original design",
-      icon: <IconStar size={22} />,
-      onClick: onSwitchUi,
     },
   ];
 

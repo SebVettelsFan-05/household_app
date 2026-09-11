@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import ModalFrame from "@/components/ModalFrame";
-import PersonPicker from "@/components/PersonPicker";
 import { deleteItem, updateItem } from "@/lib/client";
 import {
   FALLBACK_CATEGORY,
@@ -37,7 +36,6 @@ export default function EditModal({
     item.categoryReviewed
   );
   const [useAmt, setUseAmt] = useState("");
-  const [owner, setOwner] = useState(item.owner || "");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -72,7 +70,6 @@ export default function EditModal({
         expiry: exp || undefined,
         category: cat,
         categoryReviewed,
-        owner,
       });
       onResult(res.items, "Saved");
       onClose();
@@ -127,7 +124,6 @@ export default function EditModal({
         expiry: item.expiry || undefined,
         category: item.category,
         categoryReviewed: item.categoryReviewed,
-        owner: item.owner || "",
       });
       onResult(res.items, `Used ${used}g`);
       onClose();
@@ -225,15 +221,6 @@ export default function EditModal({
           />
         </div>
       </div>
-
-      <PersonPicker
-        id="edit-owner"
-        label="Belongs to"
-        value={owner}
-        onChange={setOwner}
-        emptyLabel="Shared"
-        emptyIsChoice
-      />
 
       <div className="field" style={{ marginTop: 12 }}>
         <label htmlFor="use-amt">Use some (g)</label>
