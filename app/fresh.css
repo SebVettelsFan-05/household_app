@@ -1,0 +1,2381 @@
+/*
+ * Fresh shell. Every rule is scoped under `.fresh` so the classic UI, which
+ * owns all of globals.css, is untouched by anything in here.
+ *
+ * Two token layers live in the block below. The first is the fresh
+ * vocabulary (paper, card, ink, the section washes, the person colours).
+ * The second re-points the names globals.css uses (--bg, --surface, --ink,
+ * --accent, --line, --radius) at the first, so every classic modal and form
+ * reused inside this shell (recipe scraping, dictation, label scanning,
+ * passwords, the monthly breakdown, the allocation editor) inherits the
+ * paper, the ink, the current section colour, the fonts and the radii
+ * without a single line of it being rewritten.
+ */
+
+.fresh {
+  /* Surfaces */
+  --paper: #f6f1e7;
+  --card: #fffdf8;
+  --ink: #1a1714;
+  --ink-soft: #6b655c;
+  --hairline: rgba(26, 23, 20, 0.12);
+  --sunk: #ede5d6;
+  --card-shadow: 0 1px 2px rgba(26, 23, 20, 0.05),
+    0 8px 24px rgba(26, 23, 20, 0.06);
+
+  /* Section washes */
+  /* Light section washes. Each is at least 4.5:1 against paper as text
+     and at least 4.5:1 under white text as a fill. */
+  --c-recipes: #c13d22;
+  --c-recipes-hero: #c13d22;
+  --c-grocery: #8a5f00;
+  --c-expenses: #136f63;
+  --c-inventory: #3f7a2e;
+  --c-passwords: #6b3fa0;
+  --c-danger: #b3261e;
+
+  /* The current screen's wash. Overridden per [data-section] below. */
+  --section: var(--ink);
+  --on-section: #fffdf8;
+
+  /* Type */
+  --font-display: "Bricolage Grotesque", "Instrument Sans", system-ui,
+    sans-serif;
+  --font-body: "Instrument Sans", system-ui, sans-serif;
+
+  /* Geometry */
+  --r-card: 18px;
+  --r-control: 14px;
+  --top-h: 64px;
+  --nav-h: 68px;
+  /* Desktop shell width: rail plus content. One width for every screen, or
+     the rail slides sideways each time you change section. */
+  --shell-w: 1240px;
+  /* The measure a one-column screen reads at inside that content area. */
+  --column-w: 680px;
+
+  /* ---- names globals.css reads ---- */
+  --bg: var(--paper);
+  --surface: var(--card);
+  --surface-soft: var(--sunk);
+  --accent: var(--section);
+  --accent-soft: color-mix(in srgb, var(--section) 14%, var(--card));
+  --accent-ink: var(--on-section);
+  --line: var(--hairline);
+  --shadow: var(--card-shadow);
+  --radius: var(--r-control);
+  --warn: #9a5209;
+  --danger: var(--c-danger);
+
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  font-size: 16px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme="dark"] .fresh {
+  --paper: #151311;
+  --card: #211e1a;
+  --ink: #f3ede2;
+  --ink-soft: #a39b8f;
+  --hairline: rgba(243, 237, 226, 0.12);
+  --sunk: #2c2823;
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --c-recipes: #f0694b;
+  --c-recipes-hero: #f0694b;
+  --c-grocery: #e8aa2a;
+  --c-expenses: #2fa08f;
+  --c-inventory: #7bb865;
+  --c-passwords: #9c74d6;
+  --c-danger: #e8796c;
+
+  --on-section: #151311;
+  --warn: #e0a25c;
+}
+
+/* Section washes. Home and More wear plain ink. */
+.fresh[data-section="recipes"] {
+  --section: var(--c-recipes);
+  --on-section: #ffffff;
+}
+.fresh[data-section="grocery"] {
+  --section: var(--c-grocery);
+  /* White on this yellow is under 3:1, so the label goes ink instead. */
+  --on-section: #1a1714;
+}
+.fresh[data-section="expenses"] {
+  --section: var(--c-expenses);
+  --on-section: #ffffff;
+}
+.fresh[data-section="inventory"] {
+  --section: var(--c-inventory);
+  --on-section: #ffffff;
+}
+.fresh[data-section="passwords"] {
+  --section: var(--c-passwords);
+  --on-section: #ffffff;
+}
+.fresh[data-section="home"] {
+  --section: var(--ink);
+  --on-section: var(--paper);
+}
+/* Dark washes are all light enough that the label has to be dark. */
+:root[data-theme="dark"] .fresh[data-section="recipes"],
+:root[data-theme="dark"] .fresh[data-section="grocery"],
+:root[data-theme="dark"] .fresh[data-section="expenses"],
+:root[data-theme="dark"] .fresh[data-section="inventory"],
+:root[data-theme="dark"] .fresh[data-section="passwords"] {
+  --on-section: #151311;
+}
+
+/* The page behind the shell (overscroll, short screens). Reserving the
+   scrollbar gutter matters: without it a short screen and a long one lay out
+   at different widths, and the rail jumps sideways between sections. */
+body:has(.fresh) {
+  background: #f6f1e7;
+}
+/* Reserve the scrollbar gutter so the rail never shifts between a short
+   and a long section. Desktop only: on phones a reserved gutter narrows
+   every fixed element (sheets, tab bar) by a scrollbar's width. */
+@media (min-width: 720px) {
+  :root:has(.fresh) {
+    scrollbar-gutter: stable;
+  }
+}
+:root[data-theme="dark"] body:has(.fresh) {
+  background: #151311;
+}
+
+/*
+ * One body face for the whole surface. `!important` because globals.css sets
+ * its own faces on a couple of dozen element-qualified selectors; the display
+ * face is re-applied below at higher specificity.
+ */
+.fresh,
+.fresh * {
+  font-family: var(--font-body) !important;
+}
+.fresh .scan-barcode {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
+}
+.fresh .fresh-title,
+.fresh .fresh-h2,
+.fresh .fresh-tonight-dish,
+.fresh .fresh-tonight-quiet,
+.fresh .fresh-day-dish,
+.fresh .fresh-big-money,
+.fresh .fresh-counter-num,
+.fresh .fresh-input-amount,
+.fresh .fresh-sheet-title,
+.fresh .modal h2,
+.fresh .add-card h2,
+.fresh .login-title {
+  font-family: var(--font-display) !important;
+  letter-spacing: -0.015em;
+}
+
+/* ---------------------------------------------------------------- *
+ * Reused classic forms and modals
+ * ---------------------------------------------------------------- */
+
+.fresh .modal {
+  border-radius: 24px 24px 0 0;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  box-shadow: var(--card-shadow);
+}
+@media (min-width: 520px) {
+  .fresh .modal {
+    border-radius: var(--r-card);
+  }
+}
+.fresh .modal-bg {
+  background: rgba(26, 23, 20, 0.5);
+}
+.fresh .modal h2,
+.fresh .add-card h2 {
+  font-size: 22px;
+  font-weight: 650;
+}
+.fresh .add-card,
+.fresh .monthly-card,
+.fresh .split-card,
+.fresh .pw-card {
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-card);
+  box-shadow: var(--card-shadow);
+}
+
+/* No tracked uppercase anywhere. */
+.fresh .field label,
+.fresh .cat-pills-row label,
+.fresh .cat-group-head,
+.fresh .split-group h3,
+.fresh .split-summary dt,
+.fresh .monthly-section-head h3,
+.fresh .recipe-day-label,
+.fresh .modal-sub,
+.fresh .favorite-meta,
+.fresh .archive-recipe-head,
+.fresh .manage-link,
+.fresh .alloc-remainder,
+.fresh .home-card-cta {
+  text-transform: none;
+  letter-spacing: normal;
+}
+.fresh .field label,
+.fresh .cat-pills-row label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.fresh .field input[type="text"],
+.fresh .field input[type="number"],
+.fresh .field input[type="date"],
+.fresh .field input[type="search"],
+.fresh .field input[type="password"],
+.fresh .field input[type="url"],
+.fresh .field textarea,
+.fresh .select,
+.fresh select,
+.fresh .modal input[type="text"],
+.fresh .modal input[type="number"],
+.fresh .modal input[type="date"] {
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  font-size: 16px;
+  color: var(--ink);
+}
+.fresh .field input:focus,
+.fresh .field textarea:focus,
+.fresh .select:focus,
+.fresh select:focus {
+  border-color: var(--section);
+  border-width: 2px;
+  outline: none;
+}
+
+.fresh .btn-primary,
+.fresh .btn-secondary,
+.fresh .btn-accent,
+.fresh .btn-danger {
+  border-radius: 999px;
+  border-width: 1.5px;
+  font-weight: 700;
+  font-size: 16px;
+  min-height: 52px;
+}
+.fresh .btn-primary,
+.fresh .btn-accent {
+  background: var(--section);
+  border-color: var(--section);
+  color: var(--on-section);
+}
+.fresh .alloc-chip,
+.fresh .filter-pill,
+.fresh .cat-pill,
+.fresh .scan-trigger,
+.fresh .sort-pill {
+  border-radius: 999px;
+  border-width: 1.5px;
+}
+.fresh .alloc-chip {
+  min-height: 40px;
+  font-size: 14px;
+}
+.fresh .alloc-chip.active,
+.fresh .filter-pill.active,
+.fresh .cat-pill.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.fresh .check.checked {
+  color: var(--on-section);
+}
+
+/* Emoji glyphs in the reused forms are hidden and redrawn as line icons. */
+.fresh .btn-emoji {
+  display: none !important;
+}
+.fresh .scan-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  font-weight: 600;
+}
+.fresh .scan-trigger::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  flex: none;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+.fresh .add-card-actions .scan-trigger:nth-child(1) {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='3' width='6' height='11' rx='3'/%3E%3Cpath d='M5.5 12a6.5 6.5 0 0 0 13 0'/%3E%3Cpath d='M12 18.5V21'/%3E%3C/svg%3E");
+}
+.fresh .add-card-actions .scan-trigger:nth-child(2),
+.fresh .scan-manual {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5h3.5L8.2 6h7.6l1.7 2.5H21V19H3V8.5Z'/%3E%3Ccircle cx='12' cy='13.5' r='3.5'/%3E%3C/svg%3E");
+}
+.fresh .scan-manual::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  vertical-align: -3px;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+/* The receipt attachment is one large dashed tile with a camera on it. */
+.fresh .receipt-picker-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 120px;
+  padding: 20px 14px;
+  border: 2px dashed color-mix(in srgb, var(--section) 45%, var(--hairline));
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--section) 5%, var(--card));
+  color: var(--section);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+.fresh .receipt-picker-cta::before {
+  content: "";
+  width: 32px;
+  height: 32px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5h3.5L8.2 6h7.6l1.7 2.5H21V19H3V8.5Z'/%3E%3Ccircle cx='12' cy='13.5' r='3.5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5h3.5L8.2 6h7.6l1.7 2.5H21V19H3V8.5Z'/%3E%3Ccircle cx='12' cy='13.5' r='3.5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.fresh .receipt-hint {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.fresh .receipt-preview-file,
+.fresh .receipt-existing {
+  border-radius: var(--r-control);
+}
+
+.fresh .alloc-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* The split lines are a panel of controls, so the panel takes the page
+   ground and each field inside it stays on the card ground every other
+   input in the shell uses. */
+.fresh .alloc-line {
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-card);
+  background: var(--paper);
+  padding: 12px;
+}
+.fresh .alloc-amount {
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--card);
+  padding: 0 14px;
+}
+.fresh .alloc-amount-sign {
+  font-size: 16px;
+  color: var(--ink-soft);
+}
+.fresh .alloc-amount input {
+  width: 92px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.fresh .alloc-line-head {
+  gap: 10px;
+}
+.fresh .alloc-note {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh .alloc-remove {
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+}
+.fresh .alloc-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.fresh .alloc-split {
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 700;
+  min-height: 44px;
+  padding: 0 18px;
+}
+.fresh .alloc-remainder {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh .alloc-remainder.warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- *
+ * Shell
+ * ---------------------------------------------------------------- */
+
+.fresh-top {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--top-h);
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1.5px solid var(--hairline);
+}
+.fresh-title {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--section);
+}
+.fresh-top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1.5px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--card);
+}
+
+.fresh-icon-btn,
+.fresh .theme-toggle,
+.fresh .refresh-btn {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.fresh-icon-btn:hover,
+.fresh .theme-toggle:hover,
+.fresh .refresh-btn:hover:not(:disabled) {
+  background: var(--sunk);
+  color: var(--ink);
+}
+/* The two classic header buttons keep their glyphs for the classic UI; here
+   the glyph is suppressed and the line icon takes over. */
+.fresh .refresh-btn,
+.fresh .theme-toggle {
+  font-size: 0;
+}
+.fresh .refresh-btn::before,
+.fresh .theme-toggle::before {
+  content: "";
+  width: 20px;
+  height: 20px;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+.fresh .refresh-btn {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.6-5.9'/%3E%3Cpath d='M20.5 3.5V9h-5.5'/%3E%3C/svg%3E");
+}
+.fresh .refresh-btn[aria-busy="true"]::before {
+  display: none;
+}
+.fresh .theme-toggle {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"] .fresh .theme-toggle {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2.5v2M12 19.5v2M21.5 12h-2M4.5 12h-2M18.4 5.6 17 7M7 17l-1.4 1.4M18.4 18.4 17 17M7 7 5.6 5.6'/%3E%3C/svg%3E");
+}
+
+.fresh-body {
+  display: block;
+}
+.fresh-rail {
+  display: none;
+}
+.fresh-main {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 20px 16px calc(156px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ---- Bottom nav (phones) ---- */
+
+.fresh-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--card);
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-tab {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  border-top: 3px solid transparent;
+  color: var(--ink-soft);
+  padding: 0 2px;
+  cursor: pointer;
+}
+.fresh-tab.active {
+  color: var(--section);
+  border-top-color: var(--section);
+}
+.fresh-tab-icon {
+  position: relative;
+  display: inline-flex;
+}
+.fresh-tab-label {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fresh-tab.active .fresh-tab-label {
+  font-weight: 700;
+}
+.fresh-tab-count {
+  position: absolute;
+  top: -5px;
+  right: -9px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--c-recipes);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+
+/* ---- Rail (desktop) ---- */
+
+@media (min-width: 720px) {
+  .fresh-tabbar {
+    display: none;
+  }
+  /* The rail and the content read as one centred block, rather than a rail
+     pinned to a 2560px-wide edge with the content adrift in the middle. */
+  .fresh-top {
+    padding-left: max(16px, calc((100% - var(--shell-w)) / 2));
+    padding-right: max(16px, calc((100% - var(--shell-w)) / 2));
+  }
+  .fresh-body {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    align-items: start;
+    max-width: var(--shell-w);
+    margin: 0 auto;
+  }
+  .fresh-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: sticky;
+    top: var(--top-h);
+    align-self: start;
+    max-height: calc(100vh - var(--top-h));
+    overflow-y: auto;
+    padding: 20px 14px;
+    border-right: 1.5px solid var(--hairline);
+  }
+  /* Two-column screens use the whole content area; every other screen
+     centres one readable column inside it. Either way the grid, and so the
+     rail, is exactly as wide on every section. */
+  .fresh-main {
+    max-width: none;
+    padding: 28px 32px 72px;
+  }
+  .fresh:not([data-section="expenses"]):not([data-section="recipes"])
+    .fresh-main {
+    max-width: calc(var(--column-w) + 64px);
+    margin: 0 auto;
+  }
+}
+
+.fresh-rail-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 11px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.fresh-rail-btn:hover {
+  background: var(--sunk);
+  color: var(--ink);
+}
+.fresh-rail-btn.active {
+  background: color-mix(in srgb, var(--section) 14%, var(--card));
+  color: var(--section);
+}
+.fresh-rail-label {
+  flex: 1;
+  min-width: 0;
+}
+.fresh-rail-sep {
+  height: 1.5px;
+  background: var(--hairline);
+  margin: 14px 10px;
+}
+.fresh-rail-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--c-recipes);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.fresh :is(
+    .fresh-tab,
+    .fresh-rail-btn,
+    .fresh-btn,
+    .fresh-chip,
+    .fresh-row,
+    .fresh-icon-btn,
+    .fresh-seg-btn,
+    .fresh-strip-day,
+    .fresh-counter,
+    .fresh-fab,
+    .fresh-text-btn
+  ):focus-visible {
+  outline: 2px solid var(--section);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- *
+ * Primitives
+ * ---------------------------------------------------------------- */
+
+.fresh-card {
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-card);
+  box-shadow: var(--card-shadow);
+  padding: 18px 16px;
+}
+.fresh-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.fresh-h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.fresh-sub {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh-head-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 6px 0;
+  color: var(--section);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fresh-section {
+  margin: 0;
+}
+.fresh-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0 0 10px;
+}
+.fresh-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.fresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  padding: 0 20px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--card);
+  cursor: pointer;
+}
+.fresh-btn:hover {
+  background: var(--sunk);
+}
+.fresh-btn-small {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+.fresh-btn-primary {
+  min-height: 52px;
+  background: var(--section);
+  border-color: var(--section);
+  color: var(--on-section);
+}
+.fresh-btn-primary:hover {
+  background: color-mix(in srgb, var(--section) 92%, #000);
+  border-color: color-mix(in srgb, var(--section) 92%, #000);
+}
+.fresh-btn-primary:active {
+  background: color-mix(in srgb, var(--section) 92%, #000);
+}
+.fresh-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.fresh-btn-block {
+  width: 100%;
+}
+.fresh-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.fresh-text-btn {
+  background: none;
+  border: none;
+  padding: 10px 6px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fresh-text-btn:hover {
+  color: var(--ink);
+}
+.fresh-text-btn:disabled {
+  opacity: 0.5;
+}
+
+.fresh-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fresh-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 1.5px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 16px;
+  cursor: pointer;
+}
+.fresh-chip:hover {
+  border-color: var(--ink-soft);
+}
+.fresh-chip.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.fresh-chip-person {
+  padding-left: 6px;
+}
+.fresh-chip-person.active {
+  color: #fff;
+}
+
+.fresh-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--sunk);
+  border-radius: 999px;
+  align-self: flex-start;
+}
+.fresh-seg-btn {
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.fresh-seg-btn.active {
+  background: var(--section);
+  color: var(--on-section);
+  font-weight: 700;
+}
+.fresh-seg-sm .fresh-seg-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+/* Rows: hairline separated, 64px tall, whole row tappable. */
+.fresh-rows {
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--hairline);
+  padding: 10px 0;
+  color: var(--ink);
+  font-size: 16px;
+  cursor: pointer;
+}
+.fresh-row:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+.fresh-row-main {
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+button.fresh-row-main {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.fresh-row-title {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fresh-row-desc {
+  display: block;
+  margin-top: 1px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+.fresh-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 5px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh-row-store {
+  font-weight: 600;
+}
+.fresh-row-warn {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warn);
+}
+.fresh-row-qty,
+.fresh-row-amount {
+  flex: none;
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.fresh-row-note {
+  font-size: 14px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.fresh-chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--ink-soft);
+}
+.fresh-date-head {
+  padding: 4px 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.fresh-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.fresh-person-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+.fresh-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fresh-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--sunk);
+  color: var(--ink-soft);
+}
+.fresh-badge.warn {
+  background: color-mix(in srgb, var(--warn) 16%, var(--card));
+  color: var(--warn);
+}
+.fresh-badge.danger {
+  background: color-mix(in srgb, var(--c-danger) 16%, var(--card));
+  color: var(--c-danger);
+}
+.fresh-pill-note {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink-soft);
+}
+
+.fresh-cat-dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  margin-right: 9px;
+  vertical-align: middle;
+}
+
+.fresh-pool-tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--ink);
+}
+.fresh-pool-tag[data-pool="soon"] {
+  background: var(--warn);
+}
+.fresh-pool-tag[data-pool="bought"] {
+  background: var(--c-expenses);
+}
+:root[data-theme="dark"] .fresh .fresh-pool-tag {
+  color: var(--paper);
+}
+
+.fresh-split-tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1.5px solid var(--ink);
+  color: var(--ink);
+}
+.fresh-split-tag[data-kind="meals"] {
+  border-color: var(--c-recipes);
+  color: var(--c-recipes);
+}
+.fresh-split-tag[data-kind="personal"] {
+  border-color: var(--ink-soft);
+  color: var(--ink-soft);
+}
+
+.fresh-empty {
+  padding: 24px 4px;
+  color: var(--ink-soft);
+  font-size: 15px;
+}
+.fresh-empty strong {
+  display: block;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.fresh-error {
+  padding: 16px;
+  border: 1.5px solid var(--c-danger);
+  border-radius: var(--r-card);
+  color: var(--c-danger);
+  font-size: 15px;
+  background: var(--card);
+}
+.fresh-form-error {
+  margin: 12px 0 0;
+  color: var(--c-danger);
+  font-size: 14px;
+  font-weight: 600;
+}
+.fresh-field-hint {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.fresh-skel {
+  background: var(--sunk);
+  border-radius: var(--r-control);
+  height: 16px;
+  margin: 10px 0;
+}
+.fresh-skel-line {
+  width: 60%;
+  height: 26px;
+}
+.fresh-skel-row {
+  height: 56px;
+}
+.fresh-skel-card {
+  height: 140px;
+  border-radius: var(--r-card);
+  margin-bottom: 14px;
+}
+
+/* FAB: sits above the nav and clear of the last row. */
+.fresh-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--nav-h) + 16px + env(safe-area-inset-bottom));
+  z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  border: none;
+  border-radius: 999px;
+  padding: 0 22px;
+  background: var(--section);
+  color: var(--on-section);
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(26, 23, 20, 0.22);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fresh-fab:hover {
+  background: color-mix(in srgb, var(--section) 92%, #000);
+}
+/* A sheet owns the screen while it is open; the FAB would sit on top of its
+   sticky action row. */
+.fresh:has(.fresh-sheet-bg) .fresh-fab {
+  display: none;
+}
+@media (min-width: 720px) {
+  .fresh-fab {
+    right: max(32px, calc((100% - var(--shell-w)) / 2 + 32px));
+    bottom: 32px;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Sheets
+ * ---------------------------------------------------------------- */
+
+.fresh-sheet-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(26, 23, 20, 0.5);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.fresh-sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 520px;
+  max-height: 92vh;
+  background: var(--paper);
+  border: 1.5px solid var(--hairline);
+  box-shadow: var(--card-shadow);
+  border-radius: 24px 24px 0 0;
+}
+.fresh-sheet-grip {
+  width: 36px;
+  height: 4px;
+  flex: none;
+  margin: 10px auto 2px;
+  border-radius: 999px;
+  background: var(--hairline);
+}
+.fresh-sheet-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px 12px;
+  border-bottom: 1.5px solid var(--hairline);
+}
+.fresh-sheet-heading {
+  min-width: 0;
+}
+.fresh-sheet-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--section);
+  overflow-wrap: anywhere;
+}
+.fresh-sheet-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.fresh-sheet-head .fresh-icon-btn {
+  border: 1.5px solid var(--hairline);
+}
+.fresh-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+}
+/* The sticky row takes whatever the classic modal used to put in
+   `.modal-actions`: a lone full-width primary, or a destructive button on the
+   left with a `.right` cluster opposite it. */
+.fresh-sheet-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1.5px solid var(--hairline);
+  background: var(--card);
+}
+.fresh-sheet-actions > * {
+  min-width: 0;
+}
+.fresh-sheet-actions .right {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.fresh-sheet-actions .btn-primary,
+.fresh-sheet-actions .btn-secondary,
+.fresh-sheet-actions .btn-accent,
+.fresh-sheet-actions .btn-danger {
+  padding: 0 20px;
+  white-space: nowrap;
+}
+@media (min-width: 520px) {
+  .fresh-sheet-bg {
+    align-items: center;
+    padding: 24px;
+  }
+  .fresh-sheet {
+    border-radius: var(--r-card);
+    max-height: 88vh;
+  }
+  .fresh-sheet-wide {
+    max-width: 640px;
+  }
+  .fresh-sheet-grip {
+    display: none;
+  }
+  .fresh-sheet-actions {
+    padding-bottom: 16px;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Reused add forms inside a sheet
+ * ---------------------------------------------------------------- */
+
+/* The sheet already draws the card, the title and the close button, so the
+   embedded form is just its fields plus a compact tool row. */
+.fresh-embedded-form {
+  display: block;
+}
+.fresh-form-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+/* The submit reads as the sheet's action row: it sticks to the bottom of the
+   scrolling body instead of hiding under the last field. */
+.fresh-form-submit {
+  position: sticky;
+  bottom: calc(-16px - env(safe-area-inset-bottom));
+  z-index: 1;
+  margin: 6px -16px calc(-16px - env(safe-area-inset-bottom));
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--card);
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-form-submit > .btn-primary {
+  width: 100%;
+}
+
+/* ---------------------------------------------------------------- *
+ * Fresh form fields
+ * ---------------------------------------------------------------- */
+
+.fresh-field {
+  margin-bottom: 18px;
+}
+.fresh-field > label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-bottom: 7px;
+}
+.fresh-input {
+  width: 100%;
+  min-width: 0;
+  height: 52px;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  padding: 0 14px;
+  font-size: 16px;
+  color: var(--ink);
+}
+.fresh-input:focus {
+  border-color: var(--section);
+  border-width: 2px;
+  outline: none;
+}
+.fresh-amount-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--card);
+  padding: 0 16px;
+}
+.fresh-amount-wrap:focus-within {
+  border-color: var(--section);
+  border-width: 2px;
+}
+.fresh-amount-sign {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.fresh-input-amount {
+  height: 72px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.fresh-input-amount:focus {
+  border: none;
+  outline: none;
+}
+.fresh-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.fresh-field-row .fresh-field {
+  min-width: 0;
+}
+.fresh-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.fresh-search > svg {
+  position: absolute;
+  left: 14px;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+.fresh-search .fresh-input {
+  padding-left: 44px;
+}
+
+/* ---------------------------------------------------------------- *
+ * Home
+ * ---------------------------------------------------------------- */
+
+.fresh-home {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/*
+ * The hero. A solid block of the Recipes wash with paper text on it, so the
+ * first thing on the screen is the loudest thing on the screen.
+ *
+ * Contrast, measured: paper #F6F1E7 on the light tone #D9482B is 3.80:1 and
+ * on the dark tone #F0694B (where paper is the near-black #151311) it is
+ * 6.03:1. The light tone clears AA-large for the 30px display line but not
+ * AA-normal for the small ones; see the note in the handoff. Paper is used on
+ * both tones - on #D9482B ink would be 4.17:1, also short of 4.5, and worse
+ * looking.
+ */
+.fresh-tonight {
+  border: none;
+  border-radius: var(--r-card);
+  background: var(--c-recipes-hero);
+  color: var(--paper);
+  box-shadow: 0 2px 4px rgba(26, 23, 20, 0.1),
+    0 14px 30px color-mix(in srgb, var(--c-recipes-hero) 34%, transparent);
+  padding: 20px 18px;
+}
+.fresh-tonight-tap {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.fresh-tonight-when {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--paper);
+  opacity: 0.92;
+  margin-bottom: 6px;
+}
+.fresh-tonight-dish,
+.fresh-tonight-quiet {
+  display: block;
+  font-size: 30px;
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--paper);
+  overflow-wrap: anywhere;
+}
+.fresh-tonight-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 14px;
+  font-size: 15px;
+}
+.fresh-tonight-nocook {
+  color: var(--paper);
+  opacity: 0.8;
+  font-weight: 600;
+}
+.fresh-tonight .fresh-person-name {
+  color: var(--paper);
+}
+/* A 2px paper ring keeps the cook's disc off the wash it sits on. */
+.fresh-ring {
+  box-shadow: 0 0 0 2px var(--paper);
+}
+.fresh-tonight .fresh-pill-note {
+  background: transparent;
+  border: 1.5px solid color-mix(in srgb, var(--paper) 60%, transparent);
+  color: var(--paper);
+}
+.fresh-tonight .fresh-skel {
+  background: color-mix(in srgb, var(--paper) 25%, transparent);
+}
+/* Inverted: paper plate, wash-coloured label. */
+.fresh-tonight .fresh-btn-primary {
+  margin-top: 18px;
+  background: var(--paper);
+  border-color: var(--paper);
+  color: var(--c-recipes-hero);
+}
+.fresh-tonight .fresh-btn-primary:hover {
+  background: color-mix(in srgb, var(--paper) 92%, #000);
+  border-color: color-mix(in srgb, var(--paper) 92%, #000);
+}
+.fresh-tonight .fresh-btn-primary:focus-visible {
+  outline-color: var(--paper);
+}
+
+.fresh-money-rows {
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-money-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  background: none;
+  border: none;
+  border-bottom: 1.5px solid var(--hairline);
+  padding: 8px 0;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.fresh-money-row:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+.fresh-money-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.fresh-money-amount {
+  flex: none;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fresh-money-amount.send {
+  color: var(--c-recipes);
+}
+.fresh-money-amount.withdraw {
+  color: var(--c-expenses);
+}
+.fresh-money-amount.even {
+  color: var(--ink-soft);
+}
+.fresh-money-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.fresh-money-total .fresh-num {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.fresh-counter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-left: 4px solid var(--ink);
+  border-radius: var(--r-card);
+  box-shadow: var(--card-shadow);
+  padding: 14px 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.fresh-counter-num {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.fresh-counter-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.fresh-counter-wide {
+  text-align: left;
+  padding: 16px 16px;
+}
+.fresh-counter-names {
+  font-size: 14px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+
+/* ---------------------------------------------------------------- *
+ * Recipes
+ * ---------------------------------------------------------------- */
+
+.fresh-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.fresh-strip-column {
+  display: none;
+}
+.fresh-recipes-tools {
+  margin-top: -6px;
+}
+.fresh-strip-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 2px;
+  min-height: 64px;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.fresh-strip-day.today {
+  border-color: var(--section);
+  border-width: 2px;
+  color: var(--section);
+}
+.fresh-strip-letter {
+  font-size: 12px;
+  font-weight: 700;
+}
+.fresh-strip-num {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.fresh-strip-day.today .fresh-strip-num {
+  color: var(--section);
+}
+.fresh-strip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: transparent;
+}
+.fresh-strip-dot.hollow {
+  border: 1.5px solid var(--ink-soft);
+}
+
+.fresh-weeks {
+  display: grid;
+  gap: 28px;
+}
+.fresh-week {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fresh-week[data-active="false"] {
+  display: none;
+}
+.fresh-week-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fresh-cook-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.fresh-tally {
+  position: relative;
+  display: inline-flex;
+}
+.fresh-tally-count {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  border: 1.5px solid var(--paper);
+}
+
+.fresh-days {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fresh-day-when {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.fresh-day-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--card);
+  border: 1.5px solid var(--hairline);
+  border-left: 6px solid var(--cook, var(--ink-soft));
+  border-radius: var(--r-card);
+  box-shadow: var(--card-shadow);
+  padding: 14px 16px;
+}
+.fresh-day-card-tap {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.fresh-day-dish {
+  display: block;
+  margin-top: 3px;
+  font-size: 22px;
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.fresh-day-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 10px;
+  font-size: 15px;
+}
+.fresh-day-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.fresh-day-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 2px dashed var(--hairline);
+  border-radius: var(--r-card);
+  padding: 8px 12px 8px 16px;
+  min-height: 64px;
+}
+.fresh-day-add {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 0;
+  color: inherit;
+  cursor: pointer;
+}
+.fresh-day-add-text {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--section);
+}
+.fresh-day-off {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-card);
+  background: var(--sunk);
+  padding: 8px 12px 8px 16px;
+  min-height: 64px;
+}
+.fresh-day-off .fresh-day-when {
+  flex: none;
+}
+.fresh-day-off-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* ---------------------------------------------------------------- *
+ * Grocery
+ * ---------------------------------------------------------------- */
+
+.fresh-check {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 2px solid var(--hairline);
+  background: var(--card);
+  color: var(--on-section);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.fresh-check:hover {
+  border-color: var(--section);
+}
+.fresh-check.checked {
+  border-color: var(--section);
+  background: var(--section);
+}
+.fresh-row.done .fresh-row-title {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+
+/* ---------------------------------------------------------------- *
+ * Expenses
+ * ---------------------------------------------------------------- */
+
+.fresh-expenses {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+/* The Month screen carries its own month-aware settlement card; the side
+   column belongs to the Receipts screen and is only rendered there. */
+.fresh-expenses-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (min-width: 900px) {
+  .fresh-expenses {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: start;
+    gap: 24px;
+  }
+  /* One column, full width. It must not stay a flex row here: the grid rule
+     above also sets `align-items: start`, which in a column shrinks the
+     month down to its content width and strands it mid-screen. */
+  .fresh-expenses[data-segment="month"] {
+    display: block;
+  }
+  .fresh-expenses[data-segment="receipts"] > .fresh-settlement-col {
+    position: sticky;
+    top: calc(var(--top-h) + 24px);
+  }
+}
+.fresh-row.locked {
+  opacity: 0.6;
+}
+.fresh .monthly-card {
+  box-shadow: var(--card-shadow);
+}
+
+.fresh-settle-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 14px;
+}
+.fresh-settle-total-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.fresh-big-money {
+  font-size: 36px;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--section);
+}
+.fresh-settle-card .fresh-settle-row:first-of-type {
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-settle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  background: none;
+  border: none;
+  border-bottom: 1.5px solid var(--hairline);
+  padding: 8px 0;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.fresh-settle-row:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+.fresh-settle-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.fresh-settle-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  padding: 4px 0 12px 42px;
+  border-bottom: 1.5px solid var(--hairline);
+}
+
+/* ---------------------------------------------------------------- *
+ * Month
+ * ---------------------------------------------------------------- */
+
+.fresh-month {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (min-width: 900px) {
+  /* A bill row is a name and one amount; stretched across the full content
+     area it reads as two things shouting at each other from opposite walls.
+     Centred keeps the rail where it is and the numbers next to their names. */
+  .fresh-month {
+    max-width: 820px;
+    margin: 0 auto;
+  }
+}
+.fresh-month-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fresh-month-nav {
+  border: 1.5px solid var(--hairline);
+}
+.fresh-month-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.fresh-month-label {
+  min-width: 0;
+  font-family: var(--font-display) !important;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+/* Store groups expand into their trips. */
+.fresh-trips {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0 14px;
+  border-bottom: 1.5px solid var(--hairline);
+}
+.fresh-trip {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.fresh-trip-thumb {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  overflow: hidden;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--sunk);
+  cursor: pointer;
+}
+.fresh-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.fresh-thumb-fallback {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-align: center;
+  padding: 0 4px;
+}
+.fresh-trip-main {
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+.fresh-trip-when {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.fresh-trip-desc {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fresh-trip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+.fresh-trip-link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--section);
+}
+.fresh-trip-amount {
+  flex: none;
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Bill rows: a name, optional row buttons, and one money field. */
+.fresh-bill-rows {
+  border-top: 1.5px solid var(--hairline);
+}
+.fresh-bill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 68px;
+  padding: 8px 0;
+  border-bottom: 1.5px solid var(--hairline);
+}
+.fresh-bill-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fresh-bill-note {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.fresh-bill-btn {
+  border: 1.5px solid var(--hairline);
+  width: 34px;
+  height: 34px;
+}
+
+/* One control, not a box inside a box: the border and the focus ring live on
+   the wrapper and the input itself is bare. */
+.fresh-money-field {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 124px;
+  height: 52px;
+  padding: 0 12px;
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-control);
+  background: var(--card);
+}
+.fresh-money-field:has(.fresh-money-input:disabled) {
+  background: var(--sunk);
+}
+.fresh-money-sign {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.fresh-money-input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: none;
+  padding: 0;
+  text-align: right;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.fresh-money-input:disabled {
+  color: var(--ink-soft);
+}
+
+.fresh-bill-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.fresh-bill-add .fresh-input:first-child {
+  flex: 2 1 140px;
+}
+.fresh-bill-add .fresh-input:nth-child(2) {
+  flex: 1 1 90px;
+}
+.fresh-btn-add {
+  flex: none;
+  min-height: 52px;
+  padding: 0 18px;
+}
+
+.fresh-month-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ---------------------------------------------------------------- *
+ * More
+ * ---------------------------------------------------------------- */
+
+.fresh-more-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--sunk);
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- *
+ * Wide layout tweaks
+ * ---------------------------------------------------------------- */
+
+@media (min-width: 720px) {
+  .fresh-seg-weeks,
+  .fresh-strip-phone {
+    display: none;
+  }
+  .fresh-strip-column {
+    display: grid;
+  }
+  .fresh-week[data-active="false"] {
+    display: flex;
+  }
+  .fresh-weeks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * One control vocabulary, everywhere
+ * ---------------------------------------------------------------- */
+
+/*
+ * Every field in the shell, whether it was written for the fresh look or
+ * reused from the classic forms, is one 52px box: 1.5px hairline, 14px
+ * radius, card ground, 16px text (under 16px iOS zooms the page on focus).
+ *
+ * The display-size money fields opt out of the 16px floor by name. They are
+ * far above it, and this rule used to quietly shrink the add-expense amount
+ * from the spec's 36px numerals down to 16px.
+ */
+.fresh
+  input:not([type="checkbox"]):not([type="radio"]):not(.fresh-input-amount),
+.fresh select,
+.fresh textarea {
+  font-size: 16px;
+  border-radius: var(--r-control);
+}
+/* Direct children only. A composite control nested inside a `.field` (the
+   split-line amount) owns its own geometry, and a descendant selector here
+   is what used to draw a second rounded box inside the first one. */
+.fresh .field > input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.fresh .field > textarea,
+.fresh .field > select,
+.fresh .field > .select,
+.fresh .monthly-add > input {
+  min-height: 52px;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+.fresh .field > textarea {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  resize: vertical;
+}
+
+/*
+ * Focus draws inside the existing border rather than thickening it. A
+ * 1.5px-to-2px swap reflowed the field by half a pixel, and an outline with
+ * a negative offset is the only ring that follows the 14px radius exactly.
+ */
+.fresh :is(input, select, textarea):focus,
+.fresh :is(input, select, textarea):focus-visible,
+.fresh .fresh-amount-wrap:focus-within,
+.fresh .fresh-money-field:focus-within,
+.fresh .alloc-amount:focus-within {
+  border-width: 1.5px;
+  outline: 2px solid var(--section);
+  outline-offset: -2px;
+}
+.fresh .field input:focus,
+.fresh .field textarea:focus,
+.fresh .select:focus,
+.fresh select:focus {
+  border-color: var(--hairline);
+  border-width: 1.5px;
+}
+/* The bare inputs inside a composite control must not draw a ring of their
+   own; the wrapper owns it. */
+.fresh .fresh-amount-wrap input:focus,
+.fresh .fresh-money-field input:focus,
+.fresh .alloc-amount input:focus {
+  outline: none;
+}
+
+/*
+ * The split-line amount is one control, not a box inside a box. The broad
+ * `.field input` rule above reaches into it wherever the allocation editor
+ * sits inside a classic `.field` (the edit-expense sheet), so the inner
+ * input is explicitly stripped back to bare text.
+ */
+.fresh .alloc-amount {
+  height: 52px;
+  gap: 4px;
+}
+.fresh .alloc-amount input,
+.fresh .field .alloc-amount input[type="text"] {
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+/* Native pickers: the arrow and the calendar button belong to the section,
+   and neither may spill past the rounded edge. */
+.fresh select,
+.fresh .select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b655c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 18px 18px;
+}
+:root[data-theme="dark"] .fresh select,
+:root[data-theme="dark"] .fresh .select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a39b8f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.fresh input[type="date"] {
+  /* Safari grows date fields to their intrinsic width and lets the editing
+     fields sit outside the padding box; both are pinned here. */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.fresh input[type="date"]::-webkit-calendar-picker-indicator {
+  margin-right: 0;
+  padding: 4px;
+  border-radius: 999px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.fresh input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background: var(--sunk);
+}
+:root[data-theme="dark"] .fresh input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
+.fresh .password-item,
+.fresh .password-modal,
+.fresh .shared-account-card {
+  border-radius: var(--r-card);
+}
+.fresh .password-small-btn,
+.fresh .password-field-toolbar button {
+  border-radius: 999px;
+}
+
+/* A sheet is one surface: the sticky rows at its foot share its ground
+   instead of drawing a paler strip across the bottom. */
+.fresh-sheet-actions,
+.fresh-form-submit {
+  background: var(--paper);
+}
+
+/* The last row in a card is followed by the card edge, so its own hairline
+   reads as a stray line. */
+.fresh-card > .fresh-rows > :last-child > .fresh-row,
+.fresh-card > .fresh-rows > .fresh-row:last-child,
+.fresh-bill-rows > .fresh-bill-row:last-child,
+.fresh-settle-card > div:last-child > .fresh-settle-row,
+.fresh-settle-card > div:last-child > .fresh-settle-parts,
+.fresh-money-rows > .fresh-money-row:last-child {
+  border-bottom: none;
+}
+
+/* Text stand-ins for receipt images that never load. */
+.fresh .receipt-existing-icon,
+.fresh .password-image-missing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1.5px dashed var(--hairline);
+  border-radius: var(--r-control);
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-weight: 600;
+}
+.receipt-lightbox-missing {
+  margin: 0;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* A filled person chip hides its own disc, so the disc gets a ring. */
+.fresh-chip-person.active .fresh-avatar {
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.7);
+}
+
+/* Category filter chips carry the category colour like classic's pills. */
+.fresh-chip-cat .fresh-cat-dot {
+  width: 9px;
+  height: 9px;
+  margin-right: 0;
+}
+
+.fresh-day-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1.5px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--section);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.fresh-day-card-link:hover {
+  border-color: var(--section);
+}

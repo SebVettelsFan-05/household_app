@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { IconCamera, IconMic } from "@/components/fresh/icons";
 import DictateItemsModal from "@/components/DictateItemsModal";
 import ScanLabelModal, {
   type ScanResult,
@@ -25,6 +26,11 @@ type Props = {
   onResult: (items: Item[], toast: string) => void;
   onError: (message: string) => void;
   onManageCategories: () => void;
+  /**
+   * Rendered inside a fresh sheet, which already draws the card, the
+   * heading and the close button: drop this form's own chrome.
+   */
+  embedded?: boolean;
 };
 
 export default function AddItemForm({
@@ -33,6 +39,7 @@ export default function AddItemForm({
   onResult,
   onError,
   onManageCategories,
+  embedded = false,
 }: Props) {
   const [name, setName] = useState("");
   const [qty, setQty] = useState("");
@@ -172,29 +179,61 @@ export default function AddItemForm({
     if (e.key === "Enter") submit();
   }
 
+  const submitButton = (
+    <button
+      className="btn-primary"
+      onClick={submit}
+      disabled={busy}
+      type="button"
+    >
+      {busy ? "Adding…" : "Add to inventory"}
+    </button>
+  );
+
   return (
-    <section className="add-card">
-      <div className="add-card-head">
-        <h2>Add item</h2>
-        <div className="add-card-actions">
+    <section className={embedded ? "fresh-embedded-form" : "add-card"}>
+      {embedded ? (
+        <div className="fresh-form-tools">
           <button
             type="button"
-            className="scan-trigger"
+            className="fresh-btn fresh-btn-small"
             onClick={() => setDictating(true)}
-            title="Dictate several items at once using your phone keyboard mic"
           >
-            🎙️ Dictate
+            <IconMic size={17} />
+            Dictate
           </button>
           <button
             type="button"
-            className="scan-trigger"
+            className="fresh-btn fresh-btn-small"
             onClick={() => setScanning(true)}
-            title="Scan a barcode / label with your camera"
           >
-            📷 Scan
+            <IconCamera size={17} />
+            Scan
           </button>
         </div>
-      </div>
+      ) : (
+        <div className="add-card-head">
+          <h2>Add item</h2>
+          <div className="add-card-actions">
+            <button
+              type="button"
+              className="scan-trigger"
+              onClick={() => setDictating(true)}
+              title="Dictate several items at once using your phone keyboard mic"
+            >
+              <span className="btn-emoji" aria-hidden="true">🎙️</span> Dictate
+            </button>
+            <button
+              type="button"
+              className="scan-trigger"
+              onClick={() => setScanning(true)}
+              title="Scan a barcode / label with your camera"
+            >
+              <span className="btn-emoji" aria-hidden="true">📷</span> Scan
+            </button>
+          </div>
+        </div>
+      )}
       <div className="field">
         <label htmlFor="name">Name</label>
         <input
@@ -256,14 +295,11 @@ export default function AddItemForm({
           />
         </div>
       </div>
-      <button
-        className="btn-primary"
-        onClick={submit}
-        disabled={busy}
-        type="button"
-      >
-        {busy ? "Adding…" : "Add to inventory"}
-      </button>
+      {embedded ? (
+        <div className="fresh-form-submit">{submitButton}</div>
+      ) : (
+        submitButton
+      )}
       {scanning ? (
         <ScanLabelModal
           withExpiry

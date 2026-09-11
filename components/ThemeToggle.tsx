@@ -1,14 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-type Theme = "light" | "dark";
-
-function readTheme(): Theme {
-  if (typeof document === "undefined") return "light";
-  const cur = document.documentElement.dataset.theme;
-  return cur === "dark" ? "dark" : "light";
-}
+import { applyTheme, readTheme, type Theme } from "@/lib/theme";
 
 export default function ThemeToggle() {
   // The actual theme is set by an inline script in <head> before paint;
@@ -24,12 +17,7 @@ export default function ThemeToggle() {
   function toggle() {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem("theme", next);
-    } catch {
-      // ignore — toggling still works for this session
-    }
+    applyTheme(next);
   }
 
   // Until we know the real theme, render a neutral placeholder so the icon

@@ -32,6 +32,9 @@ export function ensureTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS category_reviewed BOOLEAN NOT NULL DEFAULT FALSE
     `);
     await db.execute(sql`
+      ALTER TABLE items ADD COLUMN IF NOT EXISTS owner TEXT
+    `);
+    await db.execute(sql`
       CREATE TABLE IF NOT EXISTS categories (
         name TEXT PRIMARY KEY
       )
@@ -57,6 +60,10 @@ export function ensureTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS category_reviewed BOOLEAN NOT NULL DEFAULT FALSE
     `);
     await db.execute(sql`
+      ALTER TABLE grocery_items
+      ADD COLUMN IF NOT EXISTS pool TEXT NOT NULL DEFAULT 'house'
+    `);
+    await db.execute(sql`
       CREATE TABLE IF NOT EXISTS recipes (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         week_start DATE NOT NULL,
@@ -70,6 +77,16 @@ export function ensureTables(): Promise<void> {
       )
     `);
     await db.execute(sql`
+      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS servings INTEGER
+    `);
+    await db.execute(sql`
+      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS portions INTEGER
+    `);
+    await db.execute(sql`
+      ALTER TABLE recipes
+      ADD COLUMN IF NOT EXISTS no_meal BOOLEAN NOT NULL DEFAULT FALSE
+    `);
+    await db.execute(sql`
       CREATE TABLE IF NOT EXISTS favorite_recipes (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL,
@@ -78,6 +95,9 @@ export function ensureTables(): Promise<void> {
         ingredients JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
+    `);
+    await db.execute(sql`
+      ALTER TABLE favorite_recipes ADD COLUMN IF NOT EXISTS servings INTEGER
     `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS expense_categories (
@@ -95,6 +115,9 @@ export function ensureTables(): Promise<void> {
         paid_by TEXT NOT NULL,
         added TIMESTAMP NOT NULL DEFAULT NOW()
       )
+    `);
+    await db.execute(sql`
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS allocations JSONB
     `);
     await db.execute(sql`
       ALTER TABLE expenses ADD COLUMN IF NOT EXISTS occurred_on DATE

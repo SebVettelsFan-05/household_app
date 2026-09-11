@@ -11,6 +11,12 @@ type Props = {
   favBusy?: boolean;
   onToggleFavorite?: () => void;
   onClick: () => void;
+  // Marks the slot as having no shared dinner. Only on empty slots.
+  onNoMeal?: () => void;
+  // Marker actions: drop the marker and open a fresh recipe, or just drop it.
+  onPlanMeal?: () => void;
+  onClearNoMeal?: () => void;
+  busy?: boolean;
 };
 
 export default function RecipeCard({
@@ -21,15 +27,70 @@ export default function RecipeCard({
   favBusy,
   onToggleFavorite,
   onClick,
+  onNoMeal,
+  onPlanMeal,
+  onClearNoMeal,
+  busy = false,
 }: Props) {
   const label = shortDayLabel(weekStart, day);
 
   if (!recipe) {
     return (
-      <button type="button" className="recipe-card empty-slot" onClick={onClick}>
-        <div className="recipe-day-label">{label}</div>
-        <div className="recipe-empty-cta">+ Add recipe</div>
-      </button>
+      <div className="recipe-slot">
+        <button
+          type="button"
+          className="recipe-card empty-slot"
+          onClick={onClick}
+        >
+          <div className="recipe-day-label">{label}</div>
+          <div className="recipe-empty-cta">+ Add recipe</div>
+        </button>
+        {onNoMeal ? (
+          <div className="recipe-slot-actions">
+            <button
+              type="button"
+              className="recipe-quiet-action"
+              onClick={onNoMeal}
+              disabled={busy}
+            >
+              No meal
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (recipe.noMeal) {
+    return (
+      <div className="recipe-slot">
+        <div className="recipe-card no-meal-card">
+          <div className="recipe-day-label">{label}</div>
+          <div className="recipe-no-meal">No shared meal</div>
+        </div>
+        <div className="recipe-slot-actions">
+          {onPlanMeal ? (
+            <button
+              type="button"
+              className="recipe-quiet-action"
+              onClick={onPlanMeal}
+              disabled={busy}
+            >
+              Plan a meal
+            </button>
+          ) : null}
+          {onClearNoMeal ? (
+            <button
+              type="button"
+              className="recipe-quiet-action"
+              onClick={onClearNoMeal}
+              disabled={busy}
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      </div>
     );
   }
 

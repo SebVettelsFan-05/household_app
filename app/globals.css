@@ -1553,8 +1553,10 @@ button:active { transform: scale(0.98); }
 }
 .monthly-trip-row {
   display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px; font-size: 13px; padding: 4px 0;
 }
+.monthly-trip-row .alloc-summary { flex-basis: 100%; }
 .monthly-trip-label {
   flex: 1; min-width: 0; color: var(--ink);
 }
@@ -1663,4 +1665,135 @@ button:active { transform: scale(0.98); }
   margin: 0; padding: 8px 12px;
   background: rgba(220, 38, 38, 0.08); color: var(--danger, #b91c1c);
   border-radius: 8px; font-size: 13px;
+}
+
+
+/* ---------- Shared kitchen: expense allocations ---------- */
+
+/* Household settings modal */
+.settings-hint {
+  margin: 2px 0 8px; font-size: 12px; color: var(--ink-soft);
+}
+.settings-people { display: flex; flex-wrap: wrap; gap: 8px; }
+/* These labels live inside `.field`, whose `.field label` rule makes every
+   label a block in caps and `.field input` makes every input full width.
+   Both need a more specific selector to undo. */
+.field label.settings-person,
+.field label.alloc-member {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 500; color: var(--ink);
+  text-transform: none; letter-spacing: normal;
+  margin-bottom: 0; cursor: pointer;
+}
+.field label.settings-person input[type="checkbox"],
+.field label.alloc-member input[type="checkbox"] {
+  width: auto; min-width: 0; padding: 0; margin: 0;
+  border-radius: 0; accent-color: var(--accent);
+}
+.field label.settings-person {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 999px; padding: 7px 13px;
+}
+
+/* Receipt splitter */
+.alloc-editor { display: flex; flex-direction: column; gap: 8px; }
+.alloc-line {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px;
+}
+.alloc-line-head {
+  display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 8px;
+}
+.alloc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.alloc-chip {
+  background: var(--surface); border: 1px solid var(--line);
+  color: var(--ink-soft); padding: 6px 12px;
+  border-radius: 999px; font-family: inherit;
+  font-size: 13px; font-weight: 500; white-space: nowrap;
+  cursor: pointer;
+}
+.alloc-chip.active {
+  /* var(--bg) rather than white: the dark theme's accent is a light green,
+     and white-on-light-green is unreadable. */
+  background: var(--accent); border-color: var(--accent); color: var(--bg);
+}
+.alloc-chip:disabled { opacity: 0.55; cursor: not-allowed; }
+.alloc-line-amount { display: flex; align-items: center; gap: 6px; }
+.alloc-amount {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 4px 8px;
+}
+.alloc-amount-sign { font-size: 13px; color: var(--ink-soft); }
+.alloc-amount input {
+  width: 76px; border: none; background: transparent;
+  font-family: inherit; font-size: 14px; color: var(--ink);
+  text-align: right; font-variant-numeric: tabular-nums;
+  padding: 2px 0;
+}
+.alloc-amount input:focus { outline: none; }
+.alloc-amount:focus-within { border-color: var(--accent); }
+.alloc-remove {
+  background: transparent; border: none; color: var(--ink-soft);
+  font-size: 18px; line-height: 1; cursor: pointer;
+  width: 28px; height: 28px; border-radius: 50%;
+}
+.alloc-remove:hover { background: var(--surface-soft); color: var(--ink); }
+.alloc-note {
+  margin: 0; font-size: 12px; color: var(--ink-soft);
+}
+.alloc-members { display: flex; flex-wrap: wrap; gap: 10px; }
+.alloc-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.alloc-split {
+  background: var(--surface-soft); border: 1px dashed var(--line);
+  color: var(--ink); border-radius: 8px; padding: 7px 12px;
+  font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.alloc-split:hover { border-color: var(--accent); }
+.alloc-remainder {
+  font-size: 13px; color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.alloc-remainder.warn { color: var(--warn); font-weight: 600; }
+
+/* Compact "who was this for" line under an expense */
+.alloc-summary {
+  margin-top: 3px;
+  font-size: 12px; color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.alloc-summary.stacked { display: flex; flex-direction: column; }
+
+.split-row-pools { opacity: 0.85; }
+
+/* Recipes: no-meal markers, cook counts, scaling */
+.recipe-slot { display: flex; flex-direction: column; gap: 4px; }
+.recipe-slot-actions {
+  display: flex; gap: 10px; justify-content: center;
+}
+.recipe-quiet-action {
+  background: transparent; border: none;
+  color: var(--ink-soft); font-family: inherit;
+  font-size: 12px; padding: 2px 4px; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.recipe-quiet-action:hover { color: var(--ink); }
+.recipe-quiet-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.recipe-card.no-meal-card {
+  background: var(--surface-soft); border-style: dashed;
+  box-shadow: none; cursor: default; color: var(--ink-soft);
+  align-items: center; justify-content: center; min-height: 70px;
+}
+.recipe-no-meal { font-size: 14px; font-weight: 500; }
+.week-cooks { font-size: 12px; color: var(--ink-soft); }
+.archive-cooks {
+  margin: 0 0 10px; font-size: 13px; color: var(--ink-soft);
+}
+.scale-note {
+  margin: 0 0 8px; font-size: 12px; color: var(--ink-soft);
 }

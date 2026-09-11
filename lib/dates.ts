@@ -1,17 +1,10 @@
 /**
  * Date helpers for the recipes feature.
  *
- * The household cooks Sunday through Thursday, so each "week" is anchored to
- * its Sunday. Week boundaries are evaluated in the household timezone, not the
- * server or browser timezone. This matters on Vercel: Thursday evening in
- * Toronto is already Friday in UTC, but the current cooking week should not
- * roll forward until midnight in Toronto.
- *
- * Week boundary: the active cooking week advances at Friday 00:00 household
- * time. Before that (Sun-Thu) "this week" means the current calendar week's
- * Sunday; on Fri-Sat it means the upcoming Sunday. Once Thursday cooking ends,
- * the view skips the dead weekend and points at next week's slots so adds land
- * where the user expects.
+ * A cooking week is Sunday through Saturday, anchored to its Sunday. Week
+ * boundaries are evaluated in the household timezone, not the server or
+ * browser timezone: Saturday evening in Toronto is already Sunday in UTC,
+ * but "this week" must not roll forward until midnight in Toronto.
  */
 
 const DEFAULT_HOUSEHOLD_TIME_ZONE = "America/Toronto";
@@ -19,15 +12,17 @@ const DEFAULT_HOUSEHOLD_TIME_ZONE = "America/Toronto";
 export const HOUSEHOLD_TIME_ZONE =
   process.env.NEXT_PUBLIC_HOUSEHOLD_TIME_ZONE || DEFAULT_HOUSEHOLD_TIME_ZONE;
 
-export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu"] as const;
+export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 export const DAY_LONG = [
   "Sunday",
   "Monday",
   "Tuesday",
   "Wednesday",
   "Thursday",
+  "Friday",
+  "Saturday",
 ] as const;
-export const COOKING_DAYS = [0, 1, 2, 3, 4] as const;
+export const COOKING_DAYS = [0, 1, 2, 3, 4, 5, 6] as const;
 
 export function ymd(date: Date): string {
   const y = date.getFullYear();
@@ -146,7 +141,7 @@ function weekStartPartsFor(
 ): DateParts {
   const parts = zonedDateParts(date, timeZone);
   const dow = dayOfWeek(parts);
-  return addDaysToParts(parts, dow >= 5 ? 7 - dow : -dow);
+  return addDaysToParts(parts, -dow);
 }
 
 function timeZoneOffsetMs(date: Date, timeZone: string): number {
@@ -186,10 +181,7 @@ export function addDays(date: Date, n: number): Date {
 }
 
 /**
- * Sunday anchor for the "active" cooking week in the household timezone. On
- * Sun-Thu this is the current calendar week's Sunday; on Fri/Sat it skips
- * ahead to next Sunday so "this week" always has at least one cooking day
- * still ahead.
+ * Sunday anchor for the current cooking week in the household timezone.
  */
 export function weekStartFor(
   date: Date,
@@ -217,6 +209,30 @@ export function msUntilNextLocalMidnight(now: Date = new Date()): number {
   const next = zonedMidnightUtc(tomorrow, HOUSEHOLD_TIME_ZONE);
   const diff = next.getTime() - now.getTime();
   return diff > 0 ? diff : 1000; // safety: never schedule a zero/negative timeout
+}
+
+/** Today's date in the household timezone, as YYYY-MM-DD. */
+export function todayYmd(now: Date = new Date()): string {
+  return ymdFromParts(zonedDateParts(now));
+}
+
+/**
+ * Which day slot (0 = Sunday to 6 = Saturday) today occupies inside
+ * `weekStart`'s week, or -1 when today falls outside that week.
+ */
+export function todayCookingDay(
+  weekStart: string,
+  now: Date = new Date()
+): number {
+  const [wy, wm, wd] = weekStart.split("-").map(Number);
+  if (!wy || !wm || !wd) return -1;
+  const today = zonedDateParts(now);
+  const diff = Math.round(
+    (Date.UTC(today.year, today.month - 1, today.day) -
+      Date.UTC(wy, wm - 1, wd)) /
+      86400000
+  );
+  return diff >= 0 && diff <= 6 ? diff : -1;
 }
 
 /** Pretty label like "Sun, May 24". */

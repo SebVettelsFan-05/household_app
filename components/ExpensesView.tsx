@@ -14,6 +14,7 @@ import { type Expense } from "@/lib/types";
 
 type Props = {
   expenses: Expense[];
+  mealGroup: string[];
   loading: boolean;
   loadError: string | null;
   onExpensesChange: (next: Expense[]) => void;
@@ -22,6 +23,7 @@ type Props = {
 
 export default function ExpensesView({
   expenses,
+  mealGroup,
   loading,
   loadError,
   onExpensesChange,
@@ -100,6 +102,7 @@ export default function ExpensesView({
       ) : (
         <>
           <AddExpenseForm
+            mealGroup={mealGroup}
             onResult={(next, msg) => {
               onExpensesChange(next);
               onToast(msg);
@@ -165,6 +168,7 @@ export default function ExpensesView({
       {editing ? (
         <EditExpenseModal
           item={editing}
+          mealGroup={mealGroup}
           onClose={() => setEditingId(null)}
           onResult={(next, msg) => {
             onExpensesChange(next);

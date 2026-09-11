@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import AllocationSummary from "@/components/AllocationSummary";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { driveImageUrl } from "@/lib/imageResize";
 import { fmtMoney } from "@/lib/money";
-import type { Expense } from "@/lib/types";
+import { BUYERS, type Expense } from "@/lib/types";
 
 type Props = {
   item: Expense;
@@ -81,6 +82,10 @@ export default function ExpenseRow({ item, onClick, locked = false }: Props) {
               </>
             ) : null}
           </div>
+          <AllocationSummary
+            allocations={item.allocations ?? []}
+            memberCount={BUYERS.length}
+          />
         </div>
         <div className="item-qty">{fmtMoney(item.amountCents)}</div>
         {locked ? null : <div className="item-chev">›</div>}

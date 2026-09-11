@@ -7,6 +7,7 @@ import {
   updateGroceryRepo,
 } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
+import type { GroceryPool } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ type AddBody = {
   categoryReviewed?: boolean;
   store?: string;
   addedBy?: string;
+  pool?: GroceryPool;
 };
 
 export async function POST(req: NextRequest) {
@@ -44,6 +46,7 @@ export async function POST(req: NextRequest) {
       categoryReviewed: body.categoryReviewed === true,
       store: body.store,
       addedBy: body.addedBy ?? "",
+      pool: body.pool,
     });
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, grocery });
@@ -66,6 +69,7 @@ export async function PATCH(req: NextRequest) {
       categoryReviewed: body.categoryReviewed,
       store: body.store,
       addedBy: body.addedBy,
+      pool: body.pool,
       done: body.done,
     });
     after(() => mirrorToSheet());

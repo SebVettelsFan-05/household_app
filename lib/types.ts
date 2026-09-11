@@ -15,10 +15,28 @@ export type Item = {
   added: string;
   category: Category;
   categoryReviewed: boolean;
+  // Dormant: inventory is shared household food and the UI never sets this.
+  // The column and the API field are kept, see docs/SHARED_KITCHEN.md.
+  owner: string;
 };
 
 export const BUYERS = ["Arthur", "Daniel", "Eli", "Ibrahim", "Minh"] as const;
 export type Buyer = (typeof BUYERS)[number];
+
+export function isBuyer(name: string): name is Buyer {
+  return (BUYERS as readonly string[]).includes(name);
+}
+
+/**
+ * Dormant: every grocery row is household shopping and the UI never sets
+ * this. Stored rows default to "house"; see docs/SHARED_KITCHEN.md.
+ */
+export const GROCERY_POOLS = ["house", "meals", "personal"] as const;
+export type GroceryPool = (typeof GROCERY_POOLS)[number];
+
+/** Current meal-sharing members. Stored under household_settings.meal_group. */
+export type MealGroup = { members: string[] };
+export const MEAL_GROUP_KEY = "meal_group";
 
 export type GroceryItem = {
   id: string;
@@ -28,6 +46,7 @@ export type GroceryItem = {
   categoryReviewed: boolean;
   store: string;
   addedBy: string;
+  pool: GroceryPool;
   done: boolean;
   added: string;
 };
@@ -78,6 +97,12 @@ export type Recipe = {
   link: string;
   description: string;
   ingredients: RecipeIngredient[];
+  // Base servings the ingredient grams were written for (0 = unknown).
+  servings: number;
+  // How many portions are being cooked this time (0 = not set).
+  portions: number;
+  // True marks a day with no shared dinner. Name/cook/ingredients are empty.
+  noMeal: boolean;
 };
 
 export type FavoriteRecipe = {
@@ -86,6 +111,7 @@ export type FavoriteRecipe = {
   link: string;
   description: string;
   ingredients: RecipeIngredient[];
+  servings: number;
 };
 
 export type ListRecipesResponse = ApiOk<{ recipes: Recipe[] }>;
@@ -97,6 +123,22 @@ export type AddFavoriteResponse = ApiOk<{
   existed?: boolean;
 }>;
 
+export const ALLOCATION_KINDS = ["house", "meals", "personal", "custom"] as const;
+export type AllocationKind = (typeof ALLOCATION_KINDS)[number];
+
+/**
+ * One line of a receipt: how much, and who it was for. `splitAmong` is a
+ * snapshot of member names taken when the expense was saved, so changing
+ * the meal group later never rewrites a settled month. `personal` lines
+ * are the payer's own items on a shared receipt: `splitAmong` is empty and
+ * the line is excluded from settlement.
+ */
+export type ExpenseAllocation = {
+  kind: AllocationKind;
+  amountCents: number;
+  splitAmong: string[];
+};
+
 export type Expense = {
   id: string;
   name: string;
@@ -104,6 +146,9 @@ export type Expense = {
   category: Category;
   store: string;
   paidBy: string;
+  // Always at least one line; sums to amountCents. Legacy rows come back as
+  // a single "house" line over all members.
+  allocations: ExpenseAllocation[];
   // YYYY-MM-DD — the date the user said the expense happened. Falls back to
   // `added` when missing (legacy rows).
   occurredOn: string;

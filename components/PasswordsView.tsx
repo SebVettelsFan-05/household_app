@@ -6,6 +6,8 @@ import {
   useMemo,
   useState,
 } from "react";
+import ModalFrame from "@/components/ModalFrame";
+import ReceiptImage from "@/components/ReceiptImage";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
 import {
   addSharedAccount,
@@ -304,19 +306,12 @@ function PasswordLoadingModal({
   }, [onClose]);
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal">
-        <div className="loading password-detail-loading">
-          {loading ? <span className="spinner" /> : null}
-          Loading...
-        </div>
+    <ModalFrame title="Password entry" classicTitle={null} onClose={onClose}>
+      <div className="loading password-detail-loading">
+        {loading ? <span className="spinner" /> : null}
+        Loading...
       </div>
-    </div>
+    </ModalFrame>
   );
 }
 
@@ -467,20 +462,49 @@ function SharedAccountModal({
   }
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal modal-wide password-modal">
-        <div className="modal-header">
-          <h2>Edit password entry</h2>
-          <span className="modal-sub">
+    <>
+      <ModalFrame
+        title="Edit password entry"
+        subtitle={
+          <>
             {fields.length} field{fields.length === 1 ? "" : "s"}
-          </span>
-        </div>
-
+          </>
+        }
+        size="wide"
+        classicClass="password-modal"
+        onClose={onClose}
+        actions={
+        <>
+          <button
+            type="button"
+            className="btn-danger"
+            onClick={del}
+            disabled={busy}
+          >
+            Delete
+          </button>
+          <div className="right">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={onClose}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ background: "var(--accent)", color: "white" }}
+              onClick={save}
+              disabled={busy}
+            >
+              {busy ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </>
+      }
+      >
         <div className="field">
           <label htmlFor="password-edit-name">Place / account</label>
           <input
@@ -571,8 +595,15 @@ function SharedAccountModal({
                           })
                         }
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={field.value} alt={field.label || "Saved image"} />
+                        <ReceiptImage
+                          src={field.value}
+                          alt={field.label || "Saved image"}
+                          fallback={
+                            <span className="password-image-missing">
+                              Image could not be loaded
+                            </span>
+                          }
+                        />
                       </button>
                     ) : (
                       <div className="password-image-empty">No image selected</div>
@@ -663,36 +694,7 @@ function SharedAccountModal({
           </div>
         )}
 
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="btn-danger"
-            onClick={del}
-            disabled={busy}
-          >
-            Delete
-          </button>
-          <div className="right">
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={onClose}
-              disabled={busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              style={{ background: "var(--accent)", color: "white" }}
-              onClick={save}
-              disabled={busy}
-            >
-              {busy ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
-      </div>
+      </ModalFrame>
 
       {lightbox ? (
         <ReceiptLightbox
@@ -701,6 +703,6 @@ function SharedAccountModal({
           onClose={() => setLightbox(null)}
         />
       ) : null}
-    </div>
+    </>
   );
 }

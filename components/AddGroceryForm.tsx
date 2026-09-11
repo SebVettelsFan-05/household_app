@@ -1,19 +1,21 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { IconCamera, IconMic } from "@/components/fresh/icons";
 import DictateItemsModal from "@/components/DictateItemsModal";
+import PersonPicker from "@/components/PersonPicker";
 import ScanLabelModal, {
   type ScanResult,
 } from "@/components/ScanLabelModal";
 import { addGrocery } from "@/lib/client";
 import { fmtQty } from "@/lib/format";
+import { findInventoryMatch } from "@/lib/inventoryMatch";
 import {
   guessCategoryOrFallback,
   storedCategoryWeight,
 } from "@/lib/guessCategory";
 import { normalizeName } from "@/lib/normalize";
 import {
-  BUYERS,
   FALLBACK_CATEGORY,
   type Category,
   type CategoryDef,
@@ -29,6 +31,11 @@ type Props = {
   onResult: (grocery: GroceryItem[], toast: string) => void;
   onError: (message: string) => void;
   onManageCategories: () => void;
+  /**
+   * Rendered inside a fresh sheet, which already draws the card, the
+   * heading and the close button: drop this form's own chrome.
+   */
+  embedded?: boolean;
 };
 
 export default function AddGroceryForm({
@@ -38,6 +45,7 @@ export default function AddGroceryForm({
   onResult,
   onError,
   onManageCategories,
+  embedded = false,
 }: Props) {
   const [name, setName] = useState("");
   const [qty, setQty] = useState("");
@@ -135,12 +143,10 @@ export default function AddGroceryForm({
   ]);
 
   // Soft warning: if the typed name matches something already in the fridge.
-  const fridgeMatch = useMemo(() => {
-    const trimmed = name.trim();
-    if (!trimmed) return null;
-    const norm = normalizeName(trimmed);
-    return fridgeItems.find((i) => normalizeName(i.name) === norm) ?? null;
-  }, [name, fridgeItems]);
+  const fridgeMatch = useMemo(
+    () => findInventoryMatch(fridgeItems, name),
+    [name, fridgeItems]
+  );
 
   async function submit() {
     const trimmed = name.trim();
@@ -203,29 +209,61 @@ export default function AddGroceryForm({
 
   const matchQty = fridgeMatch ? fmtQty(fridgeMatch.quantity) : null;
 
+  const submitButton = (
+    <button
+      className="btn-primary"
+      onClick={submit}
+      disabled={busy}
+      type="button"
+    >
+      {busy ? "Adding…" : "Add to list"}
+    </button>
+  );
+
   return (
-    <section className="add-card">
-      <div className="add-card-head">
-        <h2>Add to list</h2>
-        <div className="add-card-actions">
+    <section className={embedded ? "fresh-embedded-form" : "add-card"}>
+      {embedded ? (
+        <div className="fresh-form-tools">
           <button
             type="button"
-            className="scan-trigger"
+            className="fresh-btn fresh-btn-small"
             onClick={() => setDictating(true)}
-            title="Dictate several items at once using your phone keyboard mic"
           >
-            🎙️ Dictate
+            <IconMic size={17} />
+            Dictate
           </button>
           <button
             type="button"
-            className="scan-trigger"
+            className="fresh-btn fresh-btn-small"
             onClick={() => setScanning(true)}
-            title="Scan a barcode / label with your camera"
           >
-            📷 Scan
+            <IconCamera size={17} />
+            Scan
           </button>
         </div>
-      </div>
+      ) : (
+        <div className="add-card-head">
+          <h2>Add to list</h2>
+          <div className="add-card-actions">
+            <button
+              type="button"
+              className="scan-trigger"
+              onClick={() => setDictating(true)}
+              title="Dictate several items at once using your phone keyboard mic"
+            >
+              <span className="btn-emoji" aria-hidden="true">🎙️</span> Dictate
+            </button>
+            <button
+              type="button"
+              className="scan-trigger"
+              onClick={() => setScanning(true)}
+              title="Scan a barcode / label with your camera"
+            >
+              <span className="btn-emoji" aria-hidden="true">📷</span> Scan
+            </button>
+          </div>
+        </div>
+      )}
       <div className="field">
         <label htmlFor="g-name">Name</label>
         <input
@@ -301,33 +339,19 @@ export default function AddGroceryForm({
         </div>
       </div>
 
-      <div className="field">
-        <label htmlFor="g-by">Added by</label>
-        <select
-          id="g-by"
-          className="select"
-          value={addedBy}
-          onChange={(e) => setAddedBy(e.target.value)}
-        >
-          <option value="" disabled>
-            Pick a name…
-          </option>
-          {BUYERS.map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </select>
-      </div>
+      <PersonPicker
+        id="g-by"
+        label="Added by"
+        value={addedBy}
+        onChange={setAddedBy}
+        emptyLabel="Pick a name…"
+      />
 
-      <button
-        className="btn-primary"
-        onClick={submit}
-        disabled={busy}
-        type="button"
-      >
-        {busy ? "Adding…" : "Add to list"}
-      </button>
+      {embedded ? (
+        <div className="fresh-form-submit">{submitButton}</div>
+      ) : (
+        submitButton
+      )}
       {scanning ? (
         <ScanLabelModal
           withExpiry={false}

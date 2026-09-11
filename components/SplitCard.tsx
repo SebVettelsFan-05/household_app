@@ -24,7 +24,23 @@ export type SplitLine = {
   // The full share for this person across whatever pools are being settled.
   // Pre-computed by the caller so this component is purely presentational.
   share: number;
+  // Optional sub-totals of `share`, shown as a second muted line so people
+  // can see why their share differs from someone else's.
+  house?: number;
+  meals?: number;
+  bills?: number;
+  rent?: number;
 };
+
+/** "House $a · Meals $b · Bills $c · Rent $d", zero parts dropped. */
+function shareParts(line: SplitLine): string {
+  const parts: string[] = [];
+  if (line.house) parts.push(`House ${fmtMoney(line.house)}`);
+  if (line.meals) parts.push(`Meals ${fmtMoney(line.meals)}`);
+  if (line.bills) parts.push(`Bills ${fmtMoney(line.bills)}`);
+  if (line.rent) parts.push(`Rent ${fmtMoney(line.rent)}`);
+  return parts.join(" · ");
+}
 
 type Props = {
   title?: string;
@@ -34,21 +50,11 @@ type Props = {
 export default function SplitCard({ title = "Split", lines }: Props) {
   const senders = lines
     .filter((l) => l.paid - l.share < 0)
-    .map((l) => ({
-      name: l.name,
-      paid: l.paid,
-      share: l.share,
-      amount: l.share - l.paid,
-    }))
+    .map((l) => ({ ...l, amount: l.share - l.paid }))
     .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
   const receivers = lines
     .filter((l) => l.paid - l.share > 0)
-    .map((l) => ({
-      name: l.name,
-      paid: l.paid,
-      share: l.share,
-      amount: l.paid - l.share,
-    }))
+    .map((l) => ({ ...l, amount: l.paid - l.share }))
     .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
   const evens = lines
     .filter((l) => l.paid - l.share === 0)
@@ -69,8 +75,13 @@ export default function SplitCard({ title = "Split", lines }: Props) {
                   <span className="split-amount">{fmtMoney(s.amount)}</span>
                 </div>
                 <div className="split-row-sub">
-                  Paid {fmtMoney(s.paid)} — Share {fmtMoney(s.share)}
+                  Paid {fmtMoney(s.paid)} · Share {fmtMoney(s.share)}
                 </div>
+                {shareParts(s) ? (
+                  <div className="split-row-sub split-row-pools">
+                    {shareParts(s)}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -88,8 +99,13 @@ export default function SplitCard({ title = "Split", lines }: Props) {
                   <span className="split-amount">{fmtMoney(r.amount)}</span>
                 </div>
                 <div className="split-row-sub">
-                  Paid {fmtMoney(r.paid)} — Share {fmtMoney(r.share)}
+                  Paid {fmtMoney(r.paid)} · Share {fmtMoney(r.share)}
                 </div>
+                {shareParts(r) ? (
+                  <div className="split-row-sub split-row-pools">
+                    {shareParts(r)}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>

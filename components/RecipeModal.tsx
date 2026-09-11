@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ModalFrame from "@/components/ModalFrame";
+import PersonPicker from "@/components/PersonPicker";
 import {
   addFavorite,
   addRecipe,
@@ -11,15 +13,20 @@ import {
   updateRecipe,
 } from "@/lib/client";
 import {
-  BUYERS,
   type CategoryDef,
   type FavoriteRecipe,
   type Recipe,
   type RecipeIngredient,
 } from "@/lib/types";
-import { DAY_LONG, shortDayLabel } from "@/lib/dates";
+import { COOKING_DAYS, DAY_LONG, shortDayLabel } from "@/lib/dates";
 import { findFavoriteMatch, isFavoriteMatch } from "@/lib/favoriteMatch";
 import IngredientList from "./IngredientList";
+
+/** Reads a small count field. Blank or junk means "not set" (0). */
+function countOf(text: string): number {
+  const n = Math.round(Number(text.trim()));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 export type RecipeFields = {
   weekStart: string;
@@ -29,6 +36,10 @@ export type RecipeFields = {
   link: string;
   description: string;
   ingredients: RecipeIngredient[];
+  // Servings the ingredient weights were written for (0 = unknown).
+  servings: number;
+  // Portions being cooked this time (0 = not set).
+  portions: number;
 };
 
 type Props = {
@@ -37,6 +48,8 @@ type Props = {
   initial: RecipeFields;
   categories: CategoryDef[];
   fridgeItems: import("@/lib/types").Item[];
+  // Effective meal group, already falling back to everyone when unset.
+  mealGroup: string[];
   // The two weeks currently visible (this week, next week). The user can
   // move/place a recipe in either of these slots from inside the modal.
   weekOptions: { weekStart: string; label: string }[];
@@ -54,6 +67,8 @@ type Props = {
     recipeName: string;
     ingredients: RecipeIngredient[];
     defaultAddedBy: string;
+    servings: number;
+    portions: number;
     onCategoriesReviewed: (ingredients: RecipeIngredient[]) => void;
   }) => void;
 };
@@ -64,6 +79,7 @@ export default function RecipeModal({
   initial,
   categories,
   fridgeItems,
+  mealGroup,
   weekOptions,
   favorites,
   onFavoritesChange,
@@ -84,6 +100,12 @@ export default function RecipeModal({
   );
   const [day, setDay] = useState<number>(initial.day);
   const [weekStart, setWeekStart] = useState<string>(initial.weekStart);
+  const [servings, setServings] = useState<string>(
+    initial.servings > 0 ? String(initial.servings) : ""
+  );
+  const [portions, setPortions] = useState<string>(
+    initial.portions > 0 ? String(initial.portions) : ""
+  );
   const [busy, setBusy] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
@@ -123,6 +145,12 @@ export default function RecipeModal({
       if (!description.trim() && data.description) {
         setDescription(data.description);
       }
+      // `servings` is newer than this client's response type — read it
+      // defensively so an older API just leaves the field blank.
+      const scraped = Number((data as { servings?: unknown }).servings ?? 0);
+      if (!servings.trim() && Number.isFinite(scraped) && scraped > 0) {
+        setServings(String(Math.round(scraped)));
+      }
       mergeIngredients(data.ingredients);
       if (data.ingredients.length === 0) {
         // Page loaded but had no usable ingredient data — steer straight to
@@ -130,7 +158,7 @@ export default function RecipeModal({
         setShowPaste(true);
         onResult(
           [],
-          "No ingredients found on the page — paste them below instead"
+          "No ingredients found on the page. Paste them below instead"
         );
         return;
       }
@@ -138,7 +166,7 @@ export default function RecipeModal({
       onResult(
         [],
         data.hasApproximate
-          ? `${summary} (some quantities are estimates — double-check)`
+          ? `${summary} (some quantities are estimates, double-check)`
           : summary
       );
     } catch (err) {
@@ -167,7 +195,7 @@ export default function RecipeModal({
       onResult(
         [],
         data.hasApproximate
-          ? `${summary} (some quantities are estimates — double-check)`
+          ? `${summary} (some quantities are estimates, double-check)`
           : summary
       );
     } catch (err) {
@@ -196,6 +224,8 @@ export default function RecipeModal({
       onError("Pick who's cooking");
       return;
     }
+    const servingsNum = countOf(servings);
+    const portionsNum = countOf(portions);
     setBusy(true);
     try {
       if (editing && recipeId) {
@@ -207,6 +237,8 @@ export default function RecipeModal({
           ingredients,
           day,
           weekStart,
+          servings: servingsNum,
+          portions: portionsNum,
         });
         onResult(res.recipes, "Saved");
       } else {
@@ -218,6 +250,8 @@ export default function RecipeModal({
           link: link || undefined,
           description: description || undefined,
           ingredients,
+          servings: servingsNum,
+          portions: portionsNum,
         });
         onResult(res.recipes, "Recipe added");
       }
@@ -295,194 +329,29 @@ export default function RecipeModal({
       recipeName: name.trim() || initial.name || "Recipe",
       ingredients,
       defaultAddedBy: assignedTo,
+      servings: countOf(servings),
+      portions: countOf(portions),
       onCategoriesReviewed: setIngredients,
     });
   }
 
+  // Cooks come from the meal group, but an existing recipe's cook stays
+  // selectable so editing it never silently reassigns the dinner.
+  const cookOptions =
+    !initial.assignedTo || mealGroup.includes(initial.assignedTo)
+      ? mealGroup
+      : [...mealGroup, initial.assignedTo];
+
   const label = weekStart ? shortDayLabel(weekStart, day) : DAY_LONG[day];
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal modal-wide">
-        <div className="modal-header">
-          <h2>{editing ? "Edit recipe" : "Add recipe"}</h2>
-          <span className="modal-sub">{label}</span>
-        </div>
-
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="r-week">Week</label>
-            <select
-              id="r-week"
-              className="select"
-              value={weekStart}
-              onChange={(e) => setWeekStart(e.target.value)}
-            >
-              {weekOptions.map((opt) => (
-                <option key={opt.weekStart} value={opt.weekStart}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="r-day">Day</label>
-            <select
-              id="r-day"
-              className="select"
-              value={day}
-              onChange={(e) => setDay(Number(e.target.value))}
-            >
-              {[0, 1, 2, 3, 4].map((d) => (
-                <option key={d} value={d}>
-                  {DAY_LONG[d]}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="field">
-          <label htmlFor="r-who">Cook</label>
-          <select
-            id="r-who"
-            className="select"
-            value={assignedTo}
-            onChange={(e) => setAssignedTo(e.target.value)}
-          >
-            <option value="" disabled>
-              Pick a cook…
-            </option>
-            {BUYERS.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="field">
-          <label htmlFor="r-name">Recipe name</label>
-          <input
-            id="r-name"
-            type="text"
-            placeholder="e.g. Thai green curry"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-
-        <div className="field">
-          <label htmlFor="r-link">Link (optional)</label>
-          <div className="link-row">
-            <input
-              id="r-link"
-              type="url"
-              placeholder="https://…"
-              value={link}
-              onChange={(e) => setLink(e.target.value)}
-            />
-            <button
-              type="button"
-              className="btn-secondary link-fetch"
-              onClick={fetchFromLink}
-              disabled={scraping || busy || !link.trim()}
-              title="Pull ingredients from the link automatically"
-            >
-              {scraping ? "Fetching…" : "Fetch"}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary link-fetch"
-              onClick={() => setShowPaste((v) => !v)}
-              disabled={scraping || busy}
-              aria-expanded={showPaste}
-              title="Paste an ingredient list copied from anywhere"
-            >
-              Paste
-            </button>
-          </div>
-        </div>
-
-        {showPaste ? (
-          <div className="field">
-            <label htmlFor="r-paste">
-              Pasted ingredients (one per line)
-            </label>
-            <textarea
-              id="r-paste"
-              className="textarea"
-              rows={5}
-              placeholder={"2 tbsp olive oil\n500g chicken thighs\n1 large onion"}
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-            />
-            <div className="link-row" style={{ marginTop: 8 }}>
-              <button
-                type="button"
-                className="btn-secondary link-fetch"
-                onClick={parsePasted}
-                disabled={pasting || busy || !pasteText.trim()}
-              >
-                {pasting ? "Parsing…" : "Add to ingredients"}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="field">
-          <label htmlFor="r-desc">Description / notes (optional)</label>
-          <textarea
-            id="r-desc"
-            className="textarea"
-            rows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Method notes, tweaks, who likes what…"
-          />
-        </div>
-
-        <div className="field">
-          <label>Ingredients</label>
-          <IngredientList
-            value={ingredients}
-            onChange={setIngredients}
-            categories={categories}
-            fridgeItems={fridgeItems}
-          />
-        </div>
-
-        <div className="recipe-actions-row">
-          <button
-            type="button"
-            className={`btn-secondary${isFavorited ? " is-favorited" : ""}`}
-            onClick={toggleFavorite}
-            disabled={busy || !name.trim()}
-            aria-pressed={isFavorited}
-            title={
-              isFavorited
-                ? "Remove this recipe from favorites"
-                : "Save this recipe to favorites"
-            }
-          >
-            {isFavorited ? "★ Favorited" : "☆ Favorite"}
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={addToGrocery}
-            disabled={busy || ingredients.length === 0}
-            title="Add ingredients to the grocery list"
-          >
-            Add to grocery
-          </button>
-        </div>
-
-        <div className="modal-actions">
+    <ModalFrame
+      title={editing ? "Edit recipe" : "Add recipe"}
+      subtitle={label}
+      size="wide"
+      onClose={onClose}
+      actions={
+        <>
           {editing ? (
             <button
               type="button"
@@ -514,8 +383,194 @@ export default function RecipeModal({
               {busy ? "Saving…" : "Save"}
             </button>
           </div>
+        </>
+      }
+    >
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor="r-week">Week</label>
+          <select
+            id="r-week"
+            className="select"
+            value={weekStart}
+            onChange={(e) => setWeekStart(e.target.value)}
+          >
+            {weekOptions.map((opt) => (
+              <option key={opt.weekStart} value={opt.weekStart}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="r-day">Day</label>
+          <select
+            id="r-day"
+            className="select"
+            value={day}
+            onChange={(e) => setDay(Number(e.target.value))}
+          >
+            {COOKING_DAYS.map((d) => (
+              <option key={d} value={d}>
+                {DAY_LONG[d]}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
-    </div>
+      <PersonPicker
+        id="r-who"
+        label="Cook"
+        value={assignedTo}
+        onChange={setAssignedTo}
+        emptyLabel="Pick a cook…"
+        people={cookOptions}
+      />
+
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor="r-servings">Recipe serves</label>
+          <input
+            id="r-servings"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            placeholder="e.g. 4"
+            value={servings}
+            onChange={(e) => setServings(e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="r-portions">Cooking for</label>
+          <input
+            id="r-portions"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            placeholder="e.g. 3"
+            value={portions}
+            onChange={(e) => setPortions(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="r-name">Recipe name</label>
+        <input
+          id="r-name"
+          type="text"
+          placeholder="e.g. Thai green curry"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+
+      <div className="field">
+        <label htmlFor="r-link">Link (optional)</label>
+        <div className="link-row">
+          <input
+            id="r-link"
+            type="url"
+            placeholder="https://…"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn-secondary link-fetch"
+            onClick={fetchFromLink}
+            disabled={scraping || busy || !link.trim()}
+            title="Pull ingredients from the link automatically"
+          >
+            {scraping ? "Fetching…" : "Fetch"}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary link-fetch"
+            onClick={() => setShowPaste((v) => !v)}
+            disabled={scraping || busy}
+            aria-expanded={showPaste}
+            title="Paste an ingredient list copied from anywhere"
+          >
+            Paste
+          </button>
+        </div>
+      </div>
+
+      {showPaste ? (
+        <div className="field">
+          <label htmlFor="r-paste">
+            Pasted ingredients (one per line)
+          </label>
+          <textarea
+            id="r-paste"
+            className="textarea"
+            rows={5}
+            placeholder={"2 tbsp olive oil\n500g chicken thighs\n1 large onion"}
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+          />
+          <div className="link-row" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn-secondary link-fetch"
+              onClick={parsePasted}
+              disabled={pasting || busy || !pasteText.trim()}
+            >
+              {pasting ? "Parsing…" : "Add to ingredients"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="field">
+        <label htmlFor="r-desc">Description / notes (optional)</label>
+        <textarea
+          id="r-desc"
+          className="textarea"
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Method notes, tweaks, who likes what…"
+        />
+      </div>
+
+      <div className="field">
+        <label>Ingredients</label>
+        <IngredientList
+          value={ingredients}
+          onChange={setIngredients}
+          categories={categories}
+          fridgeItems={fridgeItems}
+        />
+      </div>
+
+      <div className="recipe-actions-row">
+        <button
+          type="button"
+          className={`btn-secondary${isFavorited ? " is-favorited" : ""}`}
+          onClick={toggleFavorite}
+          disabled={busy || !name.trim()}
+          aria-pressed={isFavorited}
+          title={
+            isFavorited
+              ? "Remove this recipe from favorites"
+              : "Save this recipe to favorites"
+          }
+        >
+          <span className="btn-emoji" aria-hidden="true">{isFavorited ? "★ " : "☆ "}</span>
+          {isFavorited ? "Favorited" : "Favorite"}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={addToGrocery}
+          disabled={busy || ingredients.length === 0}
+          title="Add ingredients to the grocery list"
+        >
+          Add to grocery
+        </button>
+      </div>
+    </ModalFrame>
   );
 }

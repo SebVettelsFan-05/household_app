@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ModalFrame from "@/components/ModalFrame";
+import PersonPicker from "@/components/PersonPicker";
 import { deleteGrocery, updateGrocery } from "@/lib/client";
 import {
-  BUYERS,
   FALLBACK_CATEGORY,
   type Category,
   type CategoryDef,
@@ -100,86 +101,11 @@ export default function EditGroceryModal({
   }
 
   return (
-    <div
-      className="modal-bg"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal">
-        <h2>Edit grocery item</h2>
-        <div className="field">
-          <label htmlFor="eg-name">Name</label>
-          <input
-            id="eg-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <div className="field">
-          <div className="cat-pills-row">
-            <label>Category</label>
-            <button
-              type="button"
-              className="manage-link"
-              onClick={onManageCategories}
-            >
-              Manage
-            </button>
-          </div>
-          <CategoryPills
-            categories={categories}
-            value={cat}
-            onChange={(category) => {
-              setCat(category);
-              setCategoryReviewed(true);
-            }}
-          />
-        </div>
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="eg-qty">Quantity (g)</label>
-            <input
-              id="eg-qty"
-              type="number"
-              inputMode="numeric"
-              min={0}
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="eg-store">Store</label>
-            <input
-              id="eg-store"
-              type="text"
-              value={store}
-              onChange={(e) => setStore(e.target.value)}
-              placeholder="(optional)"
-            />
-          </div>
-        </div>
-        <div className="field">
-          <label htmlFor="eg-by">Added by</label>
-          <select
-            id="eg-by"
-            className="select"
-            value={addedBy}
-            onChange={(e) => setAddedBy(e.target.value)}
-          >
-            <option value="" disabled>
-              Pick a name…
-            </option>
-            {BUYERS.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="modal-actions">
+    <ModalFrame
+      title="Edit grocery item"
+      onClose={onClose}
+      actions={
+        <>
           <button
             type="button"
             className="btn-danger"
@@ -207,8 +133,68 @@ export default function EditGroceryModal({
               {busy ? "Saving…" : "Save"}
             </button>
           </div>
+        </>
+      }
+    >
+      <div className="field">
+        <label htmlFor="eg-name">Name</label>
+        <input
+          id="eg-name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <div className="cat-pills-row">
+          <label>Category</label>
+          <button
+            type="button"
+            className="manage-link"
+            onClick={onManageCategories}
+          >
+            Manage
+          </button>
+        </div>
+        <CategoryPills
+          categories={categories}
+          value={cat}
+          onChange={(category) => {
+            setCat(category);
+            setCategoryReviewed(true);
+          }}
+        />
+      </div>
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor="eg-qty">Quantity (g)</label>
+          <input
+            id="eg-qty"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="eg-store">Store</label>
+          <input
+            id="eg-store"
+            type="text"
+            value={store}
+            onChange={(e) => setStore(e.target.value)}
+            placeholder="(optional)"
+          />
         </div>
       </div>
-    </div>
+      <PersonPicker
+        id="eg-by"
+        label="Added by"
+        value={addedBy}
+        onChange={setAddedBy}
+        emptyLabel="Pick a name…"
+      />
+    </ModalFrame>
   );
 }

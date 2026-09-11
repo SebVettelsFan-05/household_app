@@ -35,6 +35,8 @@ type ParsedScrape = {
   description: string;
   ingredients: ParsedIngredient[];
   hasApproximate: boolean;
+  // Base servings from the site's recipeYield; 0 when it didn't say.
+  servings: number;
   source?: RecipeSource;
 };
 type CacheEntry = {
@@ -43,7 +45,7 @@ type CacheEntry = {
 };
 const CACHE = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24h
-const PARSER_VERSION = "v4";
+const PARSER_VERSION = "v5";
 const cacheKey = (url: string) => `${PARSER_VERSION}:${url}`;
 
 // Same-instance rate cap. Generous because this is a household app, not a
@@ -93,6 +95,8 @@ type ScrapeResponse = {
   // True when one or more rows had a unit we couldn't precisely convert
   // (volumes, mostly) — the UI surfaces this so the user double-checks.
   hasApproximate: boolean;
+  // Base servings the ingredient amounts were written for (0 = unknown).
+  servings: number;
   // Which extraction strategy produced the data (debugging/transparency).
   source?: string;
 };
@@ -161,6 +165,7 @@ export async function POST(req: NextRequest) {
         hasApproximate: parsedIngredients.some(
           (ingredient) => ingredient.approximate
         ),
+        servings: scraped.servings ?? 0,
         source: scraped.source,
       };
       CACHE.set(cacheId, {
@@ -199,6 +204,7 @@ export async function POST(req: NextRequest) {
       description: parsedScrape.description,
       ingredients,
       hasApproximate: parsedScrape.hasApproximate,
+      servings: parsedScrape.servings,
       source: parsedScrape.source,
     };
     return NextResponse.json(result);

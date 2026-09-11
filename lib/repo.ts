@@ -5,7 +5,7 @@ import {
   randomBytes,
   randomUUID,
 } from "crypto";
-import { eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { db } from "@/db/client";
 import {
@@ -24,16 +24,21 @@ import { thisWeekStart, nextWeekStart } from "./dates";
 import type {
   CategoryDef,
   Expense,
+  ExpenseAllocation,
   ExpenseCategoryDef,
   FavoriteRecipe,
   GroceryItem,
+  GroceryPool,
   Item,
+  MealGroup,
   Recipe,
   RecipeIngredient,
   SharedAccount,
   SharedAccountField,
   SharedFieldKind,
 } from "./types";
+import { BUYERS, GROCERY_POOLS, MEAL_GROUP_KEY, isBuyer } from "./types";
+import { allocationsFromStored, normalizeAllocations } from "./allocations";
 import {
   DEFAULT_CATEGORIES,
   DEFAULT_EXPENSE_CATEGORIES,
@@ -58,7 +63,29 @@ function rowToItem(r: typeof itemsTable.$inferSelect): Item {
     added: formatDate(r.added),
     category: r.category,
     categoryReviewed: r.categoryReviewed,
+    owner: r.owner || "",
   };
+}
+
+/**
+ * "" (shared) or one of the household members. Anything else is rejected.
+ * The UI no longer sets an owner — the column is dormant, see
+ * docs/SHARED_KITCHEN.md — but the API still accepts one.
+ */
+function validateOwner(input: string | undefined): string {
+  const owner = String(input ?? "").trim();
+  if (!owner) return "";
+  if (!isBuyer(owner)) throw new Error(`Unknown household member: ${owner}`);
+  return owner;
+}
+
+/** Dormant like `owner`: stored, never used to scope anything. */
+function validatePool(input: string | undefined): GroceryPool {
+  const pool = String(input ?? "").trim() || "house";
+  if (!(GROCERY_POOLS as readonly string[]).includes(pool)) {
+    throw new Error(`Pool must be one of ${GROCERY_POOLS.join(", ")}`);
+  }
+  return pool as GroceryPool;
 }
 
 function rowToCategory(r: typeof categoriesTable.$inferSelect): CategoryDef {
@@ -241,6 +268,8 @@ export type AddItemInput = {
   expiry?: string;
   category?: string;
   categoryReviewed?: boolean;
+  // "" = shared household food; a member name = that person's own food.
+  owner?: string;
 };
 
 export async function addItemRepo(
@@ -260,7 +289,9 @@ export async function addItemRepo(
     ? requireValidCategory(input.category, validCats)
     : pickCategory(input.category, validCats);
   const expiry = input.expiry ? input.expiry : null;
+  const owner = validateOwner(input.owner);
 
+  // One shelf, one row per thing: the merge is a plain normalized-name match.
   const all = await db.select().from(itemsTable);
   const normNew = normalizeName(trimmedName);
   const existing = all.find((it) => normalizeName(it.name) === normNew);
@@ -307,6 +338,7 @@ export async function addItemRepo(
     expiry,
     category,
     categoryReviewed: input.categoryReviewed === true,
+    owner: owner || null,
   });
   return { items: await listItemsRepo(), merged: false };
 }
@@ -317,7 +349,9 @@ export async function updateItemRepo(input: UpdateItemInput): Promise<Item[]> {
   if (!input.id) throw new Error("id required");
   const trimmedName = String(input.name ?? "").trim();
   if (!trimmedName) throw new Error("Name required");
-  const qty = Number(input.quantity);
+  // Same rule as add — an edit must not be able to park a 0 or fractional
+  // quantity on a row that add would have rejected.
+  const qty = requirePositiveIntegerQuantity(input.quantity);
 
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const category = input.categoryReviewed
@@ -328,11 +362,14 @@ export async function updateItemRepo(input: UpdateItemInput): Promise<Item[]> {
     .update(itemsTable)
     .set({
       name: trimmedName,
-      quantity: qty || 0,
+      quantity: qty,
       expiry: input.expiry ? input.expiry : null,
       category,
       ...(input.categoryReviewed !== undefined
         ? { categoryReviewed: input.categoryReviewed === true }
+        : {}),
+      ...(input.owner !== undefined
+        ? { owner: validateOwner(input.owner) || null }
         : {}),
     })
     .where(eq(itemsTable.id, input.id));
@@ -357,6 +394,9 @@ function rowToGrocery(r: typeof groceryTable.$inferSelect): GroceryItem {
     categoryReviewed: r.categoryReviewed,
     store: r.store || "",
     addedBy: r.addedBy,
+    pool: (GROCERY_POOLS as readonly string[]).includes(r.pool)
+      ? (r.pool as GroceryPool)
+      : "house",
     done: r.done,
     added: formatDate(r.added),
   };
@@ -374,6 +414,7 @@ export type AddGroceryInput = {
   categoryReviewed?: boolean;
   store?: string;
   addedBy: string;
+  pool?: GroceryPool;
 };
 
 export async function addGroceryRepo(
@@ -390,6 +431,7 @@ export async function addGroceryRepo(
     ? requireValidCategory(input.category, validCats)
     : pickCategory(input.category, validCats);
   const store = input.store ? String(input.store).trim() : null;
+  const pool = validatePool(input.pool);
   const canonicalName = titleCaseName(trimmedName);
 
   // Case-insensitive merge against open (not-done) rows. Done rows are left
@@ -433,6 +475,7 @@ export async function addGroceryRepo(
     categoryReviewed: input.categoryReviewed === true,
     store,
     addedBy,
+    pool,
   });
   return listGroceryRepo();
 }
@@ -445,6 +488,7 @@ export type UpdateGroceryInput = {
   categoryReviewed?: boolean;
   store?: string;
   addedBy?: string;
+  pool?: GroceryPool;
   done?: boolean;
 };
 
@@ -479,6 +523,9 @@ export async function updateGroceryRepo(
     const a = String(input.addedBy).trim();
     if (!a) throw new Error("Added by required");
     patch.addedBy = a;
+  }
+  if (input.pool !== undefined) {
+    patch.pool = validatePool(input.pool);
   }
   if (input.done !== undefined) {
     patch.done = !!input.done;
@@ -574,7 +621,7 @@ export async function moveDoneGroceryToItemsRepo(): Promise<{
         .values({
           name,
           quantity: g.quantity || 0,
-          // Inventory items don't currently carry store/addedBy.
+          // Inventory items don't currently carry store/addedBy/owner.
           category,
           categoryReviewed,
         })
@@ -609,6 +656,7 @@ export async function bulkAddGroceryRepo(
     categoryReviewed?: boolean;
     store?: string;
     addedBy: string;
+    pool?: GroceryPool;
   }>
 ): Promise<GroceryItem[]> {
   if (inputs.length === 0) return listGroceryRepo();
@@ -640,6 +688,7 @@ export async function bulkAddGroceryRepo(
       categoryReviewed,
       store: input.store ? String(input.store).trim() || null : null,
       addedBy,
+      pool: validatePool(input.pool),
     };
   });
 
@@ -672,98 +721,92 @@ export async function bulkAddGroceryRepo(
   // Snapshot the current rows once so we can match against existing open
   // entries by normalized name (same merge rule as addGroceryRepo).
   const existingRows = await db.select().from(groceryTable);
-  type MergeTarget = {
-    id: string;
-    name: string;
-    quantity: number;
-    category: string;
-    categoryReviewed: boolean;
-    addedBy: string;
-  };
-  const openByNorm = new Map<string, MergeTarget>();
-  for (const r of existingRows) {
-    if (!r.done) {
-      openByNorm.set(normalizeName(r.name), {
-        id: r.id,
-        name: r.name,
-        quantity: r.quantity,
-        category: r.category,
-        categoryReviewed: r.categoryReviewed,
-        addedBy: r.addedBy,
-      });
-    }
-  }
+  const openRows = existingRows
+    .filter((r) => !r.done)
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      norm: normalizeName(r.name),
+      quantity: r.quantity,
+      category: r.category,
+      categoryReviewed: r.categoryReviewed,
+      addedBy: r.addedBy,
+      changed: false,
+    }));
 
-
-  // Validate every existing-row sum before the first update, so a late
-  // integer overflow cannot partially commit earlier recipe ingredients.
-  for (const input of prepared) {
-    const existing = openByNorm.get(input.norm);
-    if (existing) {
-      requirePositiveIntegerQuantity(
-        existing.quantity + input.quantity,
-        `Combined quantity for "${input.name}"`
-      );
-    }
-  }
-
+  // Fold everything into the in-memory snapshot first, so every combined
+  // quantity is validated before the first write and a late integer
+  // overflow cannot partially commit earlier recipe ingredients.
   const toInsert: Array<typeof groceryTable.$inferInsert> = [];
-  const writes: BatchItem<"pg">[] = [];
   for (const input of prepared) {
-    const existing = openByNorm.get(input.norm);
-
-    if (existing) {
-      const nextQty = existing.quantity + input.quantity;
-      const nextAddedBy = mergeAddedBy(existing.addedBy, input.addedBy);
-      const replaceCategory = shouldReplaceStoredCategory(
-        existing.category,
-        existing.categoryReviewed,
-        input.category,
-        input.categoryReviewed,
-        validCats
-      );
-      const nextCategory = replaceCategory
-        ? input.category
-        : existing.category;
-      const nextCategoryReviewed = replaceCategory
-        ? input.categoryReviewed
-        : existing.categoryReviewed;
-      writes.push(
-        db
-          .update(groceryTable)
-          .set({
-            quantity: nextQty,
-            name: input.name,
-            addedBy: nextAddedBy,
-            ...(replaceCategory
-              ? {
-                  category: nextCategory,
-                  categoryReviewed: nextCategoryReviewed,
-                }
-              : {}),
-          })
-          .where(eq(groceryTable.id, existing.id))
-      );
-    } else {
-      const row = {
+    const target = openRows.find((o) => o.norm === input.norm);
+    if (!target) {
+      toInsert.push({
         name: input.name,
         quantity: input.quantity,
         category: input.category,
         categoryReviewed: input.categoryReviewed,
         store: input.store,
         addedBy: input.addedBy,
-      };
-      toInsert.push(row);
+        pool: input.pool,
+      });
+      continue;
     }
+    target.quantity = requirePositiveIntegerQuantity(
+      target.quantity + input.quantity,
+      `Combined quantity for "${input.name}"`
+    );
+    target.name = input.name;
+    target.addedBy = mergeAddedBy(target.addedBy, input.addedBy);
+    if (
+      shouldReplaceStoredCategory(
+        target.category,
+        target.categoryReviewed,
+        input.category,
+        input.categoryReviewed,
+        validCats
+      )
+    ) {
+      target.category = input.category;
+      target.categoryReviewed = input.categoryReviewed;
+    }
+    target.changed = true;
   }
 
+  const writes: BatchItem<"pg">[] = [];
+  for (const target of openRows) {
+    if (!target.changed) continue;
+    writes.push(
+      db
+        .update(groceryTable)
+        .set({
+          quantity: target.quantity,
+          name: target.name,
+          addedBy: target.addedBy,
+          category: target.category,
+          categoryReviewed: target.categoryReviewed,
+        })
+        .where(eq(groceryTable.id, target.id))
+    );
+  }
   if (toInsert.length > 0) {
     writes.push(db.insert(groceryTable).values(toInsert));
   }
   if (writes.length > 0) {
-    await db.batch(
-      writes as [BatchItem<"pg">, ...BatchItem<"pg">[]]
-    );
+    // `batch` only exists on the neon-http driver (it runs the statements
+    // in one round trip / transaction). The local node-postgres driver used
+    // for dev and smoke tests has no batch, so fall back to sequential
+    // awaits there.
+    const batchable = db as unknown as {
+      batch?: (items: [BatchItem<"pg">, ...BatchItem<"pg">[]]) => Promise<unknown>;
+    };
+    if (typeof batchable.batch === "function") {
+      await batchable.batch(
+        writes as [BatchItem<"pg">, ...BatchItem<"pg">[]]
+      );
+    } else {
+      for (const w of writes) await w;
+    }
   }
   return listGroceryRepo();
 }
@@ -806,6 +849,9 @@ function rowToRecipe(r: typeof recipesTable.$inferSelect): Recipe {
     link: r.link || "",
     description: r.description || "",
     ingredients: Array.isArray(r.ingredients) ? r.ingredients : [],
+    servings: r.servings ?? 0,
+    portions: r.portions ?? 0,
+    noMeal: r.noMeal,
   };
 }
 
@@ -816,6 +862,7 @@ function rowToFavorite(r: typeof favoritesTable.$inferSelect): FavoriteRecipe {
     link: r.link || "",
     description: r.description || "",
     ingredients: Array.isArray(r.ingredients) ? r.ingredients : [],
+    servings: r.servings ?? 0,
   };
 }
 
@@ -837,7 +884,8 @@ export async function listArchivedRecipesRepo(): Promise<Recipe[]> {
     .select()
     .from(recipesTable)
     .where(lt(recipesTable.weekStart, cutoff));
-  const archive = rows.map(rowToRecipe);
+  // "No meal" markers are bookkeeping, not recipes — never archive them.
+  const archive = rows.filter((r) => !r.noMeal).map(rowToRecipe);
   archive.sort((a, b) => {
     if (a.weekStart !== b.weekStart) return b.weekStart.localeCompare(a.weekStart);
     return a.day - b.day;
@@ -853,27 +901,92 @@ export type AddRecipeInput = {
   link?: string;
   description?: string;
   ingredients?: unknown;
+  servings?: number;
+  portions?: number;
+  noMeal?: boolean;
 };
+
+/** Non-negative whole number; 0 and undefined both mean "not set" (null). */
+function validateRecipeCount(
+  input: number | undefined,
+  label: string
+): number | null {
+  if (input === undefined || input === null) return null;
+  const n = Number(input);
+  if (!Number.isInteger(n) || n < 0 || n > MAX_POSTGRES_INTEGER) {
+    throw new Error(`${label} must be a whole number of 0 or more`);
+  }
+  return n === 0 ? null : n;
+}
+
+function validateRecipeSlot(input: {
+  day?: number;
+  weekStart?: string;
+}) {
+  if (typeof input.day !== "number" || input.day < 0 || input.day > 6) {
+    throw new Error("Day must be Sunday through Saturday (0-6)");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.weekStart))) {
+    throw new Error("weekStart must be YYYY-MM-DD");
+  }
+}
 
 function validateRecipeBase(input: AddRecipeInput) {
   const name = String(input.name ?? "").trim();
   if (!name) throw new Error("Recipe name required");
   const assignedTo = String(input.assignedTo ?? "").trim();
   if (!assignedTo) throw new Error("Assigned cook required");
-  if (typeof input.day !== "number" || input.day < 0 || input.day > 4) {
-    throw new Error("Day must be Sunday through Thursday (0–4)");
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.weekStart))) {
-    throw new Error("weekStart must be YYYY-MM-DD");
-  }
+  validateRecipeSlot(input);
   return { name, assignedTo };
 }
 
 export async function addRecipeRepo(
   input: AddRecipeInput
 ): Promise<Recipe[]> {
-  const { name, assignedTo } = validateRecipeBase(input);
+  const noMeal = input.noMeal === true;
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
+
+  // A day holds either a recipe or a "no meal" marker, never both.
+  if (noMeal) {
+    validateRecipeSlot(input);
+    const sameSlot = await recipesInSlot(input);
+    if (sameSlot.some((r) => !r.noMeal)) {
+      throw new Error("That day already has a recipe");
+    }
+    if (sameSlot.some((r) => r.noMeal)) return listRecipesRepo();
+    await db.insert(recipesTable).values({
+      weekStart: input.weekStart,
+      day: input.day,
+      assignedTo: "",
+      name: "",
+      link: null,
+      description: input.description
+        ? String(input.description).trim() || null
+        : null,
+      ingredients: [],
+      servings: null,
+      portions: null,
+      noMeal: true,
+    });
+    return listRecipesRepo();
+  }
+
+  const { name, assignedTo } = validateRecipeBase(input);
+  // A day holds one recipe. Filling a day that was marked "no meal"
+  // replaces the marker.
+  const sameSlot = await recipesInSlot(input);
+  if (sameSlot.some((r) => !r.noMeal)) {
+    throw new Error("That day already has a recipe");
+  }
+  const markers = sameSlot.filter((r) => r.noMeal);
+  if (markers.length > 0) {
+    await db.delete(recipesTable).where(
+      inArray(
+        recipesTable.id,
+        markers.map((m) => m.id)
+      )
+    );
+  }
   await db.insert(recipesTable).values({
     weekStart: input.weekStart,
     day: input.day,
@@ -884,8 +997,28 @@ export async function addRecipeRepo(
       ? String(input.description).trim() || null
       : null,
     ingredients: sanitizeIngredients(input.ingredients, validCats),
+    servings: validateRecipeCount(input.servings, "Servings"),
+    portions: validateRecipeCount(input.portions, "Portions"),
+    noMeal: false,
   });
   return listRecipesRepo();
+}
+
+/** Rows already sitting on the given week + day. */
+async function recipesInSlot(input: {
+  weekStart?: string;
+  day?: number;
+}): Promise<Array<typeof recipesTable.$inferSelect>> {
+  if (!input.weekStart || typeof input.day !== "number") return [];
+  return db
+    .select()
+    .from(recipesTable)
+    .where(
+      and(
+        eq(recipesTable.weekStart, input.weekStart),
+        eq(recipesTable.day, input.day)
+      )
+    );
 }
 
 export type UpdateRecipeInput = Partial<AddRecipeInput> & { id: string };
@@ -896,20 +1029,23 @@ export async function updateRecipeRepo(
   if (!input.id) throw new Error("id required");
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
 
+  // A "no meal" marker has no name or cook, so those requirements are lifted
+  // when the patch is turning the row into one.
+  const makingMarker = input.noMeal === true;
   const patch: Partial<typeof recipesTable.$inferInsert> = {};
-  if (input.name !== undefined) {
+  if (input.name !== undefined && !makingMarker) {
     const t = String(input.name).trim();
     if (!t) throw new Error("Recipe name required");
     patch.name = t;
   }
-  if (input.assignedTo !== undefined) {
+  if (input.assignedTo !== undefined && !makingMarker) {
     const t = String(input.assignedTo).trim();
     if (!t) throw new Error("Assigned cook required");
     patch.assignedTo = t;
   }
   if (input.day !== undefined) {
-    if (input.day < 0 || input.day > 4)
-      throw new Error("Day must be 0–4 (Sun–Thu)");
+    if (input.day < 0 || input.day > 6)
+      throw new Error("Day must be Sunday through Saturday (0-6)");
     patch.day = input.day;
   }
   if (input.weekStart !== undefined) {
@@ -927,6 +1063,60 @@ export async function updateRecipeRepo(
   }
   if (input.ingredients !== undefined) {
     patch.ingredients = sanitizeIngredients(input.ingredients, validCats);
+  }
+  if (input.servings !== undefined) {
+    patch.servings = validateRecipeCount(input.servings, "Servings");
+  }
+  if (input.portions !== undefined) {
+    patch.portions = validateRecipeCount(input.portions, "Portions");
+  }
+  if (input.noMeal !== undefined) {
+    patch.noMeal = input.noMeal === true;
+    // Turning a row into a marker strips everything a meal carried.
+    if (patch.noMeal) {
+      patch.name = "";
+      patch.assignedTo = "";
+      patch.ingredients = [];
+      patch.servings = null;
+      patch.portions = null;
+    }
+  }
+
+  // Slot invariant (a day holds a recipe or a marker, never both) and the
+  // "a real recipe has a name and a cook" rule both need the merged row.
+  const existingRows = await db
+    .select()
+    .from(recipesTable)
+    .where(eq(recipesTable.id, input.id))
+    .limit(1);
+  if (existingRows.length === 0) throw new Error("Recipe not found");
+  const merged = { ...existingRows[0], ...patch };
+  if (!merged.noMeal) {
+    if (!String(merged.name ?? "").trim()) throw new Error("Recipe name required");
+    if (!String(merged.assignedTo ?? "").trim()) throw new Error("Assigned cook required");
+  }
+  const moving =
+    (patch.day !== undefined && patch.day !== existingRows[0].day) ||
+    (patch.weekStart !== undefined && patch.weekStart !== existingRows[0].weekStart) ||
+    (patch.noMeal !== undefined && patch.noMeal !== existingRows[0].noMeal);
+  if (moving) {
+    const others = (
+      await recipesInSlot({ weekStart: merged.weekStart, day: merged.day })
+    ).filter((r) => r.id !== input.id);
+    if (merged.noMeal) {
+      if (others.some((r) => !r.noMeal)) throw new Error("That day already has a recipe");
+      if (others.length > 0) {
+        // Already marked; drop this row instead of keeping two markers.
+        await db.delete(recipesTable).where(eq(recipesTable.id, input.id));
+        return listRecipesRepo();
+      }
+    } else {
+      if (others.some((r) => !r.noMeal)) throw new Error("That day already has a recipe");
+      const markers = others.filter((r) => r.noMeal);
+      if (markers.length > 0) {
+        await db.delete(recipesTable).where(inArray(recipesTable.id, markers.map((m) => m.id)));
+      }
+    }
   }
 
   await db.update(recipesTable).set(patch).where(eq(recipesTable.id, input.id));
@@ -951,6 +1141,7 @@ export async function addFavoriteRepo(input: {
   link?: string;
   description?: string;
   ingredients?: unknown;
+  servings?: number;
 }): Promise<{ favorites: FavoriteRecipe[]; existed: boolean }> {
   const name = String(input.name ?? "").trim();
   if (!name) throw new Error("Name required");
@@ -980,6 +1171,11 @@ export async function addFavoriteRepo(input: {
       ? String(input.description).trim() || null
       : null,
     ingredients: sanitizeIngredients(input.ingredients, validCats),
+    // A favorite that never learned its base servings just stores null.
+    servings:
+      Number.isInteger(Number(input.servings)) && Number(input.servings) > 0
+        ? Number(input.servings)
+        : null,
   });
   return { favorites: await listFavoritesRepo(), existed: false };
 }
@@ -1126,6 +1322,9 @@ function rowToExpense(r: typeof expensesTable.$inferSelect): Expense {
     category: r.category,
     store: r.store || "",
     paidBy: r.paidBy,
+    // NULL (or unreadable) allocations mean a pre-feature row: one house
+    // line over everyone, which is exactly the old five-way behaviour.
+    allocations: allocationsFromStored(r.allocations, r.amountCents),
     // Legacy rows didn't have occurred_on — fall back to the creation date so
     // monthly bucketing/display stays sensible.
     occurredOn: r.occurredOn || formatDate(r.added),
@@ -1173,12 +1372,38 @@ export async function listExpensesRepo(): Promise<Expense[]> {
   return rows.map(rowToExpense);
 }
 
+/**
+ * The household members who currently share dinners, per the `meal_group`
+ * setting. Anything unrecognised is dropped; an empty result means the
+ * group hasn't been set up and `meals` allocations can't be resolved.
+ */
+export async function currentMealGroup(): Promise<string[]> {
+  const raw = await getSettingRepo(MEAL_GROUP_KEY);
+  const members =
+    raw && typeof raw === "object" && Array.isArray((raw as MealGroup).members)
+      ? (raw as MealGroup).members
+      : [];
+  return members.map((m) => String(m ?? "").trim()).filter(isBuyer);
+}
+
+/** The payer has to be a household member, or settlement silently drops them. */
+function validatePaidBy(input: string | undefined): string {
+  const paidBy = String(input ?? "").trim();
+  if (!paidBy) throw new Error("Paid by required");
+  if (!isBuyer(paidBy)) {
+    throw new Error(`"${paidBy}" is not a household member`);
+  }
+  return paidBy;
+}
+
 export type AddExpenseInput = {
   amountCents: number;
   store?: string;
   paidBy: string;
   occurredOn?: string;
   description?: string;
+  // Already normalised by the caller (see normalizeAllocations).
+  allocations: ExpenseAllocation[];
   receiptUrl?: string;
   receiptFileId?: string;
   receiptMime?: string;
@@ -1191,8 +1416,13 @@ export async function addExpenseRepo(
   if (!Number.isFinite(amountCents) || amountCents <= 0) {
     throw new Error("Amount must be greater than zero");
   }
-  const paidBy = String(input.paidBy ?? "").trim();
-  if (!paidBy) throw new Error("Paid by required");
+  const paidBy = validatePaidBy(input.paidBy);
+  // Re-checked here rather than trusted: the repo is the last gate before
+  // storage, and a stored expense whose lines don't sum breaks settlement.
+  const allocations = normalizeAllocations(input.allocations, amountCents, {
+    members: BUYERS,
+    mealGroup: await currentMealGroup(),
+  });
 
   const store = input.store ? String(input.store).trim() : "";
   const description = input.description
@@ -1207,6 +1437,7 @@ export async function addExpenseRepo(
     category: EXPENSE_FALLBACK,
     store: store || null,
     paidBy,
+    allocations,
     occurredOn,
     description: description || null,
     receiptUrl: input.receiptUrl || null,
@@ -1223,6 +1454,8 @@ export type UpdateExpenseInput = {
   paidBy?: string;
   occurredOn?: string;
   description?: string;
+  // Raw client input; normalised here against the row's *final* amount.
+  allocations?: unknown;
   // Set together when replacing the attached receipt. Caller is responsible
   // for deleting the old Drive file *after* the DB update succeeds.
   receiptUrl?: string;
@@ -1244,9 +1477,7 @@ export async function updateExpenseRepo(
     patch.amountCents = cents;
   }
   if (input.paidBy !== undefined) {
-    const p = String(input.paidBy).trim();
-    if (!p) throw new Error("Paid by required");
-    patch.paidBy = p;
+    patch.paidBy = validatePaidBy(input.paidBy);
   }
   if (input.description !== undefined) {
     const d = String(input.description).trim();
@@ -1262,17 +1493,51 @@ export async function updateExpenseRepo(
     patch.receiptMime = input.receiptMime || null;
   }
 
-  // Store and date both feed into the auto-name, so if either changes we
-  // need both current values to rebuild it. Fetch the existing row, merge
-  // in the patch, and recompute the display name.
-  if (input.store !== undefined || input.occurredOn !== undefined) {
+  // Store and date both feed into the auto-name; allocations have to be
+  // re-checked against the row's final amount. Either way we need the
+  // current row, so fetch it once.
+  const needsRow =
+    input.store !== undefined ||
+    input.occurredOn !== undefined ||
+    input.allocations !== undefined ||
+    input.amountCents !== undefined;
+  let row: typeof expensesTable.$inferSelect | null = null;
+  if (needsRow) {
     const existing = await db
       .select()
       .from(expensesTable)
       .where(eq(expensesTable.id, input.id))
       .limit(1);
     if (existing.length === 0) throw new Error("Expense not found");
-    const row = existing[0];
+    row = existing[0];
+  }
+
+  if (row) {
+    const finalAmount = patch.amountCents ?? row.amountCents;
+    if (input.allocations !== undefined) {
+      // Names already on this row's snapshot stay valid even if they have
+      // left the household, so an untouched edit round-trips.
+      const allowed = allocationsFromStored(row.allocations, row.amountCents)
+        .flatMap((a) => a.splitAmong)
+        .filter((n) => !isBuyer(n));
+      patch.allocations = normalizeAllocations(input.allocations, finalAmount, {
+        members: BUYERS,
+        mealGroup: await currentMealGroup(),
+        allowed,
+      });
+    } else if (finalAmount !== row.amountCents) {
+      // The amount moved but the client didn't re-send the split. A single
+      // line can simply be restated at the new total; anything with a real
+      // split would be guesswork, so we make the user redo it.
+      const current = allocationsFromStored(row.allocations, row.amountCents);
+      if (current.length !== 1) {
+        throw new Error("Amount changed; re-enter the allocations");
+      }
+      patch.allocations = [{ ...current[0], amountCents: finalAmount }];
+    }
+  }
+
+  if (row && (input.store !== undefined || input.occurredOn !== undefined)) {
     const newStore =
       input.store !== undefined
         ? String(input.store).trim()

@@ -37,10 +37,43 @@ export type ScrapedRecipe = {
   // Raw ingredient strings as they appeared on the site, e.g. "2 tbsp olive
   // oil" or "500g chicken thighs". Quantity parsing happens elsewhere.
   ingredients: string[];
+  // Base servings the ingredient amounts were written for, from
+  // schema.org `recipeYield`. Undefined when the site didn't say.
+  servings?: number;
   // Which extraction strategy produced the data — handy when debugging a
   // problem site, and surfaced to the client for transparency.
   source?: RecipeSource;
 };
+
+/**
+ * Servings out of a schema.org `recipeYield`, which is one of the least
+ * disciplined fields on the web: "4 servings", "Serves 6", ["4", "4 rolls"],
+ * 4, "4-6 servings". We take the first integer we can find and ignore
+ * anything outside a plausible household range, so a yield of "24 cookies"
+ * never turns into a 24× ingredient scale-up by accident.
+ */
+export function parseServings(raw: unknown): number | undefined {
+  const candidates = Array.isArray(raw) ? raw : [raw];
+  for (const candidate of candidates) {
+    if (typeof candidate === "number") {
+      if (Number.isInteger(candidate) && candidate >= 1 && candidate <= 100) {
+        return candidate;
+      }
+      continue;
+    }
+    if (typeof candidate !== "string") continue;
+    const m = /\d+/.exec(candidate);
+    if (!m) continue;
+    const n = Number(m[0]);
+    if (n < 1 || n > 100) continue;
+    // "24 cookies" or "12 muffins" is a piece count, not people fed. Only
+    // trust large numbers when the text says it is about servings.
+    const aboutPeople = /serv|people|person|portion|feeds|yield/i.test(candidate);
+    if (n > 12 && !aboutPeople) continue;
+    return n;
+  }
+  return undefined;
+}
 
 export class RecipeScrapeError extends Error {
   constructor(message: string) {
@@ -312,6 +345,7 @@ export function extractRecipeFromHtml(html: string): ScrapedRecipe | null {
         ...found,
         name: found.name || weak?.name || undefined,
         description: found.description || weak?.description || undefined,
+        servings: found.servings || weak?.servings || undefined,
       };
       return enrichWithPageMeta(merged, doc);
     }
@@ -462,6 +496,7 @@ function toScrapedRecipe(
     name: name || undefined,
     description: description || undefined,
     ingredients,
+    servings: parseServings(obj.recipeYield ?? obj.yield),
     source,
   };
 }
@@ -537,7 +572,30 @@ function extractMicrodata(html: string): ScrapedRecipe | null {
 
   // A lone match is more likely stray markup than a recipe.
   if (ingredients.length < 2) return null;
-  return { ingredients, source: "microdata" };
+  return {
+    ingredients,
+    servings: parseServings(microdataValue(html, "recipeYield")),
+    source: "microdata",
+  };
+}
+
+/** First `itemprop="<name>"` value on the page (meta content or element text). */
+function microdataValue(html: string, name: string): string | undefined {
+  const metaRe = new RegExp(
+    `<meta\\b[^>]*\\bitemprop=["']${name}["'][^>]*>`,
+    "i"
+  );
+  const meta = metaRe.exec(html);
+  if (meta) {
+    const content = attrValue(meta[0], "content");
+    if (content) return content;
+  }
+  const elRe = new RegExp(
+    `<([a-z][a-z0-9]*)\\b[^>]*\\bitemprop=["']${name}["'][^>]*>([\\s\\S]*?)<\\/\\1>`,
+    "i"
+  );
+  const el = elRe.exec(html);
+  return el ? htmlToText(el[2]) || undefined : undefined;
 }
 
 function attrValue(tagHtml: string, attr: string): string {

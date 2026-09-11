@@ -27,13 +27,13 @@ const SECTIONS: {
     id: "recipes",
     title: "Recipes",
     blurb:
-      "Weekly cooking schedule, Sunday → Thursday. Pick the cook, log the recipe, and push the ingredients straight to the grocery list.",
+      "Dinner schedule for whoever is in the meal group, any day of the week. Pick the cook, log the recipe, and push the ingredients to the grocery list.",
   },
   {
     id: "expenses",
     title: "Expenses",
     blurb:
-      "Log shared spending and split the total 5 ways at the end of the month. Everyone funds the joint account; whoever paid gets reimbursed from it.",
+      "Log spending with a receipt and say who each part was for: everyone, the meal group, or just you. The joint account settles the difference each month.",
   },
   {
     id: "passwords",
@@ -48,7 +48,8 @@ export default function HomeView({ onNavigate }: Props) {
     <div className="home-view">
       <section className="home-hero">
         <p className="home-lede">
-          A little household app for the five of us.
+          House costs are shared by everyone; dinners are shared by the meal
+          group.
         </p>
         <p className="home-sub">
           Everything stays in sync across phones, and a copy lives in our
