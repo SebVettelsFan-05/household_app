@@ -2379,3 +2379,63 @@ button.fresh-row-main {
 .fresh-day-card-link:hover {
   border-color: var(--section);
 }
+
+/* ---- Grocery: a denser list ----
+   The shopping list is read standing in an aisle, so rows are tighter than
+   elsewhere: less vertical padding, smaller category headers, chips that
+   take less height, and sections closer together. */
+.fresh[data-section="grocery"] .fresh-main {
+  gap: 14px;
+}
+.fresh[data-section="grocery"] .fresh-chips {
+  gap: 6px;
+}
+.fresh[data-section="grocery"] .fresh-chip {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+.fresh[data-section="grocery"] .fresh-section-head {
+  margin: 0 0 2px;
+}
+.fresh[data-section="grocery"] .fresh-h2 {
+  font-size: 17px;
+}
+.fresh[data-section="grocery"] .fresh-h2 .fresh-cat-dot {
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+}
+.fresh[data-section="grocery"] .fresh-sub {
+  font-size: 13px;
+}
+.fresh[data-section="grocery"] .fresh-row {
+  min-height: 46px;
+  padding: 6px 0;
+  gap: 10px;
+}
+.fresh[data-section="grocery"] .fresh-row-title {
+  font-size: 15px;
+  line-height: 1.25;
+}
+.fresh[data-section="grocery"] .fresh-row-meta {
+  margin-top: 2px;
+  font-size: 13px;
+  gap: 4px 8px;
+}
+.fresh[data-section="grocery"] .fresh-row-meta .fresh-avatar {
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+}
+.fresh[data-section="grocery"] .fresh-row-warn {
+  margin-top: 2px;
+  font-size: 12px;
+}
+.fresh[data-section="grocery"] .fresh-row-qty {
+  font-size: 15px;
+}
+.fresh[data-section="grocery"] .fresh-check {
+  width: 24px;
+  height: 24px;
+}
