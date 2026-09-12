@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useRef } from "react";
 import ReceiptImage from "@/components/ReceiptImage";
+import { useEscapeLayer } from "@/lib/escapeStack";
 
 type Props = {
   src: string;
@@ -14,6 +15,9 @@ type Props = {
 /**
  * Full-screen overlay for inspecting a receipt before submit or while editing.
  * Click outside the image (or hit Escape) to dismiss.
+ *
+ * The lightbox is usually opened from inside a form, so Escape goes through
+ * the shared layer stack: it closes the lightbox and nothing else.
  */
 export default function ReceiptLightbox({
   src,
@@ -22,17 +26,14 @@ export default function ReceiptLightbox({
   originalLabel = "Open original",
   onClose,
 }: Props) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEscapeLayer(onClose, true, boxRef);
 
   return (
     <div
       className="receipt-lightbox"
+      ref={boxRef}
+      tabIndex={-1}
       onClick={onClose}
       role="dialog"
       aria-modal="true"

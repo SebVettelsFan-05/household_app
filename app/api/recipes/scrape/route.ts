@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
+import { apiError } from "@/lib/errors";
 import { loadCategoryContext } from "@/lib/categoryHistory";
 import { guessCategoryOrFallback } from "@/lib/guessCategory";
 import {
@@ -7,6 +8,7 @@ import {
   type ParsedIngredient,
 } from "@/lib/parseIngredient";
 import {
+  BlockedAddressError,
   RecipeScrapeError,
   scrapeRecipe,
   type RecipeSource,
@@ -147,11 +149,21 @@ export async function POST(req: NextRequest) {
       try {
         scraped = await scrapeRecipe(url, { totalBudgetMs: SCRAPE_BUDGET_MS });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return NextResponse.json(
-          { ok: false, error: msg },
-          { status: err instanceof RecipeScrapeError ? 422 : 500 }
-        );
+        // Anything pointed at our own network is a bad request, and the
+        // reason must not describe what is or isn't reachable in there.
+        if (err instanceof BlockedAddressError) {
+          return NextResponse.json(
+            { ok: false, error: "That address is not a public website" },
+            { status: 400 }
+          );
+        }
+        if (err instanceof RecipeScrapeError) {
+          return NextResponse.json(
+            { ok: false, error: err.message },
+            { status: 422 }
+          );
+        }
+        return apiError(err);
       }
 
       const parsedIngredients = scraped.ingredients
@@ -209,9 +221,6 @@ export async function POST(req: NextRequest) {
     };
     return NextResponse.json(result);
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 }
-    );
+    return apiError(e);
   }
 }

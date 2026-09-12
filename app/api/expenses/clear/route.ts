@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
+import { apiError } from "@/lib/errors";
 import { clearExpensesRepo } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
 import { deleteReceipt } from "@/lib/receipts";
@@ -16,9 +17,6 @@ export async function POST() {
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, expenses });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 }
-    );
+    return apiError(e);
   }
 }

@@ -8,6 +8,7 @@ import SplitCard from "@/components/SplitCard";
 import { driveImageUrl } from "@/lib/imageResize";
 import {
   fmtTripDate,
+  useMonthlyBills,
   useMonthlyBreakdown,
   ymLabel,
 } from "@/lib/monthlyBills";
@@ -38,7 +39,10 @@ type Props = {
 };
 
 export default function MonthlyBreakdown({ expenses, onToast }: Props) {
-  const view = useMonthlyBreakdown(expenses, onToast);
+  // Classic shows the month on one screen only, so the breakdown is the sole
+  // reader of the bills and can own the store itself.
+  const bills = useMonthlyBills(onToast);
+  const view = useMonthlyBreakdown(expenses, onToast, bills);
   const {
     month,
     isCurrentMonth,
@@ -97,9 +101,18 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
       <div className="monthly-section">
         <div className="monthly-section-head">
           <h3>One-time (by store)</h3>
+          {/* The shared amount, so this section plus rent plus the bills add
+              up to the settlement below. The face value follows it whenever a
+              receipt carried a personal line. */}
           <span className="monthly-sub">
             {oneTime.count} expense{oneTime.count === 1 ? "" : "s"} ·{" "}
-            <strong>{fmtMoney(oneTime.total)}</strong>
+            <strong>{fmtMoney(oneTime.sharedTotal)}</strong>
+            {oneTime.sharedTotal !== oneTime.total ? (
+              <span className="monthly-sub-faint">
+                {" "}
+                of {fmtMoney(oneTime.total)}
+              </span>
+            ) : null}
           </span>
         </div>
         {oneTime.rows.length === 0 ? (

@@ -2,7 +2,8 @@
 
 import FreshSheet, { type SheetSize } from "@/components/fresh/FreshSheet";
 import { useUiMode } from "@/components/UiModeProvider";
-import type { ReactNode } from "react";
+import { useEscapeLayer } from "@/lib/escapeStack";
+import { useRef, type ReactNode } from "react";
 
 type Props = {
   /** Sheet title in fresh, and the classic <h2> unless `classicTitle` is set. */
@@ -32,6 +33,10 @@ type Props = {
  *
  * Keeping both shapes here is what lets the fresh shell restyle every menu
  * in the app while the classic look reverses to precisely what it was.
+ *
+ * Escape and the focus trap come from the shared layer stack — here for the
+ * classic box, inside `FreshSheet` for the fresh one — so no modal in the app
+ * needs a keydown listener of its own.
  */
 export default function ModalFrame({
   title,
@@ -44,6 +49,8 @@ export default function ModalFrame({
   children,
 }: Props) {
   const mode = useUiMode();
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEscapeLayer(onClose, mode === "classic", boxRef);
 
   if (mode === "fresh") {
     return (
@@ -71,7 +78,7 @@ export default function ModalFrame({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={boxClass}>
+      <div className={boxClass} ref={boxRef} tabIndex={-1}>
         {subtitle ? (
           <div className="modal-header">
             <h2>{heading}</h2>

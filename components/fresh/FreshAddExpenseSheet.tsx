@@ -12,6 +12,7 @@ import FreshSheet from "@/components/fresh/FreshSheet";
 import PersonPicker from "@/components/PersonPicker";
 import { normalizeAllocations } from "@/lib/allocations";
 import { addExpense } from "@/lib/client";
+import { todayYmd } from "@/lib/dates";
 import {
   currentExpenseMonth,
   firstDayOfMonth,
@@ -27,14 +28,6 @@ type Props = {
   onResult: (expenses: Expense[], toast: string) => void;
 };
 
-function todayYmdLocal(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /**
  * Add sheet: the amount first and large, then who paid, then how the
  * receipt splits, then the paperwork. The validation and the API call are
@@ -47,11 +40,15 @@ export default function FreshAddExpenseSheet({
   onResult,
 }: Props) {
   const currentMonthStart = firstDayOfMonth(currentExpenseMonth());
+  // The household calendar, not the browser's: a receipt entered late on the
+  // last of the month must not be dated into next month (or the future) just
+  // because the phone is in another timezone.
+  const today = todayYmd();
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState("");
   const [store, setStore] = useState("");
   const [description, setDescription] = useState("");
-  const [occurredOn, setOccurredOn] = useState<string>(todayYmdLocal);
+  const [occurredOn, setOccurredOn] = useState<string>(today);
   const [receipt, setReceipt] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [allocations, setAllocations] = useState<EditableAllocation[]>(() => [
@@ -222,6 +219,7 @@ export default function FreshAddExpenseSheet({
             className="fresh-input"
             type="date"
             min={currentMonthStart}
+            max={today}
             value={occurredOn}
             onChange={(e) => setOccurredOn(e.target.value)}
           />

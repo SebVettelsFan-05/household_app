@@ -142,7 +142,8 @@ export function titleCaseName(s: string): string {
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase()
-    .replace(/(^|[\s\-/])(\p{L})/gu, (_, sep: string, ch: string) => sep + ch.toUpperCase());
+    // A letter after an ampersand starts a word too: "t&t" is "T&T".
+    .replace(/(^|[\s\-/&])(\p{L})/gu, (_, sep: string, ch: string) => sep + ch.toUpperCase());
 }
 
 export function pickCategory(

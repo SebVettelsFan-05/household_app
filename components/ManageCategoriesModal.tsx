@@ -5,15 +5,44 @@ import ModalFrame from "@/components/ModalFrame";
 import {
   addCategory,
   deleteCategory,
+  getCategoryUsage,
+  listGrocery,
+  listRecipes,
   updateCategoryColor,
+  type CategoryUsage,
 } from "@/lib/client";
 import { getCategoryColor } from "@/lib/categoryColors";
 import { isProtectedCategory, sortCategories } from "@/lib/normalize";
 import {
   FALLBACK_CATEGORY,
   type CategoryDef,
+  type GroceryItem,
   type Item,
+  type Recipe,
 } from "@/lib/types";
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** "3 items, 1 grocery row and 4 recipe ingredients will move to "Other"." */
+function usageSentence(usage: CategoryUsage): string {
+  const recipeIngredients =
+    usage.recipeIngredients + usage.favoriteIngredients;
+  const parts = [
+    usage.items > 0 ? plural(usage.items, "item", "items") : "",
+    usage.grocery > 0 ? plural(usage.grocery, "grocery row", "grocery rows") : "",
+    recipeIngredients > 0
+      ? plural(recipeIngredients, "recipe ingredient", "recipe ingredients")
+      : "",
+  ].filter(Boolean);
+  if (parts.length === 0) return "Nothing uses it.";
+  const list =
+    parts.length === 1
+      ? parts[0]
+      : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return `${list} will move to "${FALLBACK_CATEGORY}".`;
+}
 
 type Props = {
   categories: CategoryDef[];
@@ -21,6 +50,10 @@ type Props = {
   onClose: () => void;
   onCategoriesChange: (categories: CategoryDef[]) => void;
   onItemsChange: (items: Item[]) => void;
+  // A delete reassigns grocery rows and recipe ingredients as well, so the
+  // screens showing them have to be told.
+  onGroceryChange: (grocery: GroceryItem[]) => void;
+  onRecipesChange: (recipes: Recipe[]) => void;
   onToast: (msg: string) => void;
   onError: (msg: string) => void;
 };
@@ -31,6 +64,8 @@ export default function ManageCategoriesModal({
   onClose,
   onCategoriesChange,
   onItemsChange,
+  onGroceryChange,
+  onRecipesChange,
   onToast,
   onError,
 }: Props) {
@@ -63,19 +98,24 @@ export default function ManageCategoriesModal({
   }
 
   async function remove(name: string) {
-    const usingCount = items.filter((i) => i.category === name).length;
-    const msg = usingCount
-      ? `Delete "${name}"? ${usingCount} item${usingCount === 1 ? "" : "s"} will move to "${FALLBACK_CATEGORY}".`
-      : `Delete "${name}"?`;
+    // The server counts, not this modal: it only holds the inventory rows,
+    // and the grocery list and recipe ingredients move to the fallback too.
+    const usage = await getCategoryUsage(name).catch(() => null);
+    const msg = usage
+      ? `Delete "${name}"? ${usageSentence(usage)}`
+      : `Delete "${name}"? Everything using it will move to "${FALLBACK_CATEGORY}".`;
     if (!confirm(msg)) return;
     setBusy(true);
     try {
       const res = await deleteCategory(name);
       onCategoriesChange(res.categories);
       onItemsChange(res.items);
+      // The lists the server just rewrote under us.
+      onGroceryChange(await listGrocery());
+      onRecipesChange(await listRecipes());
       onToast(
         res.reassigned
-          ? `Removed "${name}", ${res.reassigned} item${res.reassigned === 1 ? "" : "s"} reassigned`
+          ? `Removed "${name}", ${res.reassigned} reference${res.reassigned === 1 ? "" : "s"} moved to ${FALLBACK_CATEGORY}`
           : `Removed "${name}"`
       );
     } catch (err) {

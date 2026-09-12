@@ -51,14 +51,6 @@ export default function RecipeArchiveModal({ onClose, onError }: Props) {
     };
   }, [onError]);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   // Group already-sorted recipes by week. The repo returns them ordered by
   // (weekStart DESC, day ASC), so a single pass preserves that for the UI.
   const grouped = useMemo(() => {

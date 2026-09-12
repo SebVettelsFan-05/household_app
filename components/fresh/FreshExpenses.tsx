@@ -9,9 +9,10 @@ import { Avatar } from "@/components/fresh/people";
 import { IconPlus } from "@/components/fresh/icons";
 import { allocationTag } from "@/lib/allocations";
 import { currentExpenseMonth, expenseMonthOf } from "@/lib/expenseMonths";
+import { ymLabel, type MonthlyBillsStore } from "@/lib/monthlyBills";
 import { fmtMoney } from "@/lib/money";
+import type { Settlement } from "@/lib/settlement";
 import { BUYERS, type Expense } from "@/lib/types";
-import { useMonthlySettlement } from "@/lib/useMonthlySettlement";
 import type { HouseholdData } from "@/lib/useHouseholdData";
 
 export type ExpenseSegment = "receipts" | "month";
@@ -19,6 +20,10 @@ export type ExpenseSegment = "receipts" | "month";
 type Props = {
   data: HouseholdData;
   mealGroup: string[];
+  /** The shell's one bill store, shared with Home and the month editor. */
+  bills: MonthlyBillsStore;
+  /** This month's settlement, derived from that same store. */
+  settlement: Settlement;
   segment: ExpenseSegment;
   onSegmentChange: (segment: ExpenseSegment) => void;
 };
@@ -37,13 +42,14 @@ function dateHeading(iso: string): string {
 export default function FreshExpenses({
   data,
   mealGroup,
+  bills,
+  settlement,
   segment,
   onSegmentChange,
 }: Props) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const { settlement, loadingBills } = useMonthlySettlement(data.expenses);
   const currentMonth = currentExpenseMonth();
   const editing = editingId
     ? (data.expenses.find((e) => e.id === editingId) ?? null)
@@ -67,10 +73,7 @@ export default function FreshExpenses({
     return out;
   }, [data.expenses]);
 
-  const monthLabel = new Date().toLocaleString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
+  const monthLabel = ymLabel(currentMonth);
 
   function isLocked(e: Expense): boolean {
     return expenseMonthOf(e.occurredOn || e.added) < currentMonth;
@@ -110,7 +113,11 @@ export default function FreshExpenses({
       <div className="fresh-expenses" data-segment={segment}>
         <div className="fresh-expenses-main">
           {segment === "month" ? (
-            <FreshMonthly expenses={data.expenses} onToast={data.showToast} />
+            <FreshMonthly
+              expenses={data.expenses}
+              onToast={data.showToast}
+              bills={bills}
+            />
           ) : data.expensesLoading ? (
             <div>
               <div className="fresh-skel fresh-skel-row" />
@@ -188,7 +195,7 @@ export default function FreshExpenses({
               settlement={settlement}
               title="Settlement"
               subtitle={monthLabel}
-              loading={loadingBills || data.expensesLoading}
+              loading={bills.loading || data.expensesLoading}
             />
           </aside>
         ) : null}

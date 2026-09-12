@@ -12,8 +12,9 @@ import { ReceiptPicker } from "@/components/AddExpenseForm";
 import PersonPicker from "@/components/PersonPicker";
 import ReceiptImage from "@/components/ReceiptImage";
 import { normalizeAllocations } from "@/lib/allocations";
+import { todayYmd } from "@/lib/dates";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
-import { deleteExpense, updateExpense } from "@/lib/client";
+import { deleteExpense, ROW_GONE_MESSAGE, updateExpense } from "@/lib/client";
 import {
   currentExpenseMonth,
   firstDayOfMonth,
@@ -39,6 +40,8 @@ export default function EditExpenseModal({
   onError,
 }: Props) {
   const currentMonthStart = firstDayOfMonth(currentExpenseMonth());
+  // The household calendar, not the browser's — see FreshAddExpenseSheet.
+  const today = todayYmd();
   const [store, setStore] = useState(item.store || "");
   const [amount, setAmount] = useState(
     fmtMoney(item.amountCents).replace("$", "")
@@ -81,14 +84,6 @@ export default function EditExpenseModal({
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [receipt]);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   async function save() {
     const cents = parseCents(amount);
@@ -140,7 +135,14 @@ export default function EditExpenseModal({
           ? { receipt: { blob: prepared.blob, filename: prepared.filename } }
           : {}),
       });
-      onResult(res.expenses, prepared ? "Saved (receipt replaced)" : "Saved");
+      onResult(
+        res.expenses,
+        res.gone
+          ? ROW_GONE_MESSAGE
+          : prepared
+            ? "Saved (receipt replaced)"
+            : "Saved"
+      );
       onClose();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -188,8 +190,7 @@ export default function EditExpenseModal({
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ background: "var(--accent)", color: "white" }}
+              className="btn-accent"
               onClick={save}
               disabled={busy}
             >
@@ -235,6 +236,7 @@ export default function EditExpenseModal({
             id="ee-date"
             type="date"
             min={currentMonthStart}
+            max={today}
             value={occurredOn}
             onChange={(e) => setOccurredOn(e.target.value)}
           />

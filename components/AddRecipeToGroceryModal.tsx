@@ -90,14 +90,6 @@ export default function AddRecipeToGroceryModal({
     return Math.max(1, Math.round(quantity * scale));
   }
 
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busy) onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onClose]);
-
   const categoryOptions = useMemo<CategoryDef[]>(
     () =>
       categories.length > 0
@@ -232,7 +224,11 @@ export default function AddRecipeToGroceryModal({
       title="Add to grocery list"
       subtitle={recipeName || "Recipe"}
       size="wide"
-      onClose={onClose}
+      // Nothing dismisses this while the items are being written, or half
+      // the list lands on the grocery list with no way to see which half.
+      onClose={() => {
+        if (!busy) onClose();
+      }}
       actions={
         <>
           <div />
@@ -247,8 +243,7 @@ export default function AddRecipeToGroceryModal({
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ background: "var(--accent)", color: "white" }}
+              className="btn-accent"
               onClick={submit}
               disabled={busy || checkedCount === 0}
             >

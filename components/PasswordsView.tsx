@@ -2,7 +2,6 @@
 
 import {
   KeyboardEvent as ReactKeyboardEvent,
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -13,6 +12,7 @@ import {
   addSharedAccount,
   deleteSharedAccount,
   getSharedAccount,
+  ROW_GONE_MESSAGE,
   updateSharedAccount,
 } from "@/lib/client";
 import { prepareReceipt } from "@/lib/imageResize";
@@ -297,14 +297,6 @@ function PasswordLoadingModal({
   onClose: () => void;
   loading: boolean;
 }) {
-  useEffect(() => {
-    function onKey(e: globalThis.KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
     <ModalFrame title="Password entry" classicTitle={null} onClose={onClose}>
       <div className="loading password-detail-loading">
@@ -335,14 +327,6 @@ function SharedAccountModal({
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
     null
   );
-
-  useEffect(() => {
-    function onKey(e: globalThis.KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   function addField(kind: SharedFieldKind) {
     setFields((prev) => [
@@ -437,7 +421,7 @@ function SharedAccountModal({
         fields: cleanFields,
       });
       onAccountsChange(res.accounts);
-      onToast("Saved");
+      onToast(res.gone ? ROW_GONE_MESSAGE : "Saved");
       onClose();
     } catch (err) {
       onToast("Error: " + (err instanceof Error ? err.message : String(err)));
@@ -494,8 +478,7 @@ function SharedAccountModal({
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ background: "var(--accent)", color: "white" }}
+              className="btn-accent"
               onClick={save}
               disabled={busy}
             >

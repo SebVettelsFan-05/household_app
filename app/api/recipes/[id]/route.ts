@@ -1,13 +1,10 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
+import { apiError } from "@/lib/errors";
 import { deleteRecipeRepo, updateRecipeRepo } from "@/lib/repo";
 import { mirrorToSheet } from "@/lib/mirror";
 
 export const dynamic = "force-dynamic";
-
-function err(message: string, status = 500) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -33,7 +30,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, recipes });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }
 
@@ -45,6 +42,6 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, recipes });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }

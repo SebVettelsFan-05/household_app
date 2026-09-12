@@ -45,7 +45,10 @@ export default function AmountInput({
       return;
     }
     onCommit(c);
-    setDraft((c / 100).toFixed(2));
+    // No field in the app stores a negative amount — the owner either clears
+    // the line or refuses the edit with a toast — so snap back rather than
+    // leave the box showing a number that was never saved.
+    setDraft(c < 0 ? formatted : (c / 100).toFixed(2));
   }
 
   return (

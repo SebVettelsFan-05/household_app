@@ -139,14 +139,6 @@ export default function ScanLabelModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   async function handleBarcode(barcode: string) {
     try {
       const product = await lookupProductByBarcode(barcode);

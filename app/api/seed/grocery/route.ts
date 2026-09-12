@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db/client";
 import { groceryItems as groceryTable } from "@/db/schema";
 import { ensureTables } from "@/lib/migrate";
+import { apiError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -75,23 +76,27 @@ const SAMPLE: Array<{
 ];
 
 export async function POST() {
-  await ensureTables();
+  try {
+    await ensureTables();
 
-  // Refuse to seed if the table already has data — avoids stomping on a
-  // populated list. Callers should pass ?force=1 to override.
-  const existing = await db
-    .select({ id: groceryTable.id })
-    .from(groceryTable)
-    .limit(1);
-  if (existing.length > 0) {
-    return NextResponse.json({
-      ok: false,
-      error: "Grocery list already has items — refusing to seed.",
-    });
+    // Refuse to seed if the table already has data — avoids stomping on a
+    // populated list. Callers should pass ?force=1 to override.
+    const existing = await db
+      .select({ id: groceryTable.id })
+      .from(groceryTable)
+      .limit(1);
+    if (existing.length > 0) {
+      return NextResponse.json({
+        ok: false,
+        error: "Grocery list already has items — refusing to seed.",
+      });
+    }
+
+    await db.insert(groceryTable).values(SAMPLE);
+    return NextResponse.json({ ok: true, inserted: SAMPLE.length });
+  } catch (e) {
+    return apiError(e);
   }
-
-  await db.insert(groceryTable).values(SAMPLE);
-  return NextResponse.json({ ok: true, inserted: SAMPLE.length });
 }
 
 export async function GET() {

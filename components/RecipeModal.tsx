@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import ModalFrame from "@/components/ModalFrame";
 import PersonPicker from "@/components/PersonPicker";
 import {
@@ -9,6 +9,7 @@ import {
   deleteFavorite,
   deleteRecipe,
   parseIngredientsFromText,
+  ROW_GONE_MESSAGE,
   scrapeRecipeFromUrl,
   updateRecipe,
 } from "@/lib/client";
@@ -58,9 +59,13 @@ type Props = {
   favorites: FavoriteRecipe[];
   onFavoritesChange: (favorites: FavoriteRecipe[]) => void;
   onClose: () => void;
-  onResult: (recipes: Recipe[], toast: string) => void;
+  /**
+   * `recipes` is the household's new recipe list, or null when this result
+   * is only a toast and the list has not changed. Deleting the last recipe
+   * legitimately returns an empty list, so "empty" cannot mean "no change".
+   */
+  onResult: (recipes: Recipe[] | null, toast: string) => void;
   onError: (msg: string) => void;
-  escapeDisabled?: boolean;
   // Hands the in-memory ingredient state to the picker so it works for both
   // saved and draft recipes.
   onOpenAddToGrocery: (data: {
@@ -86,7 +91,6 @@ export default function RecipeModal({
   onClose,
   onResult,
   onError,
-  escapeDisabled = false,
   onOpenAddToGrocery,
 }: Props) {
   const editing = mode === "edit";
@@ -157,14 +161,14 @@ export default function RecipeModal({
         // the manual fallback instead of a dead-end "0 ingredients" toast.
         setShowPaste(true);
         onResult(
-          [],
+          null,
           "No ingredients found on the page. Paste them below instead"
         );
         return;
       }
       const summary = `Fetched ${data.ingredients.length} ingredient${data.ingredients.length === 1 ? "" : "s"}`;
       onResult(
-        [],
+        null,
         data.hasApproximate
           ? `${summary} (some quantities are estimates, double-check)`
           : summary
@@ -191,28 +195,21 @@ export default function RecipeModal({
       mergeIngredients(data.ingredients);
       setPasteText("");
       setShowPaste(false);
-      const summary = `Added ${data.ingredients.length} ingredient${data.ingredients.length === 1 ? "" : "s"}`;
-      onResult(
-        [],
-        data.hasApproximate
-          ? `${summary} (some quantities are estimates, double-check)`
-          : summary
-      );
+      const parts = [
+        `Added ${data.ingredients.length} ingredient${data.ingredients.length === 1 ? "" : "s"}`,
+      ];
+      if (data.skipped > 0) {
+        parts.push(`${data.skipped} line${data.skipped === 1 ? "" : "s"} skipped`);
+      }
+      if (data.hasApproximate) parts.push("some quantities are estimates, double-check");
+      if (data.note) parts.push(data.note);
+      onResult(null, parts.join(". "));
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     } finally {
       setPasting(false);
     }
   }
-
-  useEffect(() => {
-    if (escapeDisabled) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [escapeDisabled, onClose]);
 
   async function save() {
     const trimmed = name.trim();
@@ -240,7 +237,7 @@ export default function RecipeModal({
           servings: servingsNum,
           portions: portionsNum,
         });
-        onResult(res.recipes, "Saved");
+        onResult(res.recipes, res.gone ? ROW_GONE_MESSAGE : "Saved");
       } else {
         const res = await addRecipe({
           weekStart,
@@ -296,18 +293,22 @@ export default function RecipeModal({
         if (match) {
           const res = await deleteFavorite(match.id);
           onFavoritesChange(res.favorites);
-          onResult([], `Removed "${trimmed}" from favorites`);
+          onResult(null, `Removed "${trimmed}" from favorites`);
         }
       } else {
+        const servingsNum = countOf(servings);
         const res = await addFavorite({
           name: trimmed,
           link: link || undefined,
           description: description || undefined,
           ingredients,
+          // The ingredient weights are written for this many people; without
+          // it the favorite can never be scaled when it is cooked again.
+          servings: servingsNum > 0 ? servingsNum : undefined,
         });
         onFavoritesChange(res.favorites);
         onResult(
-          [],
+          null,
           res.existed
             ? `"${trimmed}" was already in favorites`
             : `Saved "${trimmed}" to favorites`
@@ -357,7 +358,7 @@ export default function RecipeModal({
               type="button"
               className="btn-danger"
               onClick={del}
-              disabled={busy}
+              disabled={busy || scraping || pasting}
             >
               Delete
             </button>
@@ -375,10 +376,9 @@ export default function RecipeModal({
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ background: "var(--accent)", color: "white" }}
+              className="btn-accent"
               onClick={save}
-              disabled={busy}
+              disabled={busy || scraping || pasting}
             >
               {busy ? "Saving…" : "Save"}
             </button>

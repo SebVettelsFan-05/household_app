@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import ModalFrame from "@/components/ModalFrame";
 import PersonPicker from "@/components/PersonPicker";
 import { addGrocery, addItem } from "@/lib/client";
@@ -67,14 +67,6 @@ export default function DictateItemsModal(props: Props) {
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [addedBy, setAddedBy] = useState<string>(""); // grocery mode only
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") props.onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [props]);
 
   const validCategoryNames = useMemo(
     () => props.categories.map((c) => c.name),

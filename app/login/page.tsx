@@ -11,6 +11,15 @@ import { useEffect, useState } from "react";
  * wherever middleware bounced them from, and surfaces any `error` query
  * param the OAuth callback may have redirected with.
  */
+
+/**
+ * Query-string error codes the OAuth callback can bounce back with, in the
+ * words the person reading them needs. Anything else is shown as it arrived.
+ */
+const ERROR_MESSAGES: Record<string, string> = {
+  "google-not-configured": "Google sign-in isn't set up on this deployment",
+};
+
 export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,7 +31,7 @@ export default function LoginPage() {
     const n = params.get("next");
     if (n && n.startsWith("/")) setNext(n);
     const e = params.get("error");
-    if (e) setErr(e);
+    if (e) setErr(ERROR_MESSAGES[e] || e);
   }, []);
 
   async function submitPassword(e: React.FormEvent) {

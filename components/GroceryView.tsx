@@ -7,6 +7,7 @@ import GroceryItemRow from "@/components/GroceryItemRow";
 import {
   clearGrocery,
   moveDoneGroceryToInventory,
+  ROW_GONE_MESSAGE,
   updateGrocery,
 } from "@/lib/client";
 import { buildColorLookup, getCategoryColor } from "@/lib/categoryColors";
@@ -114,6 +115,7 @@ export default function GroceryView({
     try {
       const res = await updateGrocery({ id, done });
       onGroceryChange(res.grocery);
+      if (res.gone) onToast(ROW_GONE_MESSAGE);
     } catch (err) {
       onToast("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {

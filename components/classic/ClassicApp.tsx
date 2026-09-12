@@ -15,6 +15,22 @@ import ThemeToggle from "@/components/ThemeToggle";
 import Toast from "@/components/Toast";
 import { effectiveMealGroup } from "@/lib/mealGroup";
 import type { HouseholdData } from "@/lib/useHouseholdData";
+import { useTabHash } from "@/lib/useTabHash";
+
+const TABS: Tab[] = [
+  "home",
+  "fridge",
+  "grocery",
+  "recipes",
+  "expenses",
+  "passwords",
+];
+
+/** The tab the URL hash names, falling back to Home. */
+function tabFromHash(hash: string): Tab {
+  const name = hash.replace(/^#/, "") as Tab;
+  return TABS.includes(name) ? name : "home";
+}
 
 type Props = {
   data: HouseholdData;
@@ -54,7 +70,12 @@ export default function ClassicApp({ data, onSwitchUi }: Props) {
     showToast,
   } = data;
 
-  const [tab, setTab] = useState<Tab>("home");
+  // The shell only ever renders in the browser (the page picks a look in a
+  // mount effect), so the first tab can come straight off the hash.
+  const [tab, setTab] = useState<Tab>(() =>
+    typeof window === "undefined" ? "home" : tabFromHash(window.location.hash)
+  );
+  useTabHash(tab, setTab, tabFromHash);
   const [managingCats, setManagingCats] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -168,6 +189,8 @@ export default function ClassicApp({ data, onSwitchUi }: Props) {
           onClose={() => setManagingCats(false)}
           onCategoriesChange={setCategories}
           onItemsChange={setItems}
+          onGroceryChange={setGrocery}
+          onRecipesChange={setRecipes}
           onToast={showToast}
           onError={(msg) => showToast("Error: " + msg)}
         />

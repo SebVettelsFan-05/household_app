@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ModalFrame from "@/components/ModalFrame";
-import { deleteItem, updateItem } from "@/lib/client";
+import { deleteItem, ROW_GONE_MESSAGE, updateItem } from "@/lib/client";
 import {
   FALLBACK_CATEGORY,
   type Category,
@@ -39,14 +39,6 @@ export default function EditModal({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  useEffect(() => {
     if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
       const hasFallback = categories.some((c) => c.name === FALLBACK_CATEGORY);
       setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
@@ -71,7 +63,7 @@ export default function EditModal({
         category: cat,
         categoryReviewed,
       });
-      onResult(res.items, "Saved");
+      onResult(res.items, res.gone ? ROW_GONE_MESSAGE : "Saved");
       onClose();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -125,7 +117,7 @@ export default function EditModal({
         category: item.category,
         categoryReviewed: item.categoryReviewed,
       });
-      onResult(res.items, `Used ${used}g`);
+      onResult(res.items, res.gone ? ROW_GONE_MESSAGE : `Used ${used}g`);
       onClose();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -159,8 +151,7 @@ export default function EditModal({
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ background: "var(--accent)", color: "white" }}
+              className="btn-accent"
               onClick={save}
               disabled={busy}
             >

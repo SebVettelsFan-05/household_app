@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import ModalFrame from "@/components/ModalFrame";
 import PersonPicker from "@/components/PersonPicker";
-import { deleteGrocery, updateGrocery } from "@/lib/client";
+import { deleteGrocery, ROW_GONE_MESSAGE, updateGrocery } from "@/lib/client";
 import {
   FALLBACK_CATEGORY,
   type Category,
@@ -40,14 +40,6 @@ export default function EditGroceryModal({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  useEffect(() => {
     if (categories.length > 0 && !categories.some((c) => c.name === cat)) {
       const hasFallback = categories.some((c) => c.name === FALLBACK_CATEGORY);
       setCat(hasFallback ? FALLBACK_CATEGORY : categories[0].name);
@@ -77,7 +69,7 @@ export default function EditGroceryModal({
         store,
         addedBy,
       });
-      onResult(res.grocery, "Saved");
+      onResult(res.grocery, res.gone ? ROW_GONE_MESSAGE : "Saved");
       onClose();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
@@ -125,8 +117,7 @@ export default function EditGroceryModal({
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ background: "var(--accent)", color: "white" }}
+              className="btn-accent"
               onClick={save}
               disabled={busy}
             >
