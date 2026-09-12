@@ -78,6 +78,15 @@ const WEEK_START = activeWeekStart(TODAY);
 // The cooking week is Sunday through Saturday, so today always has a slot.
 const TODAY_DAY = dowOf(TODAY);
 
+/** "Sep 11" from a YYYY-MM-DD, mirroring `fmtTripDate` in lib/monthlyBills. */
+function tripDateLabel(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 /* ---------- fixtures ---------- */
 
 async function clearMonthExpenses(api: APIRequestContext) {
@@ -98,7 +107,7 @@ async function resetFixtures(api: APIRequestContext) {
   const grocery = await (await api.get("/api/grocery")).json();
   for (const g of grocery.grocery ?? []) {
     if (
-      GROCERY_NAMES.some((n) =>
+      [...GROCERY_NAMES, ITEM_NAME].some((n) =>
         String(g.name).toLowerCase().startsWith(n.toLowerCase())
       )
     ) {
@@ -148,6 +157,18 @@ async function seedFixtures(api: APIRequestContext) {
       category: "Other",
       categoryReviewed: true,
       addedBy: "Daniel",
+    },
+  });
+
+  // Same name as the inventory fixture below, so the row carries the
+  // "have 750g" warning chip on its meta line.
+  await api.post("/api/grocery", {
+    data: {
+      name: ITEM_NAME,
+      quantity: 200,
+      category: "Dairy",
+      categoryReviewed: true,
+      addedBy: "Minh",
     },
   });
 
@@ -440,7 +461,12 @@ test("the month segment renders the fresh month view", async () => {
   await expect(costco).toHaveAttribute("aria-expanded", "false");
   await costco.click();
   await expect(costco).toHaveAttribute("aria-expanded", "true");
-  await expect(page.locator(".fresh-trip").first()).toBeVisible();
+  const trip = page.locator(".fresh-trip").first();
+  await expect(trip).toBeVisible();
+  // A trip is named by its date, the way the classic breakdown names it;
+  // a receipt with no description says nothing rather than "Untitled".
+  await expect(trip.locator(".fresh-trip-title")).toHaveText(tripDateLabel(TODAY));
+  await expect(trip).not.toContainText("Untitled");
   await page.getByRole("tab", { name: "Receipts" }).click();
 });
 
@@ -665,6 +691,14 @@ test("the fresh list groups its rows under category headings", async () => {
   await expect(page.locator(".fresh-section .fresh-h2")).toHaveText(["Meat"]);
   await page.locator(".fresh-chip", { hasText: "All" }).first().click();
   await expect(page.locator(".fresh-chip", { hasText: "All" }).first()).toHaveAttribute("aria-pressed", "true");
+
+  // The house already holds 750g of the milk fixture, and that warning rides
+  // on the meta line as a chip rather than adding a third line to the row.
+  const already = page.locator(".fresh-row", { hasText: ITEM_NAME }).first();
+  await expect(already.locator(".fresh-row-warn")).toHaveText("have 750g in the inventory already");
+  await expect(
+    already.locator(".fresh-row-meta .fresh-row-warn")
+  ).toHaveCount(1);
 });
 
 test("the inventory sorts without losing its category groups", async () => {
@@ -743,9 +777,11 @@ test("on a phone the FAB clears the last row and inputs do not zoom iOS", async 
   // Nothing tappable hides under the button.
   expect(lastRow!.y + lastRow!.height).toBeLessThanOrEqual(fab!.y);
 
-  // The bottom nav is the last thing on screen and is a full 68px of target.
+  // The bottom nav is the last thing on screen. 56px plus whatever the
+  // device reserves below it, which is nothing in a desktop browser: any
+  // taller and Safari's own bottom bar eats the screen with it.
   const nav = await p.locator(".fresh-tabbar").boundingBox();
-  expect(nav!.height).toBeGreaterThanOrEqual(68);
+  expect(nav!.height).toBe(56);
 
   // More is settings + destinations only; the look lives in settings now.
   await p.locator(".fresh-tabbar button", { hasText: "More" }).first().click();
@@ -768,7 +804,131 @@ test("on a phone the FAB clears the last row and inputs do not zoom iOS", async 
   await context.close();
 });
 
+test("no fresh screen overflows a narrow phone sideways", async () => {
+  const context = await browserRef.newContext({
+    viewport: { width: 390, height: 844 },
+  });
+  await context.addInitScript(() => {
+    try {
+      window.localStorage.setItem("hh_ui", "fresh");
+    } catch {
+      /* ignore */
+    }
+  });
+  const p = await context.newPage();
+  await login(p);
+
+  for (const label of [
+    "Home",
+    "Recipes",
+    "Grocery",
+    "Expenses",
+    "More",
+    "Inventory",
+    "Passwords",
+  ]) {
+    await gotoTab(p, label);
+    await p.locator(".fresh-main").waitFor();
+    for (const width of [320, 360, 375, 390, 414]) {
+      await p.setViewportSize({ width, height: 844 });
+      await p.waitForTimeout(150);
+      const size = await p.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+        // Whatever is sticking out, so a failure names it.
+        widest: (() => {
+          const cw = document.documentElement.clientWidth;
+          for (const el of document.querySelectorAll("*")) {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 && r.height === 0) continue;
+            if (r.right > cw + 0.5) {
+              return `${el.tagName.toLowerCase()}.${el.className} right=${r.right}`;
+            }
+          }
+          return "";
+        })(),
+      }));
+      expect(
+        size.scrollWidth,
+        `${label} at ${width}px overflows: ${size.widest}`
+      ).toBe(size.clientWidth);
+    }
+    await p.setViewportSize({ width: 390, height: 844 });
+  }
+
+  await context.close();
+});
+
+test("every month renders at the same width on a wide screen", async () => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await gotoTab(page, "Expenses");
+  await page.getByRole("tab", { name: "Month" }).click();
+  await page.locator(".fresh-month").waitFor();
+
+  const widths: number[] = [];
+  const labels: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    await page.waitForTimeout(400);
+    labels.push((await page.locator(".fresh-month-label").textContent()) ?? "");
+    widths.push(
+      await page
+        .locator(".fresh-month")
+        .evaluate((el) => el.getBoundingClientRect().width)
+    );
+    await page.getByRole("button", { name: "Previous month" }).click();
+  }
+  // A month with no receipts must not shrink to its own content.
+  expect(new Set(widths).size, `month width changed: ${labels} ${widths}`).toBe(
+    1
+  );
+  await page.getByRole("tab", { name: "Receipts" }).click();
+});
+
 /* ---------- screenshots ---------- */
+
+/**
+ * 360px is the narrow end of the phones this house actually carries, and it
+ * is where the shell used to run off the side of the screen. Light only:
+ * these four frames are about fit and density, not colour.
+ */
+test("the four busiest screens are captured at 360 wide", async () => {
+  const context = await browserRef.newContext({
+    viewport: { width: 360, height: 800 },
+  });
+  await context.addInitScript(() => {
+    try {
+      window.localStorage.setItem("hh_ui", "fresh");
+      window.localStorage.setItem("theme", "light");
+    } catch {
+      /* ignore */
+    }
+  });
+  const p = await context.newPage();
+  await login(p);
+
+  for (const label of ["Home", "Recipes", "Grocery", "Expenses"]) {
+    await gotoTab(p, label);
+    await p.locator(".fresh-main").waitFor();
+    if (label === "Expenses") {
+      await p.getByRole("tab", { name: "Month" }).click();
+      await p.locator(".fresh-month").waitFor();
+    }
+    await p.evaluate(() => window.scrollTo(0, 0));
+    await p.waitForTimeout(400);
+    const file = label === "Expenses" ? "expenses-month" : label.toLowerCase();
+    await p.screenshot({
+      animations: "disabled",
+      path: path.join(OUT, `${file}-light-360.png`),
+    });
+    await scrollToBottom(p);
+    await p.screenshot({
+      animations: "disabled",
+      path: path.join(OUT, `${file}-bottom-light-360.png`),
+    });
+  }
+
+  await context.close();
+});
 
 const VIEWPORTS = [
   { name: "390", width: 390, height: 844, dsf: 1 },
