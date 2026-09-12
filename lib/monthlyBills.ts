@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { sharedCents } from "./allocations";
 import { getSetting, putSetting } from "./client";
 import { currentExpenseMonth, FIRST_EXPENSE_MONTH } from "./expenseMonths";
 import { computeSettlement, type Settlement, type SettlementBill } from "./settlement";
@@ -481,9 +482,14 @@ export function setBillAmount(
   cents: number
 ): FixedRecurring {
   if (month >= currentMonth) {
-    const trimmed = bill.schedule.filter((s) => s.from < month);
-    trimmed.push({ from: month, cents });
-    return { ...bill, schedule: trimmed };
+    // Replace this month's entry, keep every other one. Trimming everything
+    // from `month` onwards would throw away the increases already scheduled
+    // for later months, which the editor gives no way to get back.
+    const schedule = bill.schedule
+      .filter((s) => s.from !== month)
+      .concat({ from: month, cents })
+      .sort((a, b) => a.from.localeCompare(b.from));
+    return { ...bill, schedule };
   }
   return {
     ...bill,
@@ -532,9 +538,13 @@ export function setRentAlloc(
   alloc: RentAlloc
 ): RentState {
   if (month >= currentMonth) {
-    const trimmed = state.schedule.filter((s) => s.from < month);
-    trimmed.push({ from: month, alloc });
-    return { ...state, schedule: trimmed };
+    // Same rule as `setBillAmount`: this month's entry is replaced, later
+    // ones survive.
+    const schedule = state.schedule
+      .filter((s) => s.from !== month)
+      .concat({ from: month, alloc })
+      .sort((a, b) => a.from.localeCompare(b.from));
+    return { ...state, schedule };
   }
   return {
     ...state,
@@ -648,6 +658,8 @@ export async function loadMonthlyBills(): Promise<MonthlyBills> {
 /* ---------- The editable store both month views share ---------- */
 
 export type MonthlyBillsStore = MonthlyBills & {
+  /** True until the backend row has been read (or has failed to read). */
+  loading: boolean;
   persistFixed: (next: FixedRecurring[]) => void;
   persistVariable: (next: VariableState) => void;
   persistRent: (next: RentState) => void;
@@ -670,6 +682,7 @@ export function useMonthlyBills(
   const [fixed, setFixed] = useState<FixedRecurring[]>([]);
   const [variable, setVariable] = useState<VariableState>(() => emptyVariable());
   const [rent, setRent] = useState<RentState>({ schedule: [], overrides: {} });
+  const [loading, setLoading] = useState(true);
   // Suppress backend pushes triggered by the mount-time hydration. Without
   // this, hydrating from the backend would echo the same value back as a PUT.
   const hydratedRef = useRef(false);
@@ -756,6 +769,7 @@ export function useMonthlyBills(
       }
 
       hydratedRef.current = true;
+      setLoading(false);
     });
 
     return () => {
@@ -783,6 +797,7 @@ export function useMonthlyBills(
     fixed,
     variable,
     rent,
+    loading,
     persistFixed(next) {
       const sorted = sortFixed(next);
       setFixed(sorted);
@@ -837,7 +852,10 @@ export type MonthlyBreakdownView = {
 
   oneTime: {
     rows: MonthStoreGroup[];
+    /** Face value of the month's receipts, personal lines included. */
     total: number;
+    /** What the household is actually settling: personal lines excluded. */
+    sharedTotal: number;
     count: number;
     inMonth: Expense[];
   };
@@ -885,8 +903,11 @@ export type MonthlyBreakdownView = {
  */
 export function useMonthlyBreakdown(
   expenses: readonly Expense[],
-  onToast: (msg: string) => void
+  onToast: (msg: string) => void,
+  store: MonthlyBillsStore
 ): MonthlyBreakdownView {
+  // `currentExpenseMonth` reads the household timezone, so the month money
+  // is filed under is the month the recipe weeks agree it is.
   const [month, setMonth] = useState<string>(() => currentExpenseMonth());
   const currentMonth = currentExpenseMonth();
   const isCurrentMonth = month === currentMonth;
@@ -895,7 +916,7 @@ export function useMonthlyBreakdown(
   const canGoPrev = month > FIRST_EXPENSE_MONTH;
 
   const { fixed, variable, rent, persistFixed, persistVariable, persistRent } =
-    useMonthlyBills(onToast);
+    store;
 
   /* ---- One-time: group by store, list each trip underneath ---- */
 
@@ -903,6 +924,7 @@ export function useMonthlyBreakdown(
     const inMonth = expensesInMonth(expenses, month);
     const buckets = new Map<string, MonthStoreGroup>();
     let total = 0;
+    let sharedTotal = 0;
     for (const e of inMonth) {
       const rawStore = (e.store || "").trim();
       const storeName = rawStore ? titleCaseName(rawStore) : "Unspecified";
@@ -933,6 +955,7 @@ export function useMonthlyBreakdown(
         });
       }
       total += e.amountCents;
+      sharedTotal += sharedCents(trip.allocations);
     }
     for (const g of buckets.values()) {
       // Most recent trip first, larger amount breaking a same-day tie.
@@ -944,7 +967,7 @@ export function useMonthlyBreakdown(
       });
     }
     const rows = Array.from(buckets.values()).sort((a, b) => b.total - a.total);
-    return { rows, total, count: inMonth.length, inMonth };
+    return { rows, total, sharedTotal, count: inMonth.length, inMonth };
   }, [expenses, month]);
 
   /* ---- Rent ---- */
@@ -1033,6 +1056,13 @@ export function useMonthlyBreakdown(
       isOverridden: (bill) => hasOverride(bill, month),
       commitAmount(id, cents) {
         if (monthLocked) return;
+        // A negative amount is dropped by the settlement math but would still
+        // be counted in this section's header, so the parts would stop adding
+        // up to the total. Refuse it instead.
+        if (cents !== null && cents < 0) {
+          onToast("Amount must be greater than $0");
+          return;
+        }
         persistFixed(
           fixed.map((r) =>
             r.id === id ? setBillAmount(r, month, currentMonth, cents ?? 0) : r
@@ -1097,6 +1127,10 @@ export function useMonthlyBreakdown(
       amountFor: (line) => monthVariable[line.name],
       setAmount(name, cents) {
         if (monthLocked) return;
+        if (cents !== null && cents < 0) {
+          onToast("Amount must be greater than $0");
+          return;
+        }
         const nextAmounts: VariableMap = { ...variable.amounts };
         const bucket = { ...(nextAmounts[month] ?? {}) };
         if (cents === null) delete bucket[name];

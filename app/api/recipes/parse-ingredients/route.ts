@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
+import { apiError } from "@/lib/errors";
 import { loadCategoryContext } from "@/lib/categoryHistory";
 import { guessCategoryOrFallback } from "@/lib/guessCategory";
 import { parseRecipeIngredient } from "@/lib/parseIngredient";
@@ -16,8 +17,11 @@ const MAX_LINES = 120;
 type ParseIngredientsResponse = {
   ok: true;
   ingredients: RecipeIngredient[];
-  // Lines we deliberately dropped (section headers like "For the sauce:").
+  // Lines we deliberately dropped: section headers like "For the sauce:",
+  // plus anything past MAX_LINES.
   skipped: number;
+  // Set only when something needs explaining beyond the count.
+  note?: string;
   hasApproximate: boolean;
 };
 
@@ -32,12 +36,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const lines = text
+    const allLines = text
       .split(/\r?\n/)
       // Strip common copy-paste bullets/checkboxes before parsing.
       .map((line) => line.replace(/^[\s•·▢◻☐✓✔*\-–—]+\s*/, "").trim())
-      .filter(Boolean)
-      .slice(0, MAX_LINES);
+      .filter(Boolean);
+    const lines = allLines.slice(0, MAX_LINES);
+    // Everything past the cap used to vanish while the response still said
+    // "skipped: 0", so a long paste came back quietly short.
+    const overLimit = allLines.length - lines.length;
     if (lines.length === 0) {
       return NextResponse.json(
         { ok: false, error: "Nothing to parse — paste some ingredients first." },
@@ -47,7 +54,7 @@ export async function POST(req: NextRequest) {
 
     const parsed = lines.map((line) => parseRecipeIngredient(line));
     const kept = parsed.filter((p) => Boolean(p.name));
-    const skipped = parsed.length - kept.length;
+    const skipped = parsed.length - kept.length + overLimit;
 
     await ensureTables();
     const { history, validCategories } = await loadCategoryContext();
@@ -62,13 +69,17 @@ export async function POST(req: NextRequest) {
       ok: true,
       ingredients,
       skipped,
+      ...(overLimit > 0
+        ? {
+            note: `Only the first ${MAX_LINES} lines were read, ${overLimit} more ${
+              overLimit === 1 ? "line was" : "lines were"
+            } left out`,
+          }
+        : {}),
       hasApproximate: kept.some((p) => p.approximate),
     };
     return NextResponse.json(result);
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 }
-    );
+    return apiError(e);
   }
 }

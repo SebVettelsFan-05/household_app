@@ -47,6 +47,35 @@ function activeWeekStart(): string {
 
 const WEEK_START = activeWeekStart();
 
+/** Today in the household timezone, as YYYY-MM-DD (mirrors `todayYmd`). */
+const TODAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: HOUSEHOLD_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(new Date());
+
+/** The category the delete-confirm test creates and then removes. */
+const USAGE_CATEGORY = "Smokecat";
+
+/**
+ * WCAG relative-luminance contrast between two rendered colors, as
+ * `getComputedStyle` reports them ("rgb(a, b, c)").
+ */
+function contrastRatio(a: string, b: string): number {
+  const lum = (color: string) => {
+    const [r, g, bl] = (color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const chan = (v: number) => {
+      const x = v / 255;
+      return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(bl);
+  };
+  const l1 = lum(a);
+  const l2 = lum(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
+
 /** Desktop + mobile screenshot of the current state. */
 async function shot(name: string) {
   // `animations: "disabled"` finishes in-flight transitions first, so a chip
@@ -59,15 +88,47 @@ async function shot(name: string) {
   await page.setViewportSize(DESKTOP);
 }
 
+/**
+ * Closing a modal takes its history entry back out, and the browser does that
+ * a beat later. Wait for it before counting history entries, or a step that
+ * pushes one lands before the pop and the pop eats the wrong entry.
+ */
+async function settleHistory() {
+  await page.waitForFunction(
+    () => (window.history.state?.hhLayer ?? null) === null
+  );
+}
+
 /** The bottom tab bar uses role="tab", so click it explicitly. */
 async function gotoTab(label: string) {
   await page.locator(".tab-bar button").filter({ hasText: label }).click();
 }
 
+/**
+ * Fill the password so that React sees it. Filling before hydration sets the
+ * DOM value with no change handler attached, and hydration then resets the
+ * field, leaving Sign in disabled. Fill, wait for the button, refill once.
+ */
+async function typePassword(p: Page, password: string) {
+  const input = p.locator('input[type="password"]');
+  const button = p.getByRole("button", { name: /sign in|enter|continue/i });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await input.fill("");
+    await input.fill(password);
+    try {
+      await expect(button).toBeEnabled({ timeout: 1500 });
+      return;
+    } catch {
+      await p.waitForTimeout(300);
+    }
+  }
+  await expect(button).toBeEnabled();
+}
+
 async function login() {
   await page.goto("/");
   if (page.url().includes("/login")) {
-    await page.locator('input[type="password"]').fill(PASSWORD);
+    await typePassword(page, PASSWORD);
     await page.getByRole("button", { name: /sign in|enter|continue/i }).click();
     await page.waitForURL((url) => !url.pathname.startsWith("/login"));
   }
@@ -367,4 +428,291 @@ test("the edit modal seeds the saved split", async () => {
   // Nothing is saved: the settlement asserted above must stay true.
   await page.keyboard.press("Escape");
   await expect(page.locator(".modal-bg")).toHaveCount(0);
+});
+
+test("Escape over the classic edit modal closes only the lightbox", async () => {
+  await gotoTab("Expenses");
+  await page.getByRole("button", { name: "Current", exact: true }).click();
+  await page.locator(".item", { hasText: "Costco" }).first().click();
+  await expect(page.getByRole("heading", { name: "Edit expense" })).toBeVisible();
+
+  await page.locator("#ee-desc").fill("Escape probe");
+  await page.locator("#ee-receipt").setInputFiles(RECEIPT_PATH);
+  await page.locator(".modal .receipt-preview img").click();
+  await expect(page.locator(".receipt-lightbox")).toBeVisible();
+
+  // The lightbox goes; the modal and everything typed into it stay.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".receipt-lightbox")).toHaveCount(0);
+  await expect(page.locator(".modal-bg")).toHaveCount(1);
+  await expect(page.locator("#ee-desc")).toHaveValue("Escape probe");
+
+  // Nothing behind the modal is reachable by keyboard while it is open.
+  for (let i = 0; i < 30; i += 1) await page.keyboard.press("Tab");
+  expect(
+    await page.evaluate(() =>
+      document.querySelector(".modal")?.contains(document.activeElement)
+    )
+  ).toBe(true);
+
+  // Nothing is saved: the settlement asserted above must stay true.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+});
+
+test("closing a modal hands the keyboard back to whatever opened it", async () => {
+  const gear = page.getByRole("button", { name: "Household settings" });
+  await gear.evaluate((el) => el.setAttribute("data-probe", "opener"));
+  await gear.click();
+  await expect(page.locator(".modal-bg")).toHaveCount(1);
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  // The hand-back waits for the frame after the layer leaves the DOM, so
+  // poll for it instead of reading focus the instant the modal is gone.
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute("data-probe") === "opener"
+  );
+
+  // A lightbox opened from inside the modal hands focus back into the modal,
+  // not out to the page behind it.
+  await gotoTab("Expenses");
+  await page.getByRole("button", { name: "Current", exact: true }).click();
+  await page.locator(".item", { hasText: "Costco" }).first().click();
+  await expect(page.getByRole("heading", { name: "Edit expense" })).toBeVisible();
+
+  await page.locator("#ee-receipt").setInputFiles(RECEIPT_PATH);
+  await page.locator("#ee-desc").click();
+  await page.locator(".modal .receipt-preview img").click();
+  await expect(page.locator(".receipt-lightbox")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".receipt-lightbox")).toHaveCount(0);
+  await expect(page.locator(".modal-bg")).toHaveCount(1);
+  // The thumbnail is a bare <img>, so opening the lightbox leaves focus on
+  // the modal box itself; that is what the lightbox has to hand it back to.
+  await page.waitForFunction(() =>
+    String(document.activeElement?.className ?? "").includes("modal")
+  );
+
+  // Nothing is saved: the settlement asserted above must stay true.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  await settleHistory();
+});
+
+test("Back walks the classic tabs and closes a modal without leaving", async () => {
+  await settleHistory();
+  await gotoTab("Home");
+  await gotoTab("Grocery");
+  expect(new URL(page.url()).hash).toBe("#grocery");
+  await gotoTab("Recipes");
+  expect(new URL(page.url()).hash).toBe("#recipes");
+
+  // A reload lands on the tab the user was on, not back on Home.
+  await page.reload();
+  await expect(page.locator(".recipe-grid").first()).toBeVisible();
+
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Grocery" })).toBeVisible();
+
+  // An open modal owns one entry of its own, so Back closes the modal and
+  // leaves the app standing on the same tab.
+  await page.getByRole("button", { name: "Household settings" }).click();
+  await expect(page.locator(".modal-bg")).toHaveCount(1);
+  await page.goBack();
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  await expect(page.locator(".wrap")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Grocery" })).toBeVisible();
+
+  // Closing it from the modal takes that entry back out again, so the next
+  // Back is the tab move and not a second dismissal.
+  await page.getByRole("button", { name: "Household settings" }).click();
+  await expect(page.locator(".modal-bg")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  await settleHistory();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Household" })).toBeVisible();
+});
+
+test("deleting a row somebody else already deleted closes cleanly", async () => {
+  const ghost = "Smokeghostrice";
+  await page.request.post("/api/items", {
+    data: { name: ghost, quantity: 300, category: "Pantry" },
+  });
+  await page.reload();
+  await gotoTab("Inventory");
+
+  await page.locator(".item", { hasText: ghost }).first().click();
+  await expect(page.getByRole("heading", { name: "Edit item" })).toBeVisible();
+
+  // The row goes behind the modal's back — another housemate, another device.
+  const items = await (await page.request.get("/api/items")).json();
+  const row = (items.items ?? []).find(
+    (i: { name: string }) => i.name === ghost
+  );
+  expect(row).toBeTruthy();
+  await page.request.delete(`/api/items?id=${encodeURIComponent(row.id)}`);
+
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Delete" }).click();
+
+  // The delete asked for what had already happened, so it counts as done.
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  await expect(page.locator(".item", { hasText: ghost })).toHaveCount(0);
+  await expect(page.locator(".toast")).not.toContainText("Error");
+});
+
+test("both classic date fields are capped at today", async () => {
+  await gotoTab("Expenses");
+  await page.getByRole("button", { name: "Current", exact: true }).click();
+  await expect(page.locator("#e-date")).toHaveValue(TODAY);
+  await expect(page.locator("#e-date")).toHaveAttribute("max", TODAY);
+
+  await page.locator(".item", { hasText: "Costco" }).first().click();
+  await expect(page.getByRole("heading", { name: "Edit expense" })).toBeVisible();
+  await expect(page.locator("#ee-date")).toHaveAttribute("max", TODAY);
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  await settleHistory();
+});
+
+test("a category delete counts everything it is about to move", async () => {
+  // The confirm used to count only the inventory rows this modal happened to
+  // have loaded, so grocery rows and recipe ingredients were reassigned to
+  // "Other" without anyone being told, and the grocery screen kept the group.
+  await page.request.post("/api/categories", {
+    data: { name: USAGE_CATEGORY, color: null },
+  });
+  await page.request.post("/api/items", {
+    data: {
+      name: "Smokecatitem",
+      quantity: 1,
+      category: USAGE_CATEGORY,
+      categoryReviewed: true,
+    },
+  });
+  await page.request.post("/api/grocery", {
+    data: {
+      name: "Smokecatgrocery",
+      quantity: 1,
+      category: USAGE_CATEGORY,
+      categoryReviewed: true,
+      addedBy: "Arthur",
+    },
+  });
+  // Next week, so this week's cook tally is left alone.
+  const nextWeek = new Date(Date.UTC(
+    Number(WEEK_START.slice(0, 4)),
+    Number(WEEK_START.slice(5, 7)) - 1,
+    Number(WEEK_START.slice(8, 10)) + 7
+  ))
+    .toISOString()
+    .slice(0, 10);
+  await page.request.post("/api/recipes", {
+    data: {
+      weekStart: nextWeek,
+      day: 3,
+      assignedTo: "Eli",
+      name: "Smokecat Stew",
+      ingredients: [
+        { name: "Smokecatspice", quantity: 10, category: USAGE_CATEGORY },
+      ],
+    },
+  });
+
+  await page.reload();
+  await gotoTab("Grocery");
+  await expect(
+    page.locator(".cat-group-name", { hasText: USAGE_CATEGORY })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Manage" }).first().click();
+  const row = page.locator(".cat-mgr-row", { hasText: USAGE_CATEGORY });
+  await expect(row).toBeVisible();
+
+  // First pass: read the confirm and walk away. The wording has to name every
+  // kind of row that is about to move, not just the inventory ones.
+  const message = new Promise<string>((resolve) => {
+    page.once("dialog", (d) => {
+      resolve(d.message());
+      d.dismiss();
+    });
+  });
+  await row.getByRole("button", { name: "Remove" }).click();
+  expect(await message).toBe(
+    `Delete "${USAGE_CATEGORY}"? 1 item, 1 grocery row and 1 recipe ingredient will move to "Other".`
+  );
+  await expect(row).toBeVisible();
+
+  page.once("dialog", (d) => d.accept());
+  await row.getByRole("button", { name: "Remove" }).click();
+  await expect(
+    page.locator(".cat-mgr-row", { hasText: USAGE_CATEGORY })
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+
+  // No dead group left behind on the grocery screen, with no reload.
+  await expect(
+    page.locator(".cat-group-name", { hasText: USAGE_CATEGORY })
+  ).toHaveCount(0);
+  await expect(page.locator(".toast")).not.toContainText("Error");
+  await settleHistory();
+
+  // Clean up this test's rows.
+  const grocery = await (await page.request.get("/api/grocery")).json();
+  for (const g of grocery.grocery ?? []) {
+    if (String(g.name).toLowerCase().startsWith("smokecat")) {
+      await page.request.delete(`/api/grocery?id=${encodeURIComponent(g.id)}`);
+    }
+  }
+  const items = await (await page.request.get("/api/items")).json();
+  for (const it of items.items ?? []) {
+    if (String(it.name).toLowerCase().startsWith("smokecat")) {
+      await page.request.delete(`/api/items?id=${encodeURIComponent(it.id)}`);
+    }
+  }
+  const recipes = await (await page.request.get("/api/recipes")).json();
+  for (const r of recipes.recipes ?? []) {
+    if (r.name === "Smokecat Stew") {
+      await page.request.delete(`/api/recipes/${encodeURIComponent(r.id)}`);
+    }
+  }
+  await page.reload();
+  await expect(page.locator(".wrap")).toBeVisible();
+});
+
+test("the household settings modal is captured in both themes", async () => {
+  await gotoTab("Home");
+  await page.getByRole("button", { name: "Household settings" }).click();
+  await expect(page.locator(".modal")).toBeVisible();
+  await shot("13-settings-light");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  await settleHistory();
+
+  // Dark is where a hard-coded white label on the accent button shows up, so
+  // the Save button has to be readable in this frame. The header toggle
+  // flips the theme in place — a reload would reopen the modal before the
+  // household data is back and shoot an empty meal group.
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await page.getByRole("button", { name: "Household settings" }).click();
+  await expect(page.locator(".modal")).toBeVisible();
+  await shot("13-settings-dark");
+
+  // Measured, not eyeballed: white on the dark theme's mint accent is
+  // 2.37:1, which is unreadable and well under WCAG AA.
+  const save = page.locator(".modal .btn-accent", { hasText: "Save" });
+  const [ink, paper] = await save.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return [cs.color, cs.backgroundColor];
+  });
+  expect(contrastRatio(ink, paper)).toBeGreaterThan(4.5);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
 });

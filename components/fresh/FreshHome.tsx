@@ -6,15 +6,18 @@ import type { FreshTab, RecipeSlot } from "@/components/fresh/FreshApp";
 import { Avatar } from "@/components/fresh/people";
 import { IconChevronRight } from "@/components/fresh/icons";
 import { DAY_LONG, shortDayLabel, thisWeekStart, todayCookingDay } from "@/lib/dates";
-import { expiryStatus } from "@/lib/format";
+import { daysUntil, expiryStatus } from "@/lib/format";
 import { fmtMoney } from "@/lib/money";
+import type { Settlement } from "@/lib/settlement";
 import type { Item } from "@/lib/types";
-import { useMonthlySettlement } from "@/lib/useMonthlySettlement";
 import type { HouseholdData } from "@/lib/useHouseholdData";
 
 type Props = {
   data: HouseholdData;
   mealGroup: string[];
+  /** This month's settlement, from the shell's one bill store. */
+  settlement: Settlement;
+  loadingBills: boolean;
   onNavigate: (tab: FreshTab) => void;
   onOpenMonth: () => void;
   onPlanDinner: (slot: RecipeSlot) => void;
@@ -22,25 +25,15 @@ type Props = {
 
 const EXPIRING_WINDOW_DAYS = 3;
 
-/** Days until `expiry`, or null when the item carries no date. */
-function daysUntil(expiry: string): number | null {
-  if (!expiry) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(expiry + "T00:00:00");
-  if (Number.isNaN(d.getTime())) return null;
-  return Math.round((d.getTime() - today.getTime()) / 86400000);
-}
-
 export default function FreshHome({
   data,
   mealGroup,
+  settlement,
+  loadingBills,
   onNavigate,
   onOpenMonth,
   onPlanDinner,
 }: Props) {
-  const { settlement, loadingBills } = useMonthlySettlement(data.expenses);
-
   const today = useHouseholdToday();
   const weekStart = thisWeekStart(today);
   const dayIndex = todayCookingDay(weekStart, today);
@@ -62,14 +55,14 @@ export default function FreshHome({
   const expiring = useMemo(() => {
     const rows: { item: Item; days: number }[] = [];
     for (const item of data.items) {
-      const days = daysUntil(item.expiry);
+      const days = daysUntil(item.expiry, today);
       if (days === null || days > EXPIRING_WINDOW_DAYS) continue;
       rows.push({ item, days });
     }
     return rows.sort(
       (a, b) => a.days - b.days || a.item.name.localeCompare(b.item.name)
     );
-  }, [data.items]);
+  }, [data.items, today]);
 
   const monthName = new Date().toLocaleString("en-US", { month: "long" });
   // "Sun, May 24" -> "May 24"; the long day name is written out separately.
@@ -262,7 +255,7 @@ export default function FreshHome({
         ) : (
           <div className="fresh-rows">
             {expiring.slice(0, 6).map(({ item }) => {
-              const status = expiryStatus(item.expiry);
+              const status = expiryStatus(item.expiry, today);
               return (
                 <div className="fresh-row" key={item.id}>
                   <span className="fresh-row-main">

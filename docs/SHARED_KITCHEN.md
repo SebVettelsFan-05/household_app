@@ -120,5 +120,18 @@ else changes.
 
 `npm run dev:local` runs the app on :3100 against a throwaway Postgres in
 Docker (`household-dev-pg`, port 5433) with a stub for the Apps Script
-receipt/mirror webhook. Add `-- --reset` to drop the schema first. The
-production Neon database is never touched by this process tree.
+receipt/mirror webhook. Add `-- --reset` to drop the schema first (restart
+the app afterwards; it caches its table bootstrap). The production Neon
+database is never touched by this process tree.
+
+`npm run seed:local` fills the local DB with a realistic month. To reseed
+from scratch:
+
+```
+docker exec household-dev-pg psql -U dev -d household_dev -c "TRUNCATE items, grocery_items, recipes, favorite_recipes, expenses, household_settings, shared_accounts;"
+npm run seed:local
+```
+
+`npm run smoke` runs both Playwright suites; they create and remove their
+own fixtures but also clear the current cooking week and this month's
+bills, so reseed after a run if you want to look at the app.

@@ -39,7 +39,33 @@ import type {
 } from "./types";
 import { isBuyer, MEAL_GROUP_KEY } from "./types";
 
+/** What every caller sees when the session has expired under them. */
+export const SIGNED_OUT_MESSAGE = "Signed out — taking you to the sign-in page";
+
+/**
+ * A 401 means the cookie expired or was revoked while the app was open. Left
+ * alone it surfaces as "HTTP 401" on a screen still showing yesterday's data,
+ * so send the browser to the sign-in page with the screen it was on in `next`
+ * and throw, rather than letting the caller render a half-failure.
+ *
+ * The login page itself calls no API, but guard the redirect anyway so a
+ * future 401 from there cannot start a reload loop.
+ */
+function signOutIfUnauthorized(res: Response): void {
+  if (res.status !== 401) return;
+  if (
+    typeof window !== "undefined" &&
+    !window.location.pathname.startsWith("/login")
+  ) {
+    const next =
+      window.location.pathname + window.location.search + window.location.hash;
+    window.location.replace(`/login?next=${encodeURIComponent(next)}`);
+  }
+  throw new Error(SIGNED_OUT_MESSAGE);
+}
+
 async function parse<T>(res: Response): Promise<ApiResponse<T>> {
+  signOutIfUnauthorized(res);
   let body: unknown = null;
   try {
     body = await res.json();
@@ -61,6 +87,20 @@ function unwrap<T>(r: ApiResponse<T>): T {
   if (!r.ok) throw new Error(r.error || "Unknown error");
   return r;
 }
+
+/**
+ * What the UI says when an edit lands on a row somebody else deleted first.
+ *
+ * A row can disappear under an open modal: another housemate deletes it, or
+ * the same delete is sent twice from two devices. The server answers 404 for
+ * both. A *delete* that 404s has already got what it asked for, so every
+ * delete helper below re-reads the list and returns it as a success — the
+ * modal closes and the ghost row goes with it, instead of dead-ending on
+ * "Error: Not found" with the row still on screen. A *patch* genuinely did
+ * not happen, so it comes back flagged `gone`: the caller shows this message
+ * and closes with the refreshed list rather than pretending it saved.
+ */
+export const ROW_GONE_MESSAGE = "This row was already removed";
 
 /* ----- items ----- */
 
@@ -88,12 +128,15 @@ export async function addItem(input: AddInput) {
 
 export type UpdateInput = AddInput & { id: string };
 
-export async function updateItem(input: UpdateInput) {
+export async function updateItem(
+  input: UpdateInput
+): Promise<MutateResponse & { gone?: true }> {
   const res = await fetch("/api/items", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+  if (res.status === 404) return { ok: true, items: await listItems(), gone: true };
   return unwrap(await parse<MutateResponse>(res));
 }
 
@@ -101,6 +144,7 @@ export async function deleteItem(id: string) {
   const res = await fetch(`/api/items?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+  if (res.status === 404) return { ok: true as const, items: await listItems() };
   return unwrap(await parse<MutateResponse>(res));
 }
 
@@ -129,11 +173,40 @@ export async function updateCategoryColor(name: string, color: string | null) {
   return unwrap(await parse<UpdateCategoryResponse>(res));
 }
 
+/**
+ * How much of the database a category is holding up. Read before the delete
+ * confirm, because the modal only knows about the inventory rows it has
+ * loaded — the grocery list and the recipe ingredient lists are reassigned
+ * too, and used to be deleted without warning.
+ */
+export type CategoryUsage = {
+  items: number;
+  grocery: number;
+  recipeIngredients: number;
+  favoriteIngredients: number;
+};
+
+export async function getCategoryUsage(name: string): Promise<CategoryUsage> {
+  const res = await fetch(
+    `/api/categories/usage?name=${encodeURIComponent(name)}`,
+    { cache: "no-store" }
+  );
+  return unwrap(await parse<{ usage: CategoryUsage }>(res)).usage;
+}
+
 export async function deleteCategory(name: string) {
   const res = await fetch(
     `/api/categories?name=${encodeURIComponent(name)}`,
     { method: "DELETE" }
   );
+  if (res.status === 404) {
+    return {
+      ok: true as const,
+      categories: await listCategories(),
+      items: await listItems(),
+      reassigned: 0,
+    };
+  }
   return unwrap(await parse<DeleteCategoryResponse>(res));
 }
 
@@ -173,12 +246,17 @@ export type UpdateGroceryInput = {
   done?: boolean;
 };
 
-export async function updateGrocery(input: UpdateGroceryInput) {
+export async function updateGrocery(
+  input: UpdateGroceryInput
+): Promise<GroceryMutateResponse & { gone?: true }> {
   const res = await fetch("/api/grocery", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+  if (res.status === 404) {
+    return { ok: true, grocery: await listGrocery(), gone: true };
+  }
   return unwrap(await parse<GroceryMutateResponse>(res));
 }
 
@@ -186,6 +264,9 @@ export async function deleteGrocery(id: string) {
   const res = await fetch(`/api/grocery?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+  if (res.status === 404) {
+    return { ok: true as const, grocery: await listGrocery() };
+  }
   return unwrap(await parse<GroceryMutateResponse>(res));
 }
 
@@ -207,6 +288,7 @@ export async function moveDoneGroceryToInventory(): Promise<{
   moved: number;
 }> {
   const res = await fetch("/api/grocery/move-done", { method: "POST" });
+  signOutIfUnauthorized(res);
   const body = (await res.json().catch(() => null)) as
     | MoveDoneResponse
     | { ok: false; error: string }
@@ -271,6 +353,7 @@ export async function lookupProductByBarcode(
     `/api/products/lookup?barcode=${encodeURIComponent(barcode)}`,
     { cache: "no-store" }
   );
+  signOutIfUnauthorized(res);
   const body = (await res.json().catch(() => null)) as
     | { ok: true; product: ProductScan | null }
     | { ok: false; error: string }
@@ -298,6 +381,7 @@ export async function scrapeRecipeFromUrl(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
   });
+  signOutIfUnauthorized(res);
   const body = (await res.json().catch(() => null)) as
     | (ScrapeRecipeResponse & { ok: true })
     | { ok: false; error: string }
@@ -314,6 +398,8 @@ export type ParseIngredientsResponse = {
   ingredients: RecipeIngredient[];
   skipped: number;
   hasApproximate: boolean;
+  // Set when the paste was longer than the server reads.
+  note?: string;
 };
 
 /**
@@ -328,6 +414,7 @@ export async function parseIngredientsFromText(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
+  signOutIfUnauthorized(res);
   const body = (await res.json().catch(() => null)) as
     | (ParseIngredientsResponse & { ok: true })
     | { ok: false; error: string }
@@ -364,12 +451,18 @@ export async function addRecipe(input: AddRecipeInput) {
   return unwrap(await parse<RecipeMutateResponse>(res));
 }
 
-export async function updateRecipe(id: string, input: Partial<AddRecipeInput>) {
+export async function updateRecipe(
+  id: string,
+  input: Partial<AddRecipeInput>
+): Promise<RecipeMutateResponse & { gone?: true }> {
   const res = await fetch(`/api/recipes/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+  if (res.status === 404) {
+    return { ok: true, recipes: await listRecipes(), gone: true };
+  }
   return unwrap(await parse<RecipeMutateResponse>(res));
 }
 
@@ -377,6 +470,9 @@ export async function deleteRecipe(id: string) {
   const res = await fetch(`/api/recipes/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+  if (res.status === 404) {
+    return { ok: true as const, recipes: await listRecipes() };
+  }
   return unwrap(await parse<RecipeMutateResponse>(res));
 }
 
@@ -406,6 +502,9 @@ export async function deleteFavorite(id: string) {
   const res = await fetch(`/api/favorites/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+  if (res.status === 404) {
+    return { ok: true as const, favorites: await listFavorites() };
+  }
   return unwrap(await parse<FavoritesMutateResponse>(res));
 }
 
@@ -469,11 +568,16 @@ export async function addExpense(input: AddExpenseInput) {
 
 export type UpdateExpenseInput = Partial<AddExpenseInput> & { id: string };
 
-export async function updateExpense(input: UpdateExpenseInput) {
+export async function updateExpense(
+  input: UpdateExpenseInput
+): Promise<ExpenseMutateResponse & { gone?: true }> {
   const res = await fetch("/api/expenses", {
     method: "PATCH",
     body: expenseToFormData(input),
   });
+  if (res.status === 404) {
+    return { ok: true, expenses: await listExpenses(), gone: true };
+  }
   return unwrap(await parse<ExpenseMutateResponse>(res));
 }
 
@@ -481,6 +585,9 @@ export async function deleteExpense(id: string) {
   const res = await fetch(`/api/expenses?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+  if (res.status === 404) {
+    return { ok: true as const, expenses: await listExpenses() };
+  }
   return unwrap(await parse<ExpenseMutateResponse>(res));
 }
 
@@ -521,6 +628,14 @@ export async function deleteExpenseCategory(name: string) {
     `/api/expense-categories?name=${encodeURIComponent(name)}`,
     { method: "DELETE" }
   );
+  if (res.status === 404) {
+    return {
+      ok: true as const,
+      expenseCategories: await listExpenseCategories(),
+      expenses: await listExpenses(),
+      reassigned: 0,
+    };
+  }
   return unwrap(await parse<DeleteExpenseCategoryResponse>(res));
 }
 
@@ -558,12 +673,17 @@ export type UpdateSharedAccountInput = {
   fields?: SharedAccountField[];
 };
 
-export async function updateSharedAccount(input: UpdateSharedAccountInput) {
+export async function updateSharedAccount(
+  input: UpdateSharedAccountInput
+): Promise<SharedAccountsMutateResponse & { gone?: true }> {
   const res = await fetch("/api/shared-accounts", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+  if (res.status === 404) {
+    return { ok: true, accounts: await listSharedAccounts(), gone: true };
+  }
   return unwrap(await parse<SharedAccountsMutateResponse>(res));
 }
 
@@ -571,6 +691,9 @@ export async function deleteSharedAccount(id: string) {
   const res = await fetch(`/api/shared-accounts?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+  if (res.status === 404) {
+    return { ok: true as const, accounts: await listSharedAccounts() };
+  }
   return unwrap(await parse<SharedAccountsMutateResponse>(res));
 }
 
@@ -582,6 +705,7 @@ export async function getSetting<T>(key: string): Promise<T | null> {
   const res = await fetch(`/api/settings/${encodeURIComponent(key)}`, {
     cache: "no-store",
   });
+  signOutIfUnauthorized(res);
   const body = (await res.json().catch(() => null)) as
     | { ok: true; value: T | null }
     | { ok: false; error: string }
@@ -611,6 +735,7 @@ export async function putSetting<T>(key: string, value: T): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ value }),
   });
+  signOutIfUnauthorized(res);
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as
       | { error?: string }

@@ -41,6 +41,8 @@ const GROCERY_NAMES = [
   "Freshsmokesoap",
   "Freshsmokerice",
 ];
+// Created and deleted inside one test: the row that gets deleted twice.
+const GHOST_NAME = "Freshsmokeghost";
 
 let page: Page;
 let browserRef: Browser;
@@ -78,6 +80,24 @@ const WEEK_START = activeWeekStart(TODAY);
 // The cooking week is Sunday through Saturday, so today always has a slot.
 const TODAY_DAY = dowOf(TODAY);
 
+const THIS_MONTH = TODAY.slice(0, 7);
+
+/** YYYY-MM `delta` months from `key` (mirrors `shiftMonth` in lib/monthlyBills). */
+function shiftMonthKey(key: string, delta: number): string {
+  const [y, m] = key.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** "September 2026", the way `ymLabel` renders a month key. */
+function monthKeyLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
 /** "Sep 11" from a YYYY-MM-DD, mirroring `fmtTripDate` in lib/monthlyBills. */
 function tripDateLabel(ymd: string): string {
   const [y, m, d] = ymd.split("-").map(Number);
@@ -107,7 +127,7 @@ async function resetFixtures(api: APIRequestContext) {
   const grocery = await (await api.get("/api/grocery")).json();
   for (const g of grocery.grocery ?? []) {
     if (
-      [...GROCERY_NAMES, ITEM_NAME].some((n) =>
+      [...GROCERY_NAMES, GHOST_NAME, ITEM_NAME].some((n) =>
         String(g.name).toLowerCase().startsWith(n.toLowerCase())
       )
     ) {
@@ -128,6 +148,21 @@ async function resetFixtures(api: APIRequestContext) {
       await api.delete(`/api/items?id=${encodeURIComponent(it.id)}`);
     }
   }
+}
+
+/** This week's dinner fixture: Eli cooks, 4 servings scaled to 3 portions. */
+async function seedFixtureRecipe(api: APIRequestContext) {
+  await api.post("/api/recipes", {
+    data: {
+      weekStart: WEEK_START,
+      day: TODAY_DAY,
+      assignedTo: "Eli",
+      name: RECIPE_NAME,
+      ingredients: [{ name: "Coconut milk", quantity: 400, category: "Pantry" }],
+      servings: 4,
+      portions: 3,
+    },
+  });
 }
 
 async function seedFixtures(api: APIRequestContext) {
@@ -172,17 +207,7 @@ async function seedFixtures(api: APIRequestContext) {
     },
   });
 
-  await api.post("/api/recipes", {
-    data: {
-      weekStart: WEEK_START,
-      day: TODAY_DAY,
-      assignedTo: "Eli",
-      name: RECIPE_NAME,
-      ingredients: [{ name: "Coconut milk", quantity: 400, category: "Pantry" }],
-      servings: 4,
-      portions: 3,
-    },
-  });
+  await seedFixtureRecipe(api);
 
   await api.post("/api/items", {
     data: {
@@ -216,12 +241,57 @@ async function seedSplitExpense(api: APIRequestContext) {
   expect(res.ok()).toBeTruthy();
 }
 
+/**
+ * The recurring bills are cached per device as well as stored per household,
+ * and the cache deliberately wins over an empty backend row so one housemate
+ * opening the app on a blank install can never wipe everyone's bills.
+ * Clearing the settings through the API is therefore only half a reset: this
+ * device's copy has to go too, or it replays the dev seed's numbers and every
+ * settlement assertion below is off.
+ */
+async function clearBillCache(p: Page) {
+  await p.evaluate(() => {
+    for (const key of [
+      "monthly_recurring_fixed_v3",
+      "monthly_recurring_variable_v3",
+      "monthly_rent_alloc_v1",
+    ]) {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+}
+
 /* ---------- navigation ---------- */
+
+/**
+ * Fill the password so that React sees it. Filling before hydration sets the
+ * DOM value with no change handler attached, and hydration then resets the
+ * field, leaving Sign in disabled. Fill, wait for the button, refill once.
+ */
+async function typePassword(p: Page, password: string) {
+  const input = p.locator('input[type="password"]');
+  const button = p.getByRole("button", { name: /sign in|enter|continue/i });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await input.fill("");
+    await input.fill(password);
+    try {
+      await expect(button).toBeEnabled({ timeout: 1500 });
+      return;
+    } catch {
+      await p.waitForTimeout(300);
+    }
+  }
+  await expect(button).toBeEnabled();
+}
 
 async function login(p: Page) {
   await p.goto("/");
   if (p.url().includes("/login")) {
-    await p.locator('input[type="password"]').fill(PASSWORD);
+    await typePassword(p, PASSWORD);
     await p.getByRole("button", { name: /sign in|enter|continue/i }).click();
     await p.waitForURL((url) => !url.pathname.startsWith("/login"));
   }
@@ -261,6 +331,17 @@ async function gotoTab(p: Page, label: string) {
   await p.locator(".fresh-row", { hasText: label }).first().click();
 }
 
+/**
+ * Closing a layer takes its history entry back out, and the browser does that
+ * a beat later. Wait for it before counting history entries, or a step that
+ * pushes one lands before the pop and the pop eats the wrong entry.
+ */
+async function settleHistory() {
+  await page.waitForFunction(
+    () => (window.history.state?.hhLayer ?? null) === null
+  );
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ browser }) => {
@@ -272,6 +353,7 @@ test.beforeAll(async ({ browser }) => {
   await resetFixtures(page.request);
   await seedFixtures(page.request);
   await seedSplitExpense(page.request);
+  await clearBillCache(page);
   await page.reload();
 });
 
@@ -442,7 +524,167 @@ test("dismissing the sheet never activates what is under it", async () => {
   );
 });
 
+test("Escape closes only the layer on top, with the form left standing", async () => {
+  await gotoTab(page, "Expenses");
+  await page.getByRole("button", { name: "Add expense" }).first().click();
+  const sheet = page.locator(".fresh-sheet");
+  await expect(sheet).toBeVisible();
+
+  await sheet.locator("#fx-amount").fill("41.25");
+  await sheet.locator("#fx-store").fill("Escape Probe");
+  await sheet.locator("#fx-receipt").setInputFiles(RECEIPT_PATH);
+  await sheet.locator(".receipt-preview img").click();
+  await expect(page.locator(".receipt-lightbox")).toBeVisible();
+
+  // One Escape, one layer: the lightbox goes, the half-filled sheet stays.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".receipt-lightbox")).toHaveCount(0);
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator("#fx-amount")).toHaveValue("41.25");
+  await expect(sheet.locator("#fx-store")).toHaveValue("Escape Probe");
+
+  // And nothing behind the sheet is reachable by keyboard while it is open.
+  for (let i = 0; i < 30; i += 1) await page.keyboard.press("Tab");
+  expect(
+    await page.evaluate(() =>
+      document.querySelector(".fresh-sheet")?.contains(document.activeElement)
+    )
+  ).toBe(true);
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+});
+
+test("closing a sheet hands the keyboard back to whatever opened it", async () => {
+  await gotoTab(page, "Recipes");
+  const opener = page.getByRole("button", { name: "Favorites" }).first();
+  await opener.evaluate((el) => el.setAttribute("data-probe", "opener"));
+  await opener.click();
+  await expect(page.locator(".fresh-sheet")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  // The hand-back waits for the frame after the layer leaves the DOM, so
+  // poll for it instead of reading focus the instant the sheet is gone.
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute("data-probe") === "opener"
+  );
+
+  // A lightbox opened from inside a sheet hands focus back into the sheet,
+  // not out to the page behind it.
+  await gotoTab(page, "Expenses");
+  await page.getByRole("button", { name: "Add expense" }).first().click();
+  const sheet = page.locator(".fresh-sheet");
+  await expect(sheet).toBeVisible();
+  await sheet.locator("#fx-receipt").setInputFiles(RECEIPT_PATH);
+  await sheet.locator("#fx-store").click();
+  await sheet.locator(".receipt-preview img").click();
+  await expect(page.locator(".receipt-lightbox")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".receipt-lightbox")).toHaveCount(0);
+  await expect(sheet).toBeVisible();
+  // The thumbnail is a bare <img>, so opening the lightbox leaves focus on
+  // the sheet itself; that is what the lightbox has to hand it back to.
+  // Anything on the page behind the sheet would be outside the dialog.
+  await page.waitForFunction(() =>
+    String(document.activeElement?.className ?? "").includes("fresh-sheet")
+  );
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  await settleHistory();
+});
+
+test("Escape on a sheet opened from the FAB puts focus back on the FAB", async () => {
+  // The FAB is `display: none` while a sheet is open, so the hand-back has
+  // nothing to focus until the sheet has actually left the DOM.
+  await gotoTab(page, "Expenses");
+  const fab = page.locator(".fresh-fab");
+  await expect(fab).toBeVisible();
+  await fab.click();
+  await expect(page.locator(".fresh-sheet")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  await page.waitForFunction(() =>
+    document.activeElement?.classList.contains("fresh-fab")
+  );
+  await settleHistory();
+});
+
+test("Back walks the tabs and closes a sheet without leaving the app", async () => {
+  await settleHistory();
+  await gotoTab(page, "Home");
+  await gotoTab(page, "Grocery");
+  expect(new URL(page.url()).hash).toBe("#grocery");
+  await gotoTab(page, "Recipes");
+  expect(new URL(page.url()).hash).toBe("#recipes");
+
+  // A reload lands on the tab the user was on, not back on Home.
+  await page.reload();
+  await expect(page.locator(".fresh-title")).toHaveText("Recipes");
+
+  await page.goBack();
+  await expect(page.locator(".fresh-title")).toHaveText("Grocery");
+
+  // An open sheet owns one entry of its own, so Back closes the sheet and
+  // leaves the app standing on the same tab.
+  await page.getByRole("button", { name: "Add item" }).first().click();
+  await expect(page.locator(".fresh-sheet")).toBeVisible();
+  await page.goBack();
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  await expect(page.locator(".fresh")).toBeVisible();
+  await expect(page.locator(".fresh-title")).toHaveText("Grocery");
+
+  // Closing the sheet from the sheet takes that entry back out again, so the
+  // next Back is the tab move and not a second dismissal.
+  await page.getByRole("button", { name: "Add item" }).first().click();
+  await expect(page.locator(".fresh-sheet")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  await settleHistory();
+  await page.goBack();
+  await expect(page.locator(".fresh-title")).toHaveText("Home");
+});
+
+test("deleting a row somebody else already deleted closes cleanly", async () => {
+  await page.request.post("/api/grocery", {
+    data: {
+      name: GHOST_NAME,
+      quantity: 100,
+      category: "Other",
+      categoryReviewed: true,
+      addedBy: "Arthur",
+    },
+  });
+  await page.reload();
+  await gotoTab(page, "Grocery");
+
+  const row = page.locator(".fresh-row", { hasText: GHOST_NAME }).first();
+  await row.locator(".fresh-row-main").click();
+  await expect(page.locator(".fresh-sheet")).toBeVisible();
+
+  // The row goes behind the sheet's back — another housemate, another device.
+  const grocery = await (await page.request.get("/api/grocery")).json();
+  const ghost = (grocery.grocery ?? []).find(
+    (g: { name: string }) => g.name === GHOST_NAME
+  );
+  expect(ghost).toBeTruthy();
+  await page.request.delete(`/api/grocery?id=${encodeURIComponent(ghost.id)}`);
+
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Remove" }).click();
+
+  // The delete asked for what had already happened, so it counts as done.
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  await expect(page.locator(".fresh-row", { hasText: GHOST_NAME })).toHaveCount(
+    0
+  );
+  await expect(page.locator(".toast")).not.toContainText("Error");
+});
+
 test("the month segment renders the fresh month view", async () => {
+  await gotoTab(page, "Expenses");
   await page.getByRole("tab", { name: "Month" }).click();
   await expect(page.locator(".fresh-month")).toBeVisible();
   // No classic chrome leaks into it.
@@ -468,6 +710,224 @@ test("the month segment renders the fresh month view", async () => {
   await expect(trip.locator(".fresh-trip-title")).toHaveText(tripDateLabel(TODAY));
   await expect(trip).not.toContainText("Untitled");
   await page.getByRole("tab", { name: "Receipts" }).click();
+});
+
+test("a bill edited on the month moves the receipts settlement card", async () => {
+  // Both segments used to load the bills separately, so the card on Receipts
+  // kept showing the numbers from before the edit.
+  await gotoTab(page, "Expenses");
+  await page.getByRole("tab", { name: "Month" }).click();
+  await page.locator(".fresh-month").waitFor();
+
+  const internet = page
+    .locator(".fresh-month .fresh-bill-row", { hasText: "Internet" })
+    .locator("input");
+  await internet.fill("50.00");
+  await internet.blur();
+  // $50 over the five housemates on top of Daniel's $6 share of the receipt.
+  await expect(
+    page.locator(".fresh-month .fresh-settle-row", { hasText: "Daniel" })
+  ).toContainText("Send $16.00");
+
+  await page.getByRole("tab", { name: "Receipts" }).click();
+  const card = page.locator(".fresh-settlement-col");
+  await expect(
+    card.locator(".fresh-settle-row", { hasText: "Daniel" })
+  ).toContainText("Send $16.00");
+
+  // A negative amount is refused outright rather than dropped from the
+  // settlement while still counting in the section header.
+  await page.getByRole("tab", { name: "Month" }).click();
+  await internet.fill("-12.00");
+  await internet.blur();
+  await expect(page.locator(".toast")).toContainText(
+    "Amount must be greater than $0"
+  );
+  await expect(internet).toHaveValue("50.00");
+
+  // Put the month back the way the rest of the suite expects it.
+  await internet.fill("");
+  await internet.blur();
+  await expect(
+    page.locator(".fresh-month .fresh-settle-row", { hasText: "Daniel" })
+  ).toContainText("Send $6.00");
+  await page.getByRole("tab", { name: "Receipts" }).click();
+  await expect(
+    card.locator(".fresh-settle-row", { hasText: "Daniel" })
+  ).toContainText("Send $6.00");
+});
+
+test("editing this month's bill keeps next month's scheduled change", async () => {
+  // A current-month edit used to drop every later entry in the schedule, so a
+  // raise already booked for next month vanished without a word.
+  const nextMonth = shiftMonthKey(THIS_MONTH, 1);
+  await page.request.put("/api/settings/recurring_fixed", {
+    data: {
+      value: [
+        {
+          id: "fixed-smoke-cable",
+          name: "Smoke Cable",
+          schedule: [
+            { from: shiftMonthKey(THIS_MONTH, -4), cents: 100_00 },
+            { from: nextMonth, cents: 140_00 },
+          ],
+          overrides: {},
+        },
+      ],
+    },
+  });
+  await clearBillCache(page);
+  await page.reload();
+  await gotoTab(page, "Expenses");
+  await page.getByRole("tab", { name: "Month" }).click();
+  await page.locator(".fresh-month").waitFor();
+
+  const cable = page.getByLabel("Smoke Cable amount");
+  await expect(cable).toHaveValue("100.00");
+  await cable.fill("120.00");
+  await cable.blur();
+  await expect(cable).toHaveValue("120.00");
+
+  await page.getByRole("button", { name: "Next month" }).click();
+  await expect(page.locator(".fresh-month-label")).toHaveText(
+    monthKeyLabel(nextMonth)
+  );
+  await expect(cable).toHaveValue("140.00");
+
+  // And the edit is still there when you walk back, rather than having been
+  // overwritten by the entry that survived.
+  await page.getByRole("button", { name: "Previous month" }).click();
+  await expect(page.locator(".fresh-month-label")).toHaveText(
+    monthKeyLabel(THIS_MONTH)
+  );
+  await expect(cable).toHaveValue("120.00");
+
+  // Put the month back the way the rest of the suite expects it.
+  await page.request.put("/api/settings/recurring_fixed", {
+    data: { value: [] },
+  });
+  await clearBillCache(page);
+  await page.reload();
+  await expect(page.locator(".fresh")).toBeVisible();
+  await gotoTab(page, "Expenses");
+  await expect(
+    page.locator(".fresh-settlement-col .fresh-settle-row", {
+      hasText: "Daniel",
+    })
+  ).toContainText("Send $6.00");
+});
+
+test("the add sheet dates on the household calendar and refuses the future", async () => {
+  await gotoTab(page, "Expenses");
+  await page.locator(".fresh-fab").click();
+  const sheet = page.locator(".fresh-sheet");
+  await expect(sheet).toBeVisible();
+
+  const date = sheet.locator("#fx-date");
+  await expect(date).toHaveValue(TODAY);
+  await expect(date).toHaveAttribute("max", TODAY);
+
+  // The picker will not offer a later day, but a typed or pasted one still
+  // has to come back as an error the user can read.
+  await date.fill(addDaysYmd(TODAY, 1));
+  await sheet.locator("#fx-amount").fill("9.99");
+  await sheet.locator(".fresh-chip", { hasText: "Arthur" }).click();
+  const line = sheet.locator(".alloc-line").nth(0);
+  await line.getByRole("button", { name: "Everyone" }).click();
+  await line.getByLabel("Amount for split line 1").fill("9.99");
+  await sheet.locator("#fx-store").fill("Tomorrow Mart");
+  await sheet.locator("#fx-receipt").setInputFiles(RECEIPT_PATH);
+  await sheet
+    .locator(".fresh-sheet-actions")
+    .getByRole("button", { name: "Add expense" })
+    .click();
+
+  await expect(sheet.locator(".fresh-form-error")).toHaveText(
+    "Date can't be in the future"
+  );
+  // Nothing was filed.
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  await expect(
+    page.locator(".fresh-row", { hasText: "Tomorrow Mart" })
+  ).toHaveCount(0);
+  await settleHistory();
+});
+
+test("the month's receipts header totals what the house is settling", async () => {
+  // A receipt with a personal line: the house settles less than the receipt's
+  // face value, so the sections would stop adding up to the month's total.
+  const res = await page.request.post("/api/expenses", {
+    multipart: {
+      amountCents: "5000",
+      store: "Shoppers",
+      paidBy: "Eli",
+      occurredOn: TODAY,
+      allocations: JSON.stringify([
+        { kind: "house", amountCents: 3000 },
+        { kind: "personal", amountCents: 2000 },
+      ]),
+      receipt: { name: "receipt.png", mimeType: "image/png", buffer: TINY_PNG },
+    },
+  });
+  expect(res.ok()).toBeTruthy();
+  const added = (await res.json()).expenses.find(
+    (e: { store: string; amountCents: number }) =>
+      e.store === "Shoppers" && e.amountCents === 5000
+  );
+
+  await page.reload();
+  await gotoTab(page, "Expenses");
+  await page.getByRole("tab", { name: "Month" }).click();
+  await page.locator(".fresh-month").waitFor();
+
+  const head = page
+    .locator(".fresh-month .fresh-card", { hasText: "Receipts" })
+    .first()
+    .locator(".fresh-card-head");
+  // $120 + $50 on the receipts, $20 of it personal.
+  await expect(head).toContainText("$150.00");
+  await expect(head).toContainText("of $170.00");
+  // The old wording explained the gap in a sentence; the figure does it now.
+  await expect(page.locator(".fresh-month")).not.toContainText("Personal items");
+
+  // Every section header on the screen adds up to the month's total.
+  const sums = await page.locator(".fresh-month").evaluate((root) => {
+    const cents = (t: string | null | undefined) =>
+      Math.round(parseFloat((t ?? "").replace(/[^0-9.]/g, "") || "0") * 100);
+    let parts = 0;
+    for (const card of root.querySelectorAll(".fresh-card")) {
+      const figure = card.querySelector(".fresh-sub .fresh-num");
+      if (card.querySelector(".fresh-h2") && figure) {
+        parts += cents(figure.textContent);
+      }
+    }
+    return {
+      parts,
+      total: cents(root.querySelector(".fresh-big-money")?.textContent),
+    };
+  });
+  expect(sums.parts).toBe(sums.total);
+
+  // The classic breakdown heads its one-time section with the same pair of
+  // figures, so the two shells cannot disagree about what the month owes.
+  await page.evaluate(() => window.localStorage.setItem("hh_ui", "classic"));
+  await page.reload();
+  await page.locator(".tab-bar button", { hasText: "Expenses" }).click();
+  await page.getByRole("button", { name: "Monthly", exact: true }).click();
+  await page.locator(".monthly-card").waitFor();
+  const classicHead = page.locator(".monthly-section-head").first();
+  await expect(classicHead).toContainText("One-time");
+  await expect(classicHead).toContainText("$150.00");
+  await expect(classicHead).toContainText("of $170.00");
+  await page.evaluate(() => window.localStorage.setItem("hh_ui", "fresh"));
+
+  if (added) {
+    await page.request.delete(`/api/expenses?id=${encodeURIComponent(added.id)}`);
+  }
+  await page.reload();
+  await gotoTab(page, "Expenses");
 });
 
 /** Name to signed cents, positive meaning "send to the joint account". */
@@ -585,6 +1045,7 @@ test("the fresh month and the classic breakdown settle to the same numbers", asy
   expect(fresh).toEqual(classic);
 
   await page.request.put("/api/settings/recurring_fixed", { data: { value: [] } });
+  await clearBillCache(page);
   await page.evaluate(() => window.localStorage.setItem("hh_ui", "fresh"));
   await page.reload();
   await expect(page.locator(".fresh")).toBeVisible();
@@ -721,6 +1182,103 @@ test("the recipes tab tallies the cooks", async () => {
   // Today is ringed on the strip and carries a filled dot in Eli's colour.
   await expect(week.locator(".fresh-strip-day.today")).toHaveCount(1);
   await expect(week.locator(".fresh-strip-dot.filled")).toHaveCount(1);
+});
+
+test("planning a no-meal day keeps the marker until a dinner is saved", async () => {
+  await gotoTab(page, "Recipes");
+  const week = page.locator(".fresh-week", { hasText: "This week" }).first();
+  await week.locator(".fresh-day-empty").first().waitFor();
+  await week
+    .locator(".fresh-day-empty")
+    .first()
+    .getByRole("button", { name: "No meal" })
+    .click();
+  const off = week.locator(".fresh-day-off").first();
+  await expect(off).toBeVisible();
+
+  // "Plan" opens the editor for that slot and nothing else. Cancelling it
+  // used to leave the day blank because the marker was already deleted.
+  await off.getByRole("button", { name: "Plan" }).click();
+  await page.locator(".fresh-sheet").waitFor();
+  await page.locator(".fresh-sheet").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  await expect(week.locator(".fresh-day-off")).toHaveCount(1);
+
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const afterReload = page.locator(".fresh-week", { hasText: "This week" }).first();
+  await expect(afterReload.locator(".fresh-day-off")).toHaveCount(1);
+
+  // "Clear" is the action that deletes the marker.
+  await afterReload
+    .locator(".fresh-day-off")
+    .first()
+    .getByRole("button", { name: "Clear" })
+    .click();
+  await expect(afterReload.locator(".fresh-day-off")).toHaveCount(0);
+});
+
+test("deleting the last recipe leaves the day empty", async () => {
+  // The ghost only shows when the delete returns an empty list, so the whole
+  // two-week window has to hold nothing but the recipe being deleted.
+  const before = await (await page.request.get("/api/recipes")).json();
+  type SmokeRecipe = {
+    id: string;
+    weekStart: string;
+    day: number;
+    assignedTo: string;
+    name: string;
+    link: string;
+    description: string;
+    ingredients: unknown[];
+    servings: number;
+    portions: number;
+    noMeal: boolean;
+  };
+  const all: SmokeRecipe[] = before.recipes ?? [];
+  const others = all.filter((r) => r.name !== RECIPE_NAME);
+  for (const r of others) {
+    await page.request.delete(`/api/recipes/${encodeURIComponent(r.id)}`);
+  }
+  await page.reload();
+  await gotoTab(page, "Recipes");
+
+  const week = page.locator(".fresh-week", { hasText: "This week" }).first();
+  const card = week.locator(".fresh-day-card", { hasText: RECIPE_NAME });
+  await expect(card).toBeVisible();
+  page.once("dialog", (d) => d.accept());
+  await card.locator("button").first().click();
+  await page.locator(".fresh-sheet").waitFor();
+  await page.locator(".fresh-sheet").getByRole("button", { name: "Delete" }).click();
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+
+  await expect(week.locator(".fresh-day-card")).toHaveCount(0);
+  await expect(week.locator(".fresh-day-empty")).toHaveCount(7);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  await expect(
+    page.locator(".fresh-week", { hasText: "This week" }).first().locator(".fresh-day-empty")
+  ).toHaveCount(7);
+
+  // Put the window back: the fixture recipe, then whatever else was planned.
+  await seedFixtureRecipe(page.request);
+  for (const r of others) {
+    await page.request.post("/api/recipes", {
+      data: {
+        weekStart: r.weekStart,
+        day: r.day,
+        assignedTo: r.assignedTo,
+        name: r.name,
+        link: r.link || undefined,
+        description: r.description || undefined,
+        ingredients: r.ingredients,
+        servings: r.servings,
+        portions: r.portions,
+        noMeal: r.noMeal || undefined,
+      },
+    });
+  }
+  await page.reload();
 });
 
 test("a Saturday dinner is a real slot in both shells", async () => {
@@ -1040,6 +1598,10 @@ test("every fresh screen is captured in both themes and all three sizes", async 
       await shot("inventory-sheet");
       await p.keyboard.press("Escape");
 
+      // From Home, where the section wash is plain ink: the sheet's Save
+      // button sits on the lightest fill it ever wears in dark mode, so this
+      // is the frame that proves its label is not white-on-cream.
+      await gotoTab(p, "Home");
       await p
         .getByRole("button", { name: "Household settings" })
         .first()

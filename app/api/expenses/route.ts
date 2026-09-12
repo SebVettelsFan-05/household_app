@@ -1,20 +1,18 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
+import { apiError, ValidationError } from "@/lib/errors";
 import {
   addExpenseRepo,
   currentMealGroup,
   deleteExpenseRepo,
   listExpensesRepo,
   updateExpenseRepo,
+  validateOccurredOn,
 } from "@/lib/repo";
 import { normalizeAllocations } from "@/lib/allocations";
 import { BUYERS, isBuyer } from "@/lib/types";
 import { mirrorToSheet } from "@/lib/mirror";
-import {
-  deleteReceipt,
-  ReceiptStorageError,
-  uploadReceipt,
-} from "@/lib/receipts";
+import { deleteReceipt, uploadReceipt } from "@/lib/receipts";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +40,7 @@ export async function GET() {
     const expenses = await listExpensesRepo();
     return NextResponse.json({ ok: true, expenses });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }
 
@@ -66,7 +64,7 @@ function parseAllocationsField(raw: FormDataEntryValue | null): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error("Allocations must be valid JSON");
+    throw new ValidationError("Allocations must be valid JSON");
   }
 }
 
@@ -93,13 +91,13 @@ async function parseExpenseBody(req: NextRequest): Promise<ParsedExpense> {
     const file = form.get("receipt");
     if (file && typeof file !== "string" && file.size > 0) {
       if (file.size > MAX_RECEIPT_BYTES) {
-        throw new Error(
+        throw new ValidationError(
           `Receipt is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max is ${MAX_RECEIPT_BYTES / 1024 / 1024} MB.`
         );
       }
       const mime = file.type || "application/octet-stream";
       if (!ALLOWED_RECEIPT_MIMES.has(mime)) {
-        throw new Error(
+        throw new ValidationError(
           `Receipt type "${mime}" not supported. Use JPEG, PNG, WebP, HEIC, or PDF.`
         );
       }
@@ -134,10 +132,20 @@ export async function POST(req: NextRequest) {
     if (!isBuyer(paidBy)) {
       return err(`"${paidBy}" is not a household member`, 400);
     }
-    const allocations = normalizeAllocations(body.allocations, amountCents, {
-      members: BUYERS,
-      mealGroup: await currentMealGroup(),
-    });
+    // The date is checked here too, not just in the repo: an expense dated
+    // in the future is refused, and it should cost a 400 rather than an
+    // upload we immediately have to delete again.
+    validateOccurredOn(body.occurredOn);
+    const mealGroup = await currentMealGroup();
+    let allocations;
+    try {
+      allocations = normalizeAllocations(body.allocations, amountCents, {
+        members: BUYERS,
+        mealGroup,
+      });
+    } catch (e) {
+      return err(e instanceof Error ? e.message : String(e), 400);
+    }
 
     // Upload to Drive first. If the upload fails we never touch the DB, so
     // the user sees one clean error instead of an orphaned half-saved row.
@@ -149,8 +157,7 @@ export async function POST(req: NextRequest) {
         filename: body.receipt.filename,
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return err(msg, e instanceof ReceiptStorageError ? 502 : 500);
+      return apiError(e);
     }
 
     // DB insert. If this fails after the upload succeeded, clean up the
@@ -171,10 +178,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, expenses });
     } catch (e) {
       after(() => deleteReceipt(uploaded.id));
-      return err(e instanceof Error ? e.message : String(e));
+      return apiError(e);
     }
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e), 400);
+    return apiError(e);
   }
 }
 
@@ -224,6 +231,10 @@ export async function PATCH(req: NextRequest) {
       parsed = { ...json, receipt: null };
     }
 
+    // Same reason as in POST: refuse a future date before the upload, not
+    // after it, so a rejected edit costs no Drive round trip to undo.
+    validateOccurredOn(parsed.occurredOn);
+
     let oldReceiptIdToDelete: string | null = null;
     let uploadedReceipt: { id: string; url: string } | null = null;
     let receiptMime: string | undefined;
@@ -237,8 +248,7 @@ export async function PATCH(req: NextRequest) {
         });
         receiptMime = parsed.receipt.mimeType;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return err(msg, e instanceof ReceiptStorageError ? 502 : 500);
+        return apiError(e);
       }
       // Look up the existing receipt id so we can delete it after the
       // update commits successfully.
@@ -275,10 +285,10 @@ export async function PATCH(req: NextRequest) {
       if (uploadedReceipt) {
         after(() => deleteReceipt(uploadedReceipt!.id));
       }
-      return err(e instanceof Error ? e.message : String(e));
+      return apiError(e);
     }
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e), 400);
+    return apiError(e);
   }
 }
 
@@ -293,6 +303,6 @@ export async function DELETE(req: NextRequest) {
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, expenses });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }

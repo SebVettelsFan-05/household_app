@@ -1,9 +1,16 @@
+import { todayYmd } from "./dates";
+
 export const FIRST_EXPENSE_MONTH = "2026-05";
 
+/**
+ * Which expense month an instant falls in, evaluated in the household
+ * timezone rather than the browser's. A housemate whose phone is in another
+ * timezone (or who is travelling) must see the same "this month" as everyone
+ * else, or an expense logged near a month boundary lands in the wrong
+ * settlement and gets refused as "past".
+ */
 export function monthKey(date: Date = new Date()): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+  return todayYmd(date).slice(0, 7);
 }
 
 export function currentExpenseMonth(): string {

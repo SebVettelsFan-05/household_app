@@ -1,5 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
+import { apiError } from "@/lib/errors";
 import {
   addGroceryRepo,
   deleteGroceryRepo,
@@ -11,17 +12,13 @@ import type { GroceryPool } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-function err(message: string, status = 500) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function GET() {
   try {
     await ensureTables();
     const grocery = await listGroceryRepo();
     return NextResponse.json({ ok: true, grocery });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }
 
@@ -51,7 +48,7 @@ export async function POST(req: NextRequest) {
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, grocery });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }
 
@@ -75,7 +72,7 @@ export async function PATCH(req: NextRequest) {
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, grocery });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }
 
@@ -87,6 +84,6 @@ export async function DELETE(req: NextRequest) {
     after(() => mirrorToSheet());
     return NextResponse.json({ ok: true, grocery });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }

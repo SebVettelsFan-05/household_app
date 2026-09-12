@@ -63,13 +63,15 @@ export function useRecipeWeeks({
     }
   }
 
-  async function removeNoMealMarker(recipe: Recipe, then?: () => void) {
+  // Only the explicit "Clear" action calls this. Planning a dinner must not
+  // drop the marker up front: the user may cancel the editor, and the server
+  // replaces the marker itself when a recipe is saved into that slot.
+  async function removeNoMealMarker(recipe: Recipe) {
     if (markerBusy) return;
     setMarkerBusy(true);
     try {
       const res = await deleteRecipe(recipe.id);
       onRecipesChange(res.recipes);
-      then?.();
     } catch (err) {
       onToast("Error: " + (err instanceof Error ? err.message : String(err)));
     } finally {

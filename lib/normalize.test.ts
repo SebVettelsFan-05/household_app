@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mergeAddedBy, normalizeName } from "./normalize";
+import { mergeAddedBy, normalizeName, titleCaseName } from "./normalize";
 
 // The grocery merge rule is "same normalized name": an incoming request tops
 // up the open row it matches, whoever asked for it and whatever it is for.
@@ -16,4 +16,10 @@ test("merging a row keeps every requester", () => {
   assert.equal(mergeAddedBy("Arthur", "Eli"), "Arthur, Eli");
   assert.equal(mergeAddedBy("Arthur, Eli", "eli"), "Arthur, Eli");
   assert.equal(mergeAddedBy("", "Minh"), "Minh");
+});
+
+test("titleCaseName capitalises after an ampersand", () => {
+  assert.equal(titleCaseName("t&t"), "T&T");
+  assert.equal(titleCaseName("  no  frills "), "No Frills");
+  assert.equal(titleCaseName("costco-wholesale"), "Costco-Wholesale");
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import FreshExpenses from "@/components/fresh/FreshExpenses";
 import FreshGrocery from "@/components/fresh/FreshGrocery";
 import FreshHome from "@/components/fresh/FreshHome";
@@ -23,7 +23,10 @@ import PasswordsView from "@/components/PasswordsView";
 import RefreshButton from "@/components/RefreshButton";
 import Toast from "@/components/Toast";
 import { effectiveMealGroup } from "@/lib/mealGroup";
+import { currentExpenseMonth } from "@/lib/expenseMonths";
+import { settlementForMonth, useMonthlyBills } from "@/lib/monthlyBills";
 import type { HouseholdData } from "@/lib/useHouseholdData";
+import { useTabHash } from "@/lib/useTabHash";
 
 export type FreshTab =
   | "home"
@@ -89,13 +92,24 @@ const RAIL_TABS: FreshTab[] = [
   "passwords",
 ];
 
+/** The tab the URL hash names, falling back to Home. */
+function tabFromHash(hash: string): FreshTab {
+  const name = hash.replace(/^#/, "");
+  return name in TITLES ? (name as FreshTab) : "home";
+}
+
 type Props = {
   data: HouseholdData;
   onSwitchUi: () => void;
 };
 
 export default function FreshApp({ data, onSwitchUi }: Props) {
-  const [tab, setTab] = useState<FreshTab>("home");
+  // The shell only ever renders in the browser (the page picks a look in a
+  // mount effect), so the first tab can come straight off the hash.
+  const [tab, setTab] = useState<FreshTab>(() =>
+    typeof window === "undefined" ? "home" : tabFromHash(window.location.hash)
+  );
+  useTabHash(tab, setTab, tabFromHash);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [managingCats, setManagingCats] = useState(false);
   // Set when Home's "Plan dinner" hands a slot to the Recipes tab.
@@ -103,6 +117,18 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
   // Set when Home's money block sends the user straight to the month view.
   const [expensesSegment, setExpensesSegment] = useState<"receipts" | "month">(
     "receipts"
+  );
+
+  // One bill store for the whole shell. Home, the Receipts settlement card
+  // and the Month editor all read it, so editing Internet on the month view
+  // moves every number on every screen at once.
+  const bills = useMonthlyBills(data.showToast);
+  const { fixed, variable, rent } = bills;
+  const thisMonth = currentExpenseMonth();
+  const settlement = useMemo(
+    () =>
+      settlementForMonth(data.expenses, { fixed, variable, rent }, thisMonth),
+    [data.expenses, fixed, variable, rent, thisMonth]
   );
 
   const openGroceryCount = data.grocery.filter((g) => !g.done).length;
@@ -182,6 +208,8 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
             <FreshHome
               data={data}
               mealGroup={cookGroup}
+              settlement={settlement}
+              loadingBills={bills.loading}
               onNavigate={setTab}
               onOpenMonth={openMonth}
               onPlanDinner={planDinner}
@@ -199,6 +227,8 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
             <FreshExpenses
               data={data}
               mealGroup={cookGroup}
+              bills={bills}
+              settlement={settlement}
               segment={expensesSegment}
               onSegmentChange={setExpensesSegment}
             />
@@ -263,6 +293,8 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
           onClose={() => setManagingCats(false)}
           onCategoriesChange={data.setCategories}
           onItemsChange={data.setItems}
+          onGroceryChange={data.setGrocery}
+          onRecipesChange={data.setRecipes}
           onToast={data.showToast}
           onError={(msg) => data.showToast("Error: " + msg)}
         />

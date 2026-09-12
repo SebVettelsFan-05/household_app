@@ -321,6 +321,16 @@ button:active { transform: scale(0.98); }
   padding: 10px 14px; border-radius: 8px;
   font-size: 14px; font-weight: 500;
 }
+/* The dark theme's accent is a light mint, so white on it reads at 2.37:1.
+   Near-black ink on the same mint is 7.41:1. Same reasoning as
+   `.alloc-chip.active`. */
+:root[data-theme="dark"] .btn-primary,
+:root[data-theme="dark"] .btn-accent,
+:root[data-theme="dark"] .login-btn,
+:root[data-theme="dark"] .ingredient-add-btn,
+:root[data-theme="dark"] .check.checked::before {
+  color: var(--bg);
+}
 
 .list-head {
   display: flex; align-items: baseline; justify-content: space-between;
@@ -1466,6 +1476,8 @@ button:active { transform: scale(0.98); }
 }
 .monthly-sub { font-size: 13px; color: var(--ink-soft); }
 .monthly-sub strong { color: var(--ink); font-weight: 600; }
+/* The face value trailing the shared total: present, but quieter. */
+.monthly-sub-faint { opacity: 0.7; }
 .monthly-empty {
   font-size: 13px; color: var(--ink-soft); font-style: italic;
   margin: 0; padding: 6px 0;

@@ -70,14 +70,6 @@ export default function HouseholdSettingsModal({
     setTheme(readTheme());
   }, []);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   function toggle(name: string) {
     setMembers((prev) =>
       prev.includes(name)
@@ -130,8 +122,7 @@ export default function HouseholdSettingsModal({
             </button>
             <button
               type="button"
-              className="btn-secondary"
-              style={{ background: "var(--accent)", color: "white" }}
+              className="btn-accent"
               onClick={save}
               disabled={busy}
             >

@@ -17,7 +17,15 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
-    return new NextResponse("Google sign-in not configured", { status: 500 });
+    // Nothing the user did is wrong, and a bare 500 body strands them on a
+    // blank page with no way back. Send them to the sign-in page, where the
+    // house password still works, with the reason in the query string the
+    // callback already uses for its own failures.
+    const url = new URL("/login", req.url);
+    url.searchParams.set("error", "google-not-configured");
+    const wanted = req.nextUrl.searchParams.get("next");
+    if (wanted) url.searchParams.set("next", wanted);
+    return NextResponse.redirect(url);
   }
 
   const stateBytes = new Uint8Array(16);

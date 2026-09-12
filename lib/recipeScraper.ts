@@ -22,6 +22,8 @@
  * them at the paste-ingredients fallback.
  */
 
+import { lookup } from "node:dns/promises";
+
 import { decodeHtmlEntities, htmlToText } from "./htmlText";
 
 export type RecipeSource =
@@ -86,6 +88,12 @@ export class RecipeScrapeError extends Error {
 // (ads, inlined CSS) but legitimate ones stay under ~2–3 MB.
 const MAX_HTML = 5_000_000;
 
+// Cap on what we're willing to pull off the wire, enforced while reading
+// rather than after: `res.text()` buffers the whole body first, so a URL
+// pointing at a multi-gigabyte file would be fully downloaded into memory
+// before anything got truncated.
+const MAX_BODY_BYTES = 4_000_000;
+
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const BOT_UA =
@@ -118,6 +126,280 @@ function botHeaders(): Record<string, string> {
   };
 }
 
+/* ========================= Outbound address guard ========================= */
+
+/**
+ * The scraper fetches a URL the user typed, from inside our network. Without
+ * a guard that is a server-side request forgery hole: "http://127.0.0.1:4321/"
+ * or "http://10.0.0.1/" would have us fetch an internal service and hand the
+ * response back. Every outbound request — each ladder level and every
+ * redirect hop — goes through `assertPublicUrl` first.
+ */
+export class BlockedAddressError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BlockedAddressError";
+  }
+}
+
+// Plain web ports only. Anything else is a service, not a recipe site.
+const ALLOWED_PORTS = new Set(["", "80", "443"]);
+
+// Redirect chains are followed by hand so each hop can be re-checked; a site
+// that needs more than this many hops is broken, not shy.
+const MAX_REDIRECTS = 5;
+
+function parseIpv4(input: string): number[] | null {
+  const parts = input.split(".");
+  if (parts.length !== 4) return null;
+  const out: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (n > 255) return null;
+    out.push(n);
+  }
+  return out;
+}
+
+function parseIpv6(input: string): number[] | null {
+  let text = input;
+  if (text.startsWith("[") && text.endsWith("]")) text = text.slice(1, -1);
+  const zone = text.indexOf("%");
+  if (zone >= 0) text = text.slice(0, zone);
+  if (!text.includes(":")) return null;
+
+  // A trailing dotted quad ("::ffff:127.0.0.1") is two more 16-bit groups.
+  if (text.includes(".")) {
+    const cut = text.lastIndexOf(":");
+    const v4 = parseIpv4(text.slice(cut + 1));
+    if (!v4) return null;
+    const high = ((v4[0] << 8) | v4[1]).toString(16);
+    const low = ((v4[2] << 8) | v4[3]).toString(16);
+    text = `${text.slice(0, cut + 1)}${high}:${low}`;
+  }
+
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  let parts: string[];
+  if (halves.length === 1) {
+    if (head.length !== 8) return null;
+    parts = head;
+  } else {
+    const fill = 8 - head.length - tail.length;
+    if (fill < 1) return null;
+    parts = [...head, ...Array<string>(fill).fill("0"), ...tail];
+  }
+
+  const out: number[] = [];
+  for (const part of parts) {
+    if (!/^[0-9a-f]{1,4}$/i.test(part)) return null;
+    out.push(parseInt(part, 16));
+  }
+  return out;
+}
+
+function isPrivateIpv4(a: number[]): boolean {
+  if (a[0] === 0) return true; // 0.0.0.0/8 — "this network"
+  if (a[0] === 10) return true; // private
+  if (a[0] === 127) return true; // loopback
+  if (a[0] === 100 && a[1] >= 64 && a[1] <= 127) return true; // 100.64/10 CGNAT
+  if (a[0] === 169 && a[1] === 254) return true; // link-local (incl. metadata)
+  if (a[0] === 172 && a[1] >= 16 && a[1] <= 31) return true; // private
+  if (a[0] === 192 && a[1] === 168) return true; // private
+  if (a[0] >= 224) return true; // 224/4 multicast and 240/4 reserved
+  return false;
+}
+
+/** The IPv4 address embedded in the two 16-bit groups `hi`:`lo`. */
+function embeddedIpv4(hi: number, lo: number): number[] {
+  return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff];
+}
+
+function isPrivateIpv6(g: number[]): boolean {
+  // ::ffff:a.b.c.d (IPv4-mapped) and the deprecated ::a.b.c.d both smuggle an
+  // IPv4 address through an IPv6 literal — judge them by the address inside.
+  const firstFiveZero = g.slice(0, 5).every((x) => x === 0);
+  if (firstFiveZero && (g[5] === 0xffff || g[5] === 0)) {
+    const embedded = embeddedIpv4(g[6], g[7]);
+    if (g[5] === 0xffff) return isPrivateIpv4(embedded);
+    // ::  and ::1 are the unspecified and loopback addresses.
+    if (g[6] === 0 && g[7] <= 1) return true;
+    if (g[6] !== 0 || g[7] !== 0) return isPrivateIpv4(embedded);
+  }
+  if ((g[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((g[0] & 0xfe00) === 0xfc00) return true; // fc00::/7 unique-local
+  if ((g[0] & 0xff00) === 0xff00) return true; // ff00::/8 multicast
+  // 6to4: 2002:<v4>::/16 reaches the embedded IPv4 address, so a 6to4
+  // address wrapping 10.0.0.1 is just another way to spell 10.0.0.1.
+  if (g[0] === 0x2002) return isPrivateIpv4(embeddedIpv4(g[1], g[2]));
+  // NAT64: 64:ff9b::/96 carries the IPv4 destination in the low 32 bits.
+  if (
+    g[0] === 0x0064 &&
+    g[1] === 0xff9b &&
+    g[2] === 0 &&
+    g[3] === 0 &&
+    g[4] === 0 &&
+    g[5] === 0
+  ) {
+    return isPrivateIpv4(embeddedIpv4(g[6], g[7]));
+  }
+  return false;
+}
+
+/**
+ * True when an IP address literal is one a server must never fetch from.
+ * Pure and synchronous — the same test is applied to a literal in the URL and
+ * to every address DNS resolves a hostname to. Anything unparseable counts as
+ * blocked: this is only ever called with something meant to be an address.
+ */
+export function isPrivateAddress(ip: string): boolean {
+  const v4 = parseIpv4(ip);
+  if (v4) return isPrivateIpv4(v4);
+  const v6 = parseIpv6(ip);
+  if (v6) return isPrivateIpv6(v6);
+  return true;
+}
+
+/** The address inside a URL hostname, or null when the host is a name. */
+function hostAsIpLiteral(hostname: string): string | null {
+  if (hostname.startsWith("[") && hostname.endsWith("]")) {
+    return hostname.slice(1, -1);
+  }
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return hostname;
+  return null;
+}
+
+/**
+ * Everything about a URL that can be judged without touching the network:
+ * scheme, port, and a hostname that is either a loopback name or an address
+ * literal. Returns the reason it is refused, or null when it looks public.
+ * Pure, so the whole policy is unit-testable.
+ */
+export function publicUrlBlockReason(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return "that is not a valid URL";
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    return "only http and https addresses can be fetched";
+  }
+  if (!ALLOWED_PORTS.has(u.port)) {
+    return `port ${u.port} is not a web port`;
+  }
+  const host = u.hostname.toLowerCase();
+  if (!host) return "that URL has no host";
+  if (host === "localhost" || host.endsWith(".localhost")) {
+    return "localhost is not a public website";
+  }
+  const literal = hostAsIpLiteral(host);
+  if (literal && isPrivateAddress(literal)) {
+    return "that address is on a private network";
+  }
+  return null;
+}
+
+/**
+ * Full check, including DNS: a public-looking hostname that resolves to a
+ * private address is refused too. A lookup that fails is NOT a policy
+ * refusal — it is an unreachable site, so the plain Error falls through to
+ * the caller's normal "couldn't reach it" handling.
+ */
+async function assertPublicUrl(raw: string): Promise<void> {
+  const reason = publicUrlBlockReason(raw);
+  if (reason) throw new BlockedAddressError(reason);
+
+  const host = new URL(raw).hostname.toLowerCase();
+  if (hostAsIpLiteral(host)) return; // already judged above
+
+  const addresses = await lookup(host, { all: true });
+  if (addresses.length === 0) {
+    throw new BlockedAddressError("that host does not resolve to an address");
+  }
+  for (const { address } of addresses) {
+    if (isPrivateAddress(address)) {
+      throw new BlockedAddressError("that address is on a private network");
+    }
+  }
+}
+
+/**
+ * fetch(), with every hop of the redirect chain re-checked. `redirect:
+ * "manual"` is the whole point: letting undici follow redirects itself would
+ * hand a public URL the ability to bounce us into the private network.
+ */
+async function guardedFetch(
+  url: string,
+  headers: Record<string, string>,
+  signal: AbortSignal
+): Promise<Response> {
+  let target = url;
+  for (let hop = 0; ; hop += 1) {
+    await assertPublicUrl(target);
+    const res = await fetch(target, { headers, redirect: "manual", signal });
+    const location =
+      res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location || hop >= MAX_REDIRECTS) return res;
+    // Release the socket before the next hop. Cancel rather than read: a
+    // redirect's body is never used, and reading it would buffer whatever
+    // the server chose to attach.
+    await res.body?.cancel().catch(() => undefined);
+    target = new URL(location, target).toString();
+  }
+}
+
+/** The charset the server declared, defaulting to UTF-8 like `res.text()`. */
+function bodyCharset(res: Response): string {
+  const m = /charset=([^;]+)/i.exec(res.headers.get("content-type") || "");
+  return m ? m[1].trim().replace(/^["']|["']$/g, "") : "utf-8";
+}
+
+/**
+ * The response body as text, but read in chunks and abandoned once
+ * MAX_BODY_BYTES have arrived: `res.text()` buffers the entire body first,
+ * so a URL that happens to point at a huge file would be downloaded whole
+ * before anything truncated it. Decoding is incremental, so a multi-byte
+ * character straddling two chunks still comes out in one piece.
+ *
+ * Exported for the tests — the cap is the only thing standing between a
+ * mistyped link and a few gigabytes of memory.
+ */
+export async function readCappedText(res: Response): Promise<string> {
+  if (!res.body) return "";
+  let decoder: TextDecoder;
+  try {
+    decoder = new TextDecoder(bodyCharset(res));
+  } catch {
+    decoder = new TextDecoder("utf-8");
+  }
+  const reader = res.body.getReader();
+  let out = "";
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      const room = MAX_BODY_BYTES - bytes;
+      if (value.byteLength >= room) {
+        out += decoder.decode(value.subarray(0, room));
+        await reader.cancel().catch(() => undefined);
+        return out;
+      }
+      bytes += value.byteLength;
+      out += decoder.decode(value, { stream: true });
+    }
+    out += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  return out;
+}
+
 type FetchOutcome =
   | { kind: "ok"; html: string }
   | { kind: "blocked"; status: number }
@@ -146,24 +428,23 @@ async function fetchHtml(
   timeoutMs: number
 ): Promise<FetchOutcome> {
   try {
-    const res = await fetch(url, {
-      headers,
-      redirect: "follow",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const res = await guardedFetch(url, headers, AbortSignal.timeout(timeoutMs));
     if (res.status === 404 || res.status === 410) {
       return { kind: "notfound", status: res.status };
     }
     if (!res.ok) {
       return { kind: "blocked", status: res.status };
     }
-    let html = await res.text();
-    if (html.length > MAX_HTML) html = html.slice(0, MAX_HTML);
+    const html = await readCappedText(res);
     if (looksLikeChallengePage(html)) {
       return { kind: "blocked", status: res.status };
     }
     return { kind: "ok", html };
   } catch (err) {
+    // A refused address is a verdict about the request, not a failed
+    // attempt — it must stop the ladder rather than fall through to the
+    // next layer.
+    if (err instanceof BlockedAddressError) throw err;
     if (isAbortError(err)) return { kind: "timeout" };
     return {
       kind: "error",
@@ -182,12 +463,10 @@ async function fetchWaybackHtml(
   budgetMs: number
 ): Promise<string | null> {
   try {
-    const availRes = await fetch(
+    const availRes = await guardedFetch(
       `https://archive.org/wayback/available?url=${encodeURIComponent(url)}`,
-      {
-        headers: botHeaders(),
-        signal: AbortSignal.timeout(Math.min(6_000, budgetMs)),
-      }
+      botHeaders(),
+      AbortSignal.timeout(Math.min(6_000, budgetMs))
     );
     if (!availRes.ok) return null;
     const avail = (await availRes.json()) as {
@@ -201,15 +480,13 @@ async function fetchWaybackHtml(
     const snapUrl = String(closest.url)
       .replace(/^http:/i, "https:")
       .replace(/\/web\/(\d+)\//, "/web/$1id_/");
-    const res = await fetch(snapUrl, {
-      headers: botHeaders(),
-      redirect: "follow",
-      signal: AbortSignal.timeout(Math.max(4_000, budgetMs - 6_000)),
-    });
+    const res = await guardedFetch(
+      snapUrl,
+      botHeaders(),
+      AbortSignal.timeout(Math.max(4_000, budgetMs - 6_000))
+    );
     if (!res.ok) return null;
-    let html = await res.text();
-    if (html.length > MAX_HTML) html = html.slice(0, MAX_HTML);
-    return html;
+    return await readCappedText(res);
   } catch {
     return null;
   }
@@ -230,6 +507,11 @@ export async function scrapeRecipe(
   }
   parsed.hash = "";
   const target = parsed.toString();
+
+  // Judged before anything is fetched, so an obviously internal address
+  // never costs a round trip.
+  const blocked = publicUrlBlockReason(target);
+  if (blocked) throw new BlockedAddressError(blocked);
 
   const deadline = Date.now() + (opts.totalBudgetMs ?? 40_000);
   const remaining = () => deadline - Date.now();

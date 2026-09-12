@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db/client";
 import { categories as categoriesTable, items as itemsTable } from "@/db/schema";
 import { ensureTables } from "@/lib/migrate";
+import { apiError } from "@/lib/errors";
 import { DEFAULT_CATEGORIES } from "@/lib/normalize";
 
 export const dynamic = "force-dynamic";
@@ -96,11 +97,17 @@ async function runSeed() {
 }
 
 export async function GET() {
-  const result = await runSeed();
-  return NextResponse.json(result);
+  try {
+    return NextResponse.json(await runSeed());
+  } catch (e) {
+    return apiError(e);
+  }
 }
 
 export async function POST() {
-  const result = await runSeed();
-  return NextResponse.json(result);
+  try {
+    return NextResponse.json(await runSeed());
+  } catch (e) {
+    return apiError(e);
+  }
 }

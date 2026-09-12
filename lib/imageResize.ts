@@ -18,6 +18,11 @@ export function driveImageUrl(fileId: string, sizePx = 1600): string {
  * re-encode as JPEG so the upload stays under ~500 KB for typical
  * receipts. PDFs / unsupported types pass through unchanged — they're
  * usually already small.
+ *
+ * An image the browser cannot decode passes through too. iPhones hand over
+ * HEIC/HEIF, which Chrome and Firefox refuse to decode, so there is nothing
+ * to draw onto the canvas; the server accepts those bytes as they are, so
+ * failing here would reject a photo the upload would have taken.
  */
 
 const MAX_EDGE_PX = 1600;
@@ -33,8 +38,14 @@ export async function prepareReceipt(file: File): Promise<PreparedReceipt> {
     return { blob: file, filename: file.name || "receipt" };
   }
 
-  const dataUrl = await readAsDataUrl(file);
-  const img = await loadImage(dataUrl);
+  // Undecodable (HEIC/HEIF) or unreadable: hand the original bytes, type and
+  // name straight to the caller rather than failing the whole upload.
+  let img: HTMLImageElement;
+  try {
+    img = await loadImage(await readAsDataUrl(file));
+  } catch {
+    return { blob: file, filename: file.name || "receipt" };
+  }
 
   // No resize needed when the image is already small enough — re-encoding
   // a small image as JPEG would just lose detail for nothing.

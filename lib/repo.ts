@@ -7,7 +7,7 @@ import {
 } from "crypto";
 import { and, eq, inArray, lt } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { db } from "@/db/client";
+import { db, type Db } from "@/db/client";
 import {
   categories as categoriesTable,
   expenseCategories as expenseCategoriesTable,
@@ -20,7 +20,7 @@ import {
   sharedAccounts as sharedAccountsTable,
 } from "@/db/schema";
 import { sql } from "drizzle-orm";
-import { thisWeekStart, nextWeekStart } from "./dates";
+import { thisWeekStart, nextWeekStart, todayYmd } from "./dates";
 import type {
   CategoryDef,
   Expense,
@@ -38,7 +38,12 @@ import type {
   SharedFieldKind,
 } from "./types";
 import { BUYERS, GROCERY_POOLS, MEAL_GROUP_KEY, isBuyer } from "./types";
-import { allocationsFromStored, normalizeAllocations } from "./allocations";
+import {
+  allocationsFromStored,
+  normalizeAllocations,
+  type ResolveContext,
+} from "./allocations";
+import { NotFoundError, ValidationError } from "./errors";
 import {
   DEFAULT_CATEGORIES,
   DEFAULT_EXPENSE_CATEGORIES,
@@ -53,6 +58,39 @@ import {
   sortCategories,
   titleCaseName,
 } from "./normalize";
+
+/**
+ * Runs a group of statements as one all-or-nothing unit, on either driver.
+ *
+ *   - neon-http exposes `batch`, which the server runs inside a single
+ *     transaction; there is no interactive transaction to open.
+ *   - node-postgres (local dev, smoke tests) has no `batch`, so a real
+ *     transaction is opened instead.
+ *
+ * `build` receives the handle the statements must be bound to rather than
+ * returning a prebuilt list: a query built on `db` executes on its own
+ * connection from the pool and would land *outside* the transaction.
+ *
+ * `database` defaults to the real handle; tests pass a fake so both branches
+ * can be exercised on one machine (local dev only ever hits `transaction`).
+ */
+export async function runWritesAtomically(
+  build: (tx: Db) => BatchItem<"pg">[],
+  database: Db = db
+): Promise<void> {
+  const batchable = database as unknown as {
+    batch?: (items: [BatchItem<"pg">, ...BatchItem<"pg">[]]) => Promise<unknown>;
+  };
+  if (typeof batchable.batch === "function") {
+    const writes = build(database);
+    if (writes.length === 0) return;
+    await batchable.batch(writes as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
+    return;
+  }
+  await database.transaction(async (tx) => {
+    for (const write of build(tx)) await write;
+  });
+}
 
 function rowToItem(r: typeof itemsTable.$inferSelect): Item {
   return {
@@ -75,7 +113,7 @@ function rowToItem(r: typeof itemsTable.$inferSelect): Item {
 function validateOwner(input: string | undefined): string {
   const owner = String(input ?? "").trim();
   if (!owner) return "";
-  if (!isBuyer(owner)) throw new Error(`Unknown household member: ${owner}`);
+  if (!isBuyer(owner)) throw new ValidationError(`Unknown household member: ${owner}`);
   return owner;
 }
 
@@ -83,7 +121,7 @@ function validateOwner(input: string | undefined): string {
 function validatePool(input: string | undefined): GroceryPool {
   const pool = String(input ?? "").trim() || "house";
   if (!(GROCERY_POOLS as readonly string[]).includes(pool)) {
-    throw new Error(`Pool must be one of ${GROCERY_POOLS.join(", ")}`);
+    throw new ValidationError(`Pool must be one of ${GROCERY_POOLS.join(", ")}`);
   }
   return pool as GroceryPool;
 }
@@ -97,7 +135,7 @@ function requireValidCategory(input: string | undefined, validCats: string[]) {
   const match = validCats.find(
     (category) => category.toLowerCase() === requested.toLowerCase()
   );
-  if (!match) throw new Error("Choose a valid category");
+  if (!match) throw new ValidationError("Choose a valid category");
   return match;
 }
 
@@ -114,11 +152,114 @@ function requirePositiveIntegerQuantity(
     quantity <= 0 ||
     quantity > MAX_POSTGRES_INTEGER
   ) {
-    throw new Error(
+    throw new ValidationError(
       `${label} must be a whole number between 1 and ${MAX_POSTGRES_INTEGER}`
     );
   }
   return quantity;
+}
+
+/**
+ * Adding two quantities that are each individually legal can still land past
+ * int4: Postgres answers that with a 22003 the user only sees as an opaque
+ * 500, after the rest of the statement has already been decided. Every place
+ * two stored quantities are merged goes through here first, so the overflow
+ * is a 400 the user can act on.
+ */
+function requireMergedQuantity(a: number, b: number, label?: string): number {
+  const total = a + b;
+  if (total > MAX_POSTGRES_INTEGER) {
+    throw new ValidationError(
+      label
+        ? `Quantity for "${label}" would exceed the maximum`
+        : "Quantity would exceed the maximum"
+    );
+  }
+  return total;
+}
+
+/* ---------- Shared input validation ---------- */
+
+// Free-text ceilings. Postgres would happily take far more, but a novel
+// pasted into a "name" field is never intentional and it wrecks every list
+// view that has to render it.
+const MAX_NAME_LEN = 120;
+const MAX_STORE_LEN = 80;
+const MAX_DESCRIPTION_LEN = 500;
+const MAX_RECIPE_NAME_LEN = 160;
+const MAX_LINK_LEN = 2000;
+const MAX_CATEGORY_LEN = 32;
+
+/**
+ * Postgres text columns cannot hold U+0000 at all — handing one over raises
+ * SQLSTATE 22021, which surfaces as an opaque 500 — and the rest of the C0
+ * controls only ever arrive from a bad paste. Both are dropped before the
+ * string is measured, so the length limits describe what actually gets
+ * stored. Tab and newline are real content in a description, so they stay.
+ */
+const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F]/g;
+
+function stripControlChars(value: string): string {
+  return value.replace(CONTROL_CHARS, "");
+}
+
+/** Required free text: a real string, non-empty after trimming, capped. */
+function requireText(value: unknown, label: string, maxLen: number): string {
+  if (typeof value !== "string") {
+    throw new ValidationError(`${label} must be text`);
+  }
+  const trimmed = stripControlChars(value).trim();
+  if (!trimmed) throw new ValidationError(`${label} required`);
+  if (trimmed.length > maxLen) {
+    throw new ValidationError(`${label} is too long (max ${maxLen} characters)`);
+  }
+  return trimmed;
+}
+
+/** Optional free text: missing becomes "", non-strings are still rejected. */
+function optionalText(value: unknown, label: string, maxLen: number): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") {
+    throw new ValidationError(`${label} must be text`);
+  }
+  const trimmed = stripControlChars(value).trim();
+  if (trimmed.length > maxLen) {
+    throw new ValidationError(`${label} is too long (max ${maxLen} characters)`);
+  }
+  return trimmed;
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Every row id is a UUID. Handing Postgres anything else raises a cast error
+ * (SQLSTATE 22P02) that would surface as a 500 with SQL in it, so the shape
+ * is checked here, before the query is built.
+ */
+function requireId(value: unknown, label = "id"): string {
+  const s = typeof value === "string" ? value.trim() : "";
+  if (!s) throw new ValidationError(`${label} required`);
+  if (!UUID_RE.test(s)) throw new ValidationError(`${label} is not valid`);
+  return s;
+}
+
+/** A real calendar date written YYYY-MM-DD. "2026-02-31" is rejected. */
+function requireDate(value: unknown, label: string): string {
+  const s = typeof value === "string" ? value.trim() : "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    throw new ValidationError(`${label} must be YYYY-MM-DD`);
+  }
+  const [y, m, d] = s.split("-").map(Number);
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (
+    probe.getUTCFullYear() !== y ||
+    probe.getUTCMonth() + 1 !== m ||
+    probe.getUTCDate() !== d
+  ) {
+    throw new ValidationError(`${label} is not a real date`);
+  }
+  return s;
 }
 
 function shouldReplaceStoredCategory(
@@ -181,7 +322,7 @@ export async function listCategoriesRepo(): Promise<CategoryDef[]> {
 function validateColor(color: string | undefined | null): string | null {
   if (color === undefined || color === null || color === "") return null;
   if (!/^#[0-9a-f]{6}$/i.test(color)) {
-    throw new Error("Color must be a 6-digit hex like #RRGGBB");
+    throw new ValidationError("Color must be a 6-digit hex like #RRGGBB");
   }
   return color.toLowerCase();
 }
@@ -190,9 +331,7 @@ export async function addCategoryRepo(
   name: string,
   color?: string | null
 ): Promise<{ categories: CategoryDef[]; existed: boolean }> {
-  const trimmed = String(name ?? "").trim();
-  if (!trimmed) throw new Error("Name required");
-  if (trimmed.length > 32) throw new Error("Name is too long");
+  const trimmed = requireText(name, "Name", MAX_CATEGORY_LEN);
   const validatedColor = validateColor(color);
 
   const existing = await listCategoriesRepo();
@@ -211,8 +350,7 @@ export async function updateCategoryColorRepo(
   name: string,
   color: string | null
 ): Promise<CategoryDef[]> {
-  const trimmed = String(name ?? "").trim();
-  if (!trimmed) throw new Error("Name required");
+  const trimmed = requireText(name, "Name", MAX_CATEGORY_LEN);
   const validatedColor = validateColor(color);
   await db
     .update(categoriesTable)
@@ -221,38 +359,182 @@ export async function updateCategoryColorRepo(
   return listCategoriesRepo();
 }
 
-export async function deleteCategoryRepo(
-  name: string
-): Promise<{ categories: CategoryDef[]; items: Item[]; reassigned: number }> {
-  const trimmed = String(name ?? "").trim();
-  if (!trimmed) throw new Error("Name required");
-  if (isProtectedCategory(trimmed)) {
-    throw new Error(`Cannot delete the default category "${trimmed}"`);
-  }
+/** Everything that still names a category, so a delete can be described. */
+export type CategoryUsage = {
+  items: number;
+  grocery: number;
+  recipeIngredients: number;
+  favoriteIngredients: number;
+};
 
-  const allItems = await db.select().from(itemsTable);
-  const affected = allItems.filter(
-    (i) => i.category.toLowerCase() === trimmed.toLowerCase()
+export function totalCategoryUsage(usage: CategoryUsage): number {
+  return (
+    usage.items +
+    usage.grocery +
+    usage.recipeIngredients +
+    usage.favoriteIngredients
   );
-  if (affected.length > 0) {
-    for (const it of affected) {
-      await db
-        .update(itemsTable)
-        .set({
-          category: FALLBACK_CATEGORY,
-          categoryReviewed: false,
-        })
-        .where(eq(itemsTable.id, it.id));
-    }
+}
+
+type CategoryReassignPlan = {
+  usage: CategoryUsage;
+  itemIds: string[];
+  groceryIds: string[];
+  recipes: Array<{ id: string; ingredients: RecipeIngredient[] }>;
+  favorites: Array<{ id: string; ingredients: RecipeIngredient[] }>;
+};
+
+/** The matching entries, rewritten onto the fallback and back for review. */
+function reassignIngredients(
+  raw: unknown,
+  lowerName: string
+): { ingredients: RecipeIngredient[]; moved: number } | null {
+  const current: RecipeIngredient[] = Array.isArray(raw) ? raw : [];
+  let moved = 0;
+  const ingredients = current.map((ing) => {
+    if (String(ing?.category ?? "").toLowerCase() !== lowerName) return ing;
+    moved += 1;
+    return { ...ing, category: FALLBACK_CATEGORY, categoryReviewed: false };
+  });
+  return moved === 0 ? null : { ingredients, moved };
+}
+
+/**
+ * Every row that would have to move if `name` were deleted.
+ *
+ * Deleting a category used to reassign inventory only, so a grocery row or a
+ * recipe ingredient kept a category name that no longer existed — the pill
+ * rendered with no color, the row sorted into a group the filters don't
+ * offer, and nothing in the UI could fix it. The same plan backs the
+ * pre-confirm count, so the dialog promises exactly what the delete does.
+ */
+async function planCategoryReassign(
+  name: string
+): Promise<CategoryReassignPlan> {
+  const lower = name.toLowerCase();
+  const [itemRows, groceryRows, recipeRows, favoriteRows] = await Promise.all([
+    db.select({ id: itemsTable.id, category: itemsTable.category }).from(itemsTable),
+    db
+      .select({ id: groceryTable.id, category: groceryTable.category })
+      .from(groceryTable),
+    db
+      .select({ id: recipesTable.id, ingredients: recipesTable.ingredients })
+      .from(recipesTable),
+    db
+      .select({ id: favoritesTable.id, ingredients: favoritesTable.ingredients })
+      .from(favoritesTable),
+  ]);
+
+  const itemIds = itemRows
+    .filter((r) => r.category.toLowerCase() === lower)
+    .map((r) => r.id);
+  const groceryIds = groceryRows
+    .filter((r) => r.category.toLowerCase() === lower)
+    .map((r) => r.id);
+
+  const recipes: CategoryReassignPlan["recipes"] = [];
+  let recipeIngredients = 0;
+  for (const row of recipeRows) {
+    const next = reassignIngredients(row.ingredients, lower);
+    if (!next) continue;
+    recipes.push({ id: row.id, ingredients: next.ingredients });
+    recipeIngredients += next.moved;
   }
 
-  await db.delete(categoriesTable).where(eq(categoriesTable.name, trimmed));
+  const favorites: CategoryReassignPlan["favorites"] = [];
+  let favoriteIngredients = 0;
+  for (const row of favoriteRows) {
+    const next = reassignIngredients(row.ingredients, lower);
+    if (!next) continue;
+    favorites.push({ id: row.id, ingredients: next.ingredients });
+    favoriteIngredients += next.moved;
+  }
+
+  return {
+    usage: {
+      items: itemIds.length,
+      grocery: groceryIds.length,
+      recipeIngredients,
+      favoriteIngredients,
+    },
+    itemIds,
+    groceryIds,
+    recipes,
+    favorites,
+  };
+}
+
+/** Read-only: what a delete of `name` would move, for the confirm dialog. */
+export async function categoryUsageRepo(name: string): Promise<CategoryUsage> {
+  const trimmed = requireText(name, "Name", MAX_CATEGORY_LEN);
+  const plan = await planCategoryReassign(trimmed);
+  return plan.usage;
+}
+
+export async function deleteCategoryRepo(name: string): Promise<{
+  categories: CategoryDef[];
+  items: Item[];
+  reassigned: number;
+  usage: CategoryUsage;
+}> {
+  const trimmed = requireText(name, "Name", MAX_CATEGORY_LEN);
+  if (isProtectedCategory(trimmed)) {
+    throw new ValidationError(`Cannot delete the default category "${trimmed}"`);
+  }
+
+  const plan = await planCategoryReassign(trimmed);
+
+  // The reassignments and the delete go out as one unit: a half-applied
+  // delete is exactly the dangling-name state this is meant to prevent.
+  const reassign = { category: FALLBACK_CATEGORY, categoryReviewed: false };
+  await runWritesAtomically((tx) => {
+    const writes: BatchItem<"pg">[] = [];
+    if (plan.itemIds.length > 0) {
+      writes.push(
+        tx
+          .update(itemsTable)
+          .set(reassign)
+          .where(inArray(itemsTable.id, plan.itemIds))
+      );
+    }
+    if (plan.groceryIds.length > 0) {
+      writes.push(
+        tx
+          .update(groceryTable)
+          .set(reassign)
+          .where(inArray(groceryTable.id, plan.groceryIds))
+      );
+    }
+    for (const r of plan.recipes) {
+      writes.push(
+        tx
+          .update(recipesTable)
+          .set({ ingredients: r.ingredients })
+          .where(eq(recipesTable.id, r.id))
+      );
+    }
+    for (const f of plan.favorites) {
+      writes.push(
+        tx
+          .update(favoritesTable)
+          .set({ ingredients: f.ingredients })
+          .where(eq(favoritesTable.id, f.id))
+      );
+    }
+    writes.push(tx.delete(categoriesTable).where(eq(categoriesTable.name, trimmed)));
+    return writes;
+  });
 
   const [categories, items] = await Promise.all([
     listCategoriesRepo(),
     listItemsRepo(),
   ]);
-  return { categories, items, reassigned: affected.length };
+  return {
+    categories,
+    items,
+    reassigned: totalCategoryUsage(plan.usage),
+    usage: plan.usage,
+  };
 }
 
 /* ---------- Items ---------- */
@@ -280,15 +562,14 @@ export async function addItemRepo(
   mergedInto?: string;
   addedQty?: number;
 }> {
-  const trimmedName = String(input.name ?? "").trim();
-  if (!trimmedName) throw new Error("Name required");
+  const trimmedName = requireText(input.name, "Name", MAX_NAME_LEN);
   const qty = requirePositiveIntegerQuantity(input.quantity);
 
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const category = input.categoryReviewed
     ? requireValidCategory(input.category, validCats)
     : pickCategory(input.category, validCats);
-  const expiry = input.expiry ? input.expiry : null;
+  const expiry = input.expiry ? requireDate(input.expiry, "Expiry") : null;
   const owner = validateOwner(input.owner);
 
   // One shelf, one row per thing: the merge is a plain normalized-name match.
@@ -313,7 +594,7 @@ export async function addItemRepo(
     await db
       .update(itemsTable)
       .set({
-        quantity: existing.quantity + qty,
+        quantity: requireMergedQuantity(existing.quantity, qty),
         expiry: mergedExpiry,
         // Reviewed labels are durable corrections. Unreviewed/legacy rows can
         // be refreshed by the current classifier when the item is added again.
@@ -346,9 +627,8 @@ export async function addItemRepo(
 export type UpdateItemInput = AddItemInput & { id: string };
 
 export async function updateItemRepo(input: UpdateItemInput): Promise<Item[]> {
-  if (!input.id) throw new Error("id required");
-  const trimmedName = String(input.name ?? "").trim();
-  if (!trimmedName) throw new Error("Name required");
+  const id = requireId(input.id);
+  const trimmedName = requireText(input.name, "Name", MAX_NAME_LEN);
   // Same rule as add — an edit must not be able to park a 0 or fractional
   // quantity on a row that add would have rejected.
   const qty = requirePositiveIntegerQuantity(input.quantity);
@@ -358,12 +638,12 @@ export async function updateItemRepo(input: UpdateItemInput): Promise<Item[]> {
     ? requireValidCategory(input.category, validCats)
     : pickCategory(input.category, validCats);
 
-  await db
+  const updated = await db
     .update(itemsTable)
     .set({
       name: trimmedName,
       quantity: qty,
-      expiry: input.expiry ? input.expiry : null,
+      expiry: input.expiry ? requireDate(input.expiry, "Expiry") : null,
       category,
       ...(input.categoryReviewed !== undefined
         ? { categoryReviewed: input.categoryReviewed === true }
@@ -372,14 +652,20 @@ export async function updateItemRepo(input: UpdateItemInput): Promise<Item[]> {
         ? { owner: validateOwner(input.owner) || null }
         : {}),
     })
-    .where(eq(itemsTable.id, input.id));
+    .where(eq(itemsTable.id, id))
+    .returning({ id: itemsTable.id });
 
+  if (updated.length === 0) throw new NotFoundError();
   return listItemsRepo();
 }
 
 export async function deleteItemRepo(id: string): Promise<Item[]> {
-  if (!id) throw new Error("id required");
-  await db.delete(itemsTable).where(eq(itemsTable.id, id));
+  const itemId = requireId(id);
+  const deleted = await db
+    .delete(itemsTable)
+    .where(eq(itemsTable.id, itemId))
+    .returning({ id: itemsTable.id });
+  if (deleted.length === 0) throw new NotFoundError();
   return listItemsRepo();
 }
 
@@ -420,17 +706,15 @@ export type AddGroceryInput = {
 export async function addGroceryRepo(
   input: AddGroceryInput
 ): Promise<GroceryItem[]> {
-  const trimmedName = String(input.name ?? "").trim();
-  if (!trimmedName) throw new Error("Name required");
+  const trimmedName = requireText(input.name, "Name", MAX_NAME_LEN);
   const qty = requirePositiveIntegerQuantity(input.quantity);
-  const addedBy = String(input.addedBy ?? "").trim();
-  if (!addedBy) throw new Error("Added by required");
+  const addedBy = requireText(input.addedBy, "Added by", MAX_NAME_LEN);
 
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const category = input.categoryReviewed
     ? requireValidCategory(input.category, validCats)
     : pickCategory(input.category, validCats);
-  const store = input.store ? String(input.store).trim() : null;
+  const store = optionalText(input.store, "Store", MAX_STORE_LEN) || null;
   const pool = validatePool(input.pool);
   const canonicalName = titleCaseName(trimmedName);
 
@@ -454,7 +738,7 @@ export async function addGroceryRepo(
     await db
       .update(groceryTable)
       .set({
-        quantity: existing.quantity + qty,
+        quantity: requireMergedQuantity(existing.quantity, qty),
         name: canonicalName,
         // Track every requester so "For Arthur" + "For Eli" becomes
         // "For Arthur, Eli" instead of silently dropping the new person.
@@ -495,15 +779,13 @@ export type UpdateGroceryInput = {
 export async function updateGroceryRepo(
   input: UpdateGroceryInput
 ): Promise<GroceryItem[]> {
-  if (!input.id) throw new Error("id required");
+  const id = requireId(input.id);
 
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const patch: Partial<typeof groceryTable.$inferInsert> = {};
 
   if (input.name !== undefined) {
-    const trimmed = String(input.name).trim();
-    if (!trimmed) throw new Error("Name required");
-    patch.name = titleCaseName(trimmed);
+    patch.name = titleCaseName(requireText(input.name, "Name", MAX_NAME_LEN));
   }
   if (input.quantity !== undefined) {
     const qty = requirePositiveIntegerQuantity(input.quantity);
@@ -511,18 +793,17 @@ export async function updateGroceryRepo(
   }
   if (input.category !== undefined) {
     patch.category = pickCategory(input.category, validCats);
-    if (input.categoryReviewed !== undefined) {
-      patch.categoryReviewed = input.categoryReviewed === true;
-    }
+  }
+  // The reviewed flag stands on its own: confirming the category the row
+  // already has sends no `category`, and that confirmation must still stick.
+  if (input.categoryReviewed !== undefined) {
+    patch.categoryReviewed = input.categoryReviewed === true;
   }
   if (input.store !== undefined) {
-    const s = String(input.store).trim();
-    patch.store = s || null;
+    patch.store = optionalText(input.store, "Store", MAX_STORE_LEN) || null;
   }
   if (input.addedBy !== undefined) {
-    const a = String(input.addedBy).trim();
-    if (!a) throw new Error("Added by required");
-    patch.addedBy = a;
+    patch.addedBy = requireText(input.addedBy, "Added by", MAX_NAME_LEN);
   }
   if (input.pool !== undefined) {
     patch.pool = validatePool(input.pool);
@@ -530,20 +811,176 @@ export async function updateGroceryRepo(
   if (input.done !== undefined) {
     patch.done = !!input.done;
   }
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError("Nothing to update");
+  }
 
-  await db.update(groceryTable).set(patch).where(eq(groceryTable.id, input.id));
+  const updated = await db
+    .update(groceryTable)
+    .set(patch)
+    .where(eq(groceryTable.id, id))
+    .returning({ id: groceryTable.id });
+  if (updated.length === 0) throw new NotFoundError();
   return listGroceryRepo();
 }
 
 export async function deleteGroceryRepo(id: string): Promise<GroceryItem[]> {
-  if (!id) throw new Error("id required");
-  await db.delete(groceryTable).where(eq(groceryTable.id, id));
+  const groceryId = requireId(id);
+  const deleted = await db
+    .delete(groceryTable)
+    .where(eq(groceryTable.id, groceryId))
+    .returning({ id: groceryTable.id });
+  if (deleted.length === 0) throw new NotFoundError();
   return listGroceryRepo();
 }
 
 export async function clearGroceryRepo(): Promise<GroceryItem[]> {
   await db.delete(groceryTable);
   return [];
+}
+
+/** The grocery columns the move reads. */
+export type MoveDoneGroceryRow = {
+  id: string;
+  name: string;
+  quantity: number;
+  category: string;
+  categoryReviewed: boolean;
+};
+
+/** The inventory columns the move reads. */
+export type MoveDoneInventoryRow = {
+  id: string;
+  name: string;
+  quantity: number;
+  category: string;
+  categoryReviewed: boolean;
+};
+
+export type MoveDonePlan = {
+  /** Existing inventory rows whose final state differs from the stored one. */
+  updates: Array<{
+    id: string;
+    quantity: number;
+    // Present only when the category is being replaced, so an untouched
+    // category is never rewritten.
+    category?: string;
+    categoryReviewed?: boolean;
+  }>;
+  inserts: Array<{
+    name: string;
+    quantity: number;
+    category: string;
+    categoryReviewed: boolean;
+  }>;
+  /** Every done grocery row, including ones too broken to move. */
+  deleteIds: string[];
+};
+
+/**
+ * The whole move, decided in memory: which inventory rows change, which get
+ * created, and which grocery rows go away. Pure, so every quantity is capped
+ * and every category resolved before the first statement is sent — and so
+ * the merge rules can be tested without a database.
+ *
+ * `done` must already be in the order the rows should be applied (oldest
+ * first); consecutive rows with the same normalized name fold together, the
+ * same way repeated adds do.
+ */
+export function planMoveDone(
+  done: MoveDoneGroceryRow[],
+  inventory: MoveDoneInventoryRow[],
+  validCats: string[]
+): MoveDonePlan {
+  type Target = {
+    quantity: number;
+    category: string;
+    categoryReviewed: boolean;
+    changed: boolean;
+    categoryChanged: boolean;
+  };
+  const existingByNorm = new Map<string, Target & { id: string }>();
+  for (const r of inventory) {
+    existingByNorm.set(normalizeName(r.name), {
+      id: r.id,
+      quantity: r.quantity,
+      category: r.category,
+      categoryReviewed: r.categoryReviewed,
+      changed: false,
+      categoryChanged: false,
+    });
+  }
+  const insertByNorm = new Map<string, Target & { name: string }>();
+
+  for (const g of done) {
+    const name = String(g.name ?? "").trim();
+    // A done row with no usable name can't become an inventory item, but it
+    // still leaves the list — same as before.
+    if (!name) continue;
+    const category = pickCategory(g.category, validCats);
+    const groceryCategoryValid = validCats.some(
+      (valid) => valid.toLowerCase() === g.category.toLowerCase()
+    );
+    const categoryReviewed = g.categoryReviewed && groceryCategoryValid;
+    const norm = normalizeName(name);
+    const target = existingByNorm.get(norm) ?? insertByNorm.get(norm);
+
+    if (!target) {
+      insertByNorm.set(norm, {
+        name,
+        quantity: g.quantity || 0,
+        // Inventory items don't currently carry store/addedBy/owner.
+        category,
+        categoryReviewed,
+        changed: true,
+        categoryChanged: true,
+      });
+      continue;
+    }
+
+    target.quantity = requireMergedQuantity(
+      target.quantity,
+      g.quantity || 0,
+      name
+    );
+    target.changed = true;
+    if (
+      shouldReplaceStoredCategory(
+        target.category,
+        target.categoryReviewed,
+        category,
+        categoryReviewed,
+        validCats
+      )
+    ) {
+      target.category = category;
+      target.categoryReviewed = categoryReviewed;
+      target.categoryChanged = true;
+    }
+  }
+
+  const updates: MoveDonePlan["updates"] = [];
+  for (const target of existingByNorm.values()) {
+    if (!target.changed) continue;
+    updates.push({
+      id: target.id,
+      quantity: target.quantity,
+      ...(target.categoryChanged
+        ? { category: target.category, categoryReviewed: target.categoryReviewed }
+        : {}),
+    });
+  }
+
+  return {
+    updates,
+    inserts: [...insertByNorm.values()].map((row) => ({
+      name: row.name,
+      quantity: row.quantity,
+      category: row.category,
+      categoryReviewed: row.categoryReviewed,
+    })),
+    deleteIds: done.map((d) => d.id),
+  };
 }
 
 /**
@@ -555,6 +992,11 @@ export async function clearGroceryRepo(): Promise<GroceryItem[]> {
  * item already exists, quantities add. Reviewed inventory categories are
  * preserved; otherwise the grocery row carries its current category across.
  * Expiry is left empty (the user can fill it in after).
+ *
+ * Inventory writes and the grocery deletes go out as one unit. They used to
+ * be issued row by row with the deletes last, so a row that failed halfway
+ * through left the inventory written *and* the list intact — and the retry
+ * the user naturally reached for added everything a second time.
  */
 export async function moveDoneGroceryToItemsRepo(): Promise<{
   items: Item[];
@@ -579,67 +1021,32 @@ export async function moveDoneGroceryToItemsRepo(): Promise<{
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
   const inventoryRows = await db.select().from(itemsTable);
 
-  // Cache existing inventory by normalized name so consecutive moves merge
-  // into the same row instead of inserting duplicates.
-  const byNorm = new Map<string, typeof itemsTable.$inferSelect>();
-  for (const r of inventoryRows) byNorm.set(normalizeName(r.name), r);
+  // Throws before anything is written when a merged quantity overflows.
+  const plan = planMoveDone(done, inventoryRows, validCats);
 
-  for (const g of done) {
-    const name = String(g.name ?? "").trim();
-    if (!name) continue;
-    const category = pickCategory(g.category, validCats);
-    const groceryCategoryValid = validCats.some(
-      (valid) => valid.toLowerCase() === g.category.toLowerCase()
-    );
-    const categoryReviewed = g.categoryReviewed && groceryCategoryValid;
-    const norm = normalizeName(name);
-    const existing = byNorm.get(norm);
-    if (existing) {
-      const nextQty = existing.quantity + (g.quantity || 0);
-      const replaceCategory = shouldReplaceStoredCategory(
-        existing.category,
-        existing.categoryReviewed,
-        category,
-        categoryReviewed,
-        validCats
+  await runWritesAtomically((tx) => {
+    const writes: BatchItem<"pg">[] = [];
+    for (const u of plan.updates) {
+      writes.push(
+        tx
+          .update(itemsTable)
+          .set({
+            quantity: u.quantity,
+            ...(u.category !== undefined
+              ? { category: u.category, categoryReviewed: u.categoryReviewed }
+              : {}),
+          })
+          .where(eq(itemsTable.id, u.id))
       );
-      await db
-        .update(itemsTable)
-        .set({
-          quantity: nextQty,
-          ...(replaceCategory ? { category, categoryReviewed } : {}),
-        })
-        .where(eq(itemsTable.id, existing.id));
-      existing.quantity = nextQty;
-      if (replaceCategory) {
-        existing.category = category;
-        existing.categoryReviewed = categoryReviewed;
-      }
-    } else {
-      const [inserted] = await db
-        .insert(itemsTable)
-        .values({
-          name,
-          quantity: g.quantity || 0,
-          // Inventory items don't currently carry store/addedBy/owner.
-          category,
-          categoryReviewed,
-        })
-        .returning();
-      if (inserted) byNorm.set(norm, inserted);
     }
-  }
-
-  // Drop the moved grocery rows after inventory writes succeed, so a
-  // partial failure leaves the user with both lists rather than nothing.
-  await db
-    .delete(groceryTable)
-    .where(
-      inArray(
-        groceryTable.id,
-        done.map((d) => d.id)
-      )
+    if (plan.inserts.length > 0) {
+      writes.push(tx.insert(itemsTable).values(plan.inserts));
+    }
+    writes.push(
+      tx.delete(groceryTable).where(inArray(groceryTable.id, plan.deleteIds))
     );
+    return writes;
+  });
 
   return {
     items: await listItemsRepo(),
@@ -667,14 +1074,15 @@ export async function bulkAddGroceryRepo(
   // merge could commit before a later invalid row threw, so retrying doubled
   // the first item.
   const preparedRows = inputs.map((input) => {
-    const rawName = String(input.name ?? "").trim();
+    if (typeof input.name !== "string" || !input.name.trim()) {
+      throw new ValidationError("Each ingredient needs a name");
+    }
+    const rawName = requireText(input.name, "Ingredient name", MAX_NAME_LEN);
     const quantity = requirePositiveIntegerQuantity(
       input.quantity,
-      `Quantity for "${rawName || "ingredient"}"`
+      `Quantity for "${rawName}"`
     );
-    const addedBy = String(input.addedBy ?? "").trim();
-    if (!rawName) throw new Error("Each ingredient needs a name");
-    if (!addedBy) throw new Error("Added by required");
+    const addedBy = requireText(input.addedBy, "Added by", MAX_NAME_LEN);
     const categoryReviewed = input.categoryReviewed === true;
     const category = categoryReviewed
       ? requireValidCategory(input.category, validCats)
@@ -686,7 +1094,7 @@ export async function bulkAddGroceryRepo(
       quantity,
       category,
       categoryReviewed,
-      store: input.store ? String(input.store).trim() || null : null,
+      store: optionalText(input.store, "Store", MAX_STORE_LEN) || null,
       addedBy,
       pool: validatePool(input.pool),
     };
@@ -705,9 +1113,10 @@ export async function bulkAddGroceryRepo(
       preparedByNorm.set(row.norm, { ...row });
       continue;
     }
-    existing.quantity = requirePositiveIntegerQuantity(
-      existing.quantity + row.quantity,
-      `Combined quantity for "${row.name}"`
+    existing.quantity = requireMergedQuantity(
+      existing.quantity,
+      row.quantity,
+      row.name
     );
     existing.name = row.name;
     existing.addedBy = mergeAddedBy(existing.addedBy, row.addedBy);
@@ -752,9 +1161,10 @@ export async function bulkAddGroceryRepo(
       });
       continue;
     }
-    target.quantity = requirePositiveIntegerQuantity(
-      target.quantity + input.quantity,
-      `Combined quantity for "${input.name}"`
+    target.quantity = requireMergedQuantity(
+      target.quantity,
+      input.quantity,
+      input.name
     );
     target.name = input.name;
     target.addedBy = mergeAddedBy(target.addedBy, input.addedBy);
@@ -773,41 +1183,28 @@ export async function bulkAddGroceryRepo(
     target.changed = true;
   }
 
-  const writes: BatchItem<"pg">[] = [];
-  for (const target of openRows) {
-    if (!target.changed) continue;
-    writes.push(
-      db
-        .update(groceryTable)
-        .set({
-          quantity: target.quantity,
-          name: target.name,
-          addedBy: target.addedBy,
-          category: target.category,
-          categoryReviewed: target.categoryReviewed,
-        })
-        .where(eq(groceryTable.id, target.id))
-    );
-  }
-  if (toInsert.length > 0) {
-    writes.push(db.insert(groceryTable).values(toInsert));
-  }
-  if (writes.length > 0) {
-    // `batch` only exists on the neon-http driver (it runs the statements
-    // in one round trip / transaction). The local node-postgres driver used
-    // for dev and smoke tests has no batch, so fall back to sequential
-    // awaits there.
-    const batchable = db as unknown as {
-      batch?: (items: [BatchItem<"pg">, ...BatchItem<"pg">[]]) => Promise<unknown>;
-    };
-    if (typeof batchable.batch === "function") {
-      await batchable.batch(
-        writes as [BatchItem<"pg">, ...BatchItem<"pg">[]]
+  await runWritesAtomically((tx) => {
+    const writes: BatchItem<"pg">[] = [];
+    for (const target of openRows) {
+      if (!target.changed) continue;
+      writes.push(
+        tx
+          .update(groceryTable)
+          .set({
+            quantity: target.quantity,
+            name: target.name,
+            addedBy: target.addedBy,
+            category: target.category,
+            categoryReviewed: target.categoryReviewed,
+          })
+          .where(eq(groceryTable.id, target.id))
       );
-    } else {
-      for (const w of writes) await w;
     }
-  }
+    if (toInsert.length > 0) {
+      writes.push(tx.insert(groceryTable).values(toInsert));
+    }
+    return writes;
+  });
   return listGroceryRepo();
 }
 
@@ -822,7 +1219,9 @@ function sanitizeIngredients(
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
-    const name = String(o.name ?? "").trim();
+    // Ingredients land in a jsonb column, which Postgres refuses outright
+    // when a string carries U+0000.
+    const name = stripControlChars(String(o.name ?? "")).trim();
     const qty = Number(o.quantity);
     if (!name) continue;
     if (!qty || qty <= 0) continue;
@@ -914,7 +1313,7 @@ function validateRecipeCount(
   if (input === undefined || input === null) return null;
   const n = Number(input);
   if (!Number.isInteger(n) || n < 0 || n > MAX_POSTGRES_INTEGER) {
-    throw new Error(`${label} must be a whole number of 0 or more`);
+    throw new ValidationError(`${label} must be a whole number of 0 or more`);
   }
   return n === 0 ? null : n;
 }
@@ -923,21 +1322,43 @@ function validateRecipeSlot(input: {
   day?: number;
   weekStart?: string;
 }) {
-  if (typeof input.day !== "number" || input.day < 0 || input.day > 6) {
-    throw new Error("Day must be Sunday through Saturday (0-6)");
+  if (
+    typeof input.day !== "number" ||
+    !Number.isInteger(input.day) ||
+    input.day < 0 ||
+    input.day > 6
+  ) {
+    throw new ValidationError("Day must be Sunday through Saturday (0-6)");
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.weekStart))) {
-    throw new Error("weekStart must be YYYY-MM-DD");
-  }
+  requireDate(input.weekStart, "weekStart");
 }
 
 function validateRecipeBase(input: AddRecipeInput) {
-  const name = String(input.name ?? "").trim();
-  if (!name) throw new Error("Recipe name required");
-  const assignedTo = String(input.assignedTo ?? "").trim();
-  if (!assignedTo) throw new Error("Assigned cook required");
+  const name = requireText(input.name, "Recipe name", MAX_RECIPE_NAME_LEN);
+  const assignedTo = requireText(input.assignedTo, "Assigned cook", MAX_NAME_LEN);
   validateRecipeSlot(input);
   return { name, assignedTo };
+}
+
+/**
+ * A day holds one recipe, enforced by a unique index on (week_start, day).
+ * Two housemates filling the same slot at the same moment lose that race in
+ * Postgres rather than in the read-then-write check, so translate the code.
+ */
+function isSlotConflict(e: unknown): boolean {
+  const err = e as { code?: unknown; cause?: { code?: unknown } } | null;
+  return err?.code === "23505" || err?.cause?.code === "23505";
+}
+
+async function withSlotConflict<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    if (isSlotConflict(e)) {
+      throw new ValidationError("That day already has a recipe");
+    }
+    throw e;
+  }
 }
 
 export async function addRecipeRepo(
@@ -951,23 +1372,26 @@ export async function addRecipeRepo(
     validateRecipeSlot(input);
     const sameSlot = await recipesInSlot(input);
     if (sameSlot.some((r) => !r.noMeal)) {
-      throw new Error("That day already has a recipe");
+      throw new ValidationError("That day already has a recipe");
     }
     if (sameSlot.some((r) => r.noMeal)) return listRecipesRepo();
-    await db.insert(recipesTable).values({
-      weekStart: input.weekStart,
-      day: input.day,
-      assignedTo: "",
-      name: "",
-      link: null,
-      description: input.description
-        ? String(input.description).trim() || null
-        : null,
-      ingredients: [],
-      servings: null,
-      portions: null,
-      noMeal: true,
-    });
+    const markerNote =
+      optionalText(input.description, "Description", MAX_DESCRIPTION_LEN) ||
+      null;
+    await withSlotConflict(() =>
+      db.insert(recipesTable).values({
+        weekStart: input.weekStart,
+        day: input.day,
+        assignedTo: "",
+        name: "",
+        link: null,
+        description: markerNote,
+        ingredients: [],
+        servings: null,
+        portions: null,
+        noMeal: true,
+      })
+    );
     return listRecipesRepo();
   }
 
@@ -976,7 +1400,7 @@ export async function addRecipeRepo(
   // replaces the marker.
   const sameSlot = await recipesInSlot(input);
   if (sameSlot.some((r) => !r.noMeal)) {
-    throw new Error("That day already has a recipe");
+    throw new ValidationError("That day already has a recipe");
   }
   const markers = sameSlot.filter((r) => r.noMeal);
   if (markers.length > 0) {
@@ -987,20 +1411,22 @@ export async function addRecipeRepo(
       )
     );
   }
-  await db.insert(recipesTable).values({
-    weekStart: input.weekStart,
-    day: input.day,
-    assignedTo,
-    name,
-    link: input.link ? String(input.link).trim() || null : null,
-    description: input.description
-      ? String(input.description).trim() || null
-      : null,
-    ingredients: sanitizeIngredients(input.ingredients, validCats),
-    servings: validateRecipeCount(input.servings, "Servings"),
-    portions: validateRecipeCount(input.portions, "Portions"),
-    noMeal: false,
-  });
+  await withSlotConflict(() =>
+    db.insert(recipesTable).values({
+      weekStart: input.weekStart,
+      day: input.day,
+      assignedTo,
+      name,
+      link: optionalText(input.link, "Link", MAX_LINK_LEN) || null,
+      description:
+        optionalText(input.description, "Description", MAX_DESCRIPTION_LEN) ||
+        null,
+      ingredients: sanitizeIngredients(input.ingredients, validCats),
+      servings: validateRecipeCount(input.servings, "Servings"),
+      portions: validateRecipeCount(input.portions, "Portions"),
+      noMeal: false,
+    })
+  );
   return listRecipesRepo();
 }
 
@@ -1026,7 +1452,7 @@ export type UpdateRecipeInput = Partial<AddRecipeInput> & { id: string };
 export async function updateRecipeRepo(
   input: UpdateRecipeInput
 ): Promise<Recipe[]> {
-  if (!input.id) throw new Error("id required");
+  const id = requireId(input.id);
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
 
   // A "no meal" marker has no name or cook, so those requirements are lifted
@@ -1034,32 +1460,30 @@ export async function updateRecipeRepo(
   const makingMarker = input.noMeal === true;
   const patch: Partial<typeof recipesTable.$inferInsert> = {};
   if (input.name !== undefined && !makingMarker) {
-    const t = String(input.name).trim();
-    if (!t) throw new Error("Recipe name required");
-    patch.name = t;
+    patch.name = requireText(input.name, "Recipe name", MAX_RECIPE_NAME_LEN);
   }
   if (input.assignedTo !== undefined && !makingMarker) {
-    const t = String(input.assignedTo).trim();
-    if (!t) throw new Error("Assigned cook required");
-    patch.assignedTo = t;
+    patch.assignedTo = requireText(
+      input.assignedTo,
+      "Assigned cook",
+      MAX_NAME_LEN
+    );
   }
   if (input.day !== undefined) {
-    if (input.day < 0 || input.day > 6)
-      throw new Error("Day must be Sunday through Saturday (0-6)");
+    if (!Number.isInteger(input.day) || input.day < 0 || input.day > 6)
+      throw new ValidationError("Day must be Sunday through Saturday (0-6)");
     patch.day = input.day;
   }
   if (input.weekStart !== undefined) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.weekStart))
-      throw new Error("weekStart must be YYYY-MM-DD");
-    patch.weekStart = input.weekStart;
+    patch.weekStart = requireDate(input.weekStart, "weekStart");
   }
   if (input.link !== undefined) {
-    const s = String(input.link).trim();
-    patch.link = s || null;
+    patch.link = optionalText(input.link, "Link", MAX_LINK_LEN) || null;
   }
   if (input.description !== undefined) {
-    const s = String(input.description).trim();
-    patch.description = s || null;
+    patch.description =
+      optionalText(input.description, "Description", MAX_DESCRIPTION_LEN) ||
+      null;
   }
   if (input.ingredients !== undefined) {
     patch.ingredients = sanitizeIngredients(input.ingredients, validCats);
@@ -1087,13 +1511,16 @@ export async function updateRecipeRepo(
   const existingRows = await db
     .select()
     .from(recipesTable)
-    .where(eq(recipesTable.id, input.id))
+    .where(eq(recipesTable.id, id))
     .limit(1);
-  if (existingRows.length === 0) throw new Error("Recipe not found");
+  if (existingRows.length === 0) throw new NotFoundError();
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError("Nothing to update");
+  }
   const merged = { ...existingRows[0], ...patch };
   if (!merged.noMeal) {
-    if (!String(merged.name ?? "").trim()) throw new Error("Recipe name required");
-    if (!String(merged.assignedTo ?? "").trim()) throw new Error("Assigned cook required");
+    if (!String(merged.name ?? "").trim()) throw new ValidationError("Recipe name required");
+    if (!String(merged.assignedTo ?? "").trim()) throw new ValidationError("Assigned cook required");
   }
   const moving =
     (patch.day !== undefined && patch.day !== existingRows[0].day) ||
@@ -1102,16 +1529,16 @@ export async function updateRecipeRepo(
   if (moving) {
     const others = (
       await recipesInSlot({ weekStart: merged.weekStart, day: merged.day })
-    ).filter((r) => r.id !== input.id);
+    ).filter((r) => r.id !== id);
     if (merged.noMeal) {
-      if (others.some((r) => !r.noMeal)) throw new Error("That day already has a recipe");
+      if (others.some((r) => !r.noMeal)) throw new ValidationError("That day already has a recipe");
       if (others.length > 0) {
         // Already marked; drop this row instead of keeping two markers.
-        await db.delete(recipesTable).where(eq(recipesTable.id, input.id));
+        await db.delete(recipesTable).where(eq(recipesTable.id, id));
         return listRecipesRepo();
       }
     } else {
-      if (others.some((r) => !r.noMeal)) throw new Error("That day already has a recipe");
+      if (others.some((r) => !r.noMeal)) throw new ValidationError("That day already has a recipe");
       const markers = others.filter((r) => r.noMeal);
       if (markers.length > 0) {
         await db.delete(recipesTable).where(inArray(recipesTable.id, markers.map((m) => m.id)));
@@ -1119,13 +1546,19 @@ export async function updateRecipeRepo(
     }
   }
 
-  await db.update(recipesTable).set(patch).where(eq(recipesTable.id, input.id));
+  await withSlotConflict(() =>
+    db.update(recipesTable).set(patch).where(eq(recipesTable.id, id))
+  );
   return listRecipesRepo();
 }
 
 export async function deleteRecipeRepo(id: string): Promise<Recipe[]> {
-  if (!id) throw new Error("id required");
-  await db.delete(recipesTable).where(eq(recipesTable.id, id));
+  const recipeId = requireId(id);
+  const deleted = await db
+    .delete(recipesTable)
+    .where(eq(recipesTable.id, recipeId))
+    .returning({ id: recipesTable.id });
+  if (deleted.length === 0) throw new NotFoundError();
   return listRecipesRepo();
 }
 
@@ -1136,6 +1569,12 @@ export async function listFavoritesRepo(): Promise<FavoriteRecipe[]> {
   return rows.map(rowToFavorite);
 }
 
+/** Base servings a favorite was written for; 0 means "never learned". */
+function normalizedServings(raw: unknown): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n <= MAX_POSTGRES_INTEGER ? n : 0;
+}
+
 export async function addFavoriteRepo(input: {
   name: string;
   link?: string;
@@ -1143,9 +1582,8 @@ export async function addFavoriteRepo(input: {
   ingredients?: unknown;
   servings?: number;
 }): Promise<{ favorites: FavoriteRecipe[]; existed: boolean }> {
-  const name = String(input.name ?? "").trim();
-  if (!name) throw new Error("Name required");
-  const link = input.link ? String(input.link).trim() : "";
+  const name = requireText(input.name, "Name", MAX_RECIPE_NAME_LEN);
+  const link = optionalText(input.link, "Link", MAX_LINK_LEN);
   const validCats = (await listCategoriesRepo()).map((c) => c.name);
 
   // Dedupe: a favorite already exists if its name matches case-insensitively,
@@ -1161,28 +1599,39 @@ export async function addFavoriteRepo(input: {
     return false;
   });
   if (dup) {
+    const incomingServings = normalizedServings(input.servings);
+    // A favorite saved before the scraper learned its base servings is stuck
+    // at 0 forever otherwise. Fill that one field in and touch nothing else.
+    if (incomingServings && !dup.servings) {
+      await db
+        .update(favoritesTable)
+        .set({ servings: incomingServings })
+        .where(eq(favoritesTable.id, dup.id));
+      return { favorites: await listFavoritesRepo(), existed: true };
+    }
     return { favorites: existing, existed: true };
   }
 
   await db.insert(favoritesTable).values({
     name,
     link: link || null,
-    description: input.description
-      ? String(input.description).trim() || null
-      : null,
+    description:
+      optionalText(input.description, "Description", MAX_DESCRIPTION_LEN) ||
+      null,
     ingredients: sanitizeIngredients(input.ingredients, validCats),
     // A favorite that never learned its base servings just stores null.
-    servings:
-      Number.isInteger(Number(input.servings)) && Number(input.servings) > 0
-        ? Number(input.servings)
-        : null,
+    servings: normalizedServings(input.servings) || null,
   });
   return { favorites: await listFavoritesRepo(), existed: false };
 }
 
 export async function deleteFavoriteRepo(id: string): Promise<FavoriteRecipe[]> {
-  if (!id) throw new Error("id required");
-  await db.delete(favoritesTable).where(eq(favoritesTable.id, id));
+  const favoriteId = requireId(id);
+  const deleted = await db
+    .delete(favoritesTable)
+    .where(eq(favoritesTable.id, favoriteId))
+    .returning({ id: favoritesTable.id });
+  if (deleted.length === 0) throw new NotFoundError();
   return listFavoritesRepo();
 }
 
@@ -1233,7 +1682,7 @@ export async function listExpenseCategoriesRepo(): Promise<ExpenseCategoryDef[]>
 function validateHexColor(color: string | undefined | null): string | null {
   if (color === undefined || color === null || color === "") return null;
   if (!/^#[0-9a-f]{6}$/i.test(color)) {
-    throw new Error("Color must be a 6-digit hex like #RRGGBB");
+    throw new ValidationError("Color must be a 6-digit hex like #RRGGBB");
   }
   return color.toLowerCase();
 }
@@ -1242,9 +1691,7 @@ export async function addExpenseCategoryRepo(
   name: string,
   color?: string | null
 ): Promise<{ expenseCategories: ExpenseCategoryDef[]; existed: boolean }> {
-  const trimmed = String(name ?? "").trim();
-  if (!trimmed) throw new Error("Name required");
-  if (trimmed.length > 32) throw new Error("Name is too long");
+  const trimmed = requireText(name, "Name", MAX_CATEGORY_LEN);
   const validatedColor = validateHexColor(color);
 
   const existing = await listExpenseCategoriesRepo();
@@ -1265,8 +1712,7 @@ export async function updateExpenseCategoryColorRepo(
   name: string,
   color: string | null
 ): Promise<ExpenseCategoryDef[]> {
-  const trimmed = String(name ?? "").trim();
-  if (!trimmed) throw new Error("Name required");
+  const trimmed = requireText(name, "Name", MAX_CATEGORY_LEN);
   const validatedColor = validateHexColor(color);
   await db
     .update(expenseCategoriesTable)
@@ -1280,10 +1726,9 @@ export async function deleteExpenseCategoryRepo(name: string): Promise<{
   expenses: Expense[];
   reassigned: number;
 }> {
-  const trimmed = String(name ?? "").trim();
-  if (!trimmed) throw new Error("Name required");
+  const trimmed = requireText(name, "Name", MAX_CATEGORY_LEN);
   if (trimmed.toLowerCase() === EXPENSE_FALLBACK.toLowerCase()) {
-    throw new Error(
+    throw new ValidationError(
       `Cannot delete the fallback category "${EXPENSE_FALLBACK}"`
     );
   }
@@ -1350,21 +1795,21 @@ function expenseDisplayName(store: string, occurredOn: string): string {
   return trimmedStore ? `${trimmedStore} ${label}` : `Expense ${label}`;
 }
 
-function todayYmd(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function validateOccurredOn(input: string | undefined): string {
-  const s = String(input ?? "").trim();
-  if (!s) return todayYmd();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    throw new Error("Date must be YYYY-MM-DD");
+export function validateOccurredOn(input: string | undefined): string {
+  // Defaulting uses the household timezone, not the server's: an expense
+  // logged on Friday evening in Toronto must not land on Saturday because
+  // the server clock is UTC.
+  const today = todayYmd();
+  if (input === undefined || input === null || input === "") return today;
+  const occurredOn = requireDate(input, "Date");
+  // A future date lands the expense in the receipts total but in no
+  // settlement month, so the household is short by an amount nothing
+  // explains. Same comparison the settlement months use: plain string
+  // ordering is correct for YYYY-MM-DD.
+  if (occurredOn > today) {
+    throw new ValidationError("Date can't be in the future");
   }
-  return s;
+  return occurredOn;
 }
 
 export async function listExpensesRepo(): Promise<Expense[]> {
@@ -1386,12 +1831,29 @@ export async function currentMealGroup(): Promise<string[]> {
   return members.map((m) => String(m ?? "").trim()).filter(isBuyer);
 }
 
+/**
+ * `normalizeAllocations` is shared with the client and throws plain Errors,
+ * but every one of its messages is a bad-input message — re-label them so the
+ * route answers 400 instead of hiding them behind a generic 500.
+ */
+function checkedAllocations(
+  raw: unknown,
+  totalCents: number,
+  ctx: ResolveContext
+): ExpenseAllocation[] {
+  try {
+    return normalizeAllocations(raw, totalCents, ctx);
+  } catch (e) {
+    throw new ValidationError(e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** The payer has to be a household member, or settlement silently drops them. */
 function validatePaidBy(input: string | undefined): string {
   const paidBy = String(input ?? "").trim();
-  if (!paidBy) throw new Error("Paid by required");
+  if (!paidBy) throw new ValidationError("Paid by required");
   if (!isBuyer(paidBy)) {
-    throw new Error(`"${paidBy}" is not a household member`);
+    throw new ValidationError(`"${paidBy}" is not a household member`);
   }
   return paidBy;
 }
@@ -1414,20 +1876,22 @@ export async function addExpenseRepo(
 ): Promise<Expense[]> {
   const amountCents = Math.round(Number(input.amountCents));
   if (!Number.isFinite(amountCents) || amountCents <= 0) {
-    throw new Error("Amount must be greater than zero");
+    throw new ValidationError("Amount must be greater than zero");
   }
   const paidBy = validatePaidBy(input.paidBy);
   // Re-checked here rather than trusted: the repo is the last gate before
   // storage, and a stored expense whose lines don't sum breaks settlement.
-  const allocations = normalizeAllocations(input.allocations, amountCents, {
+  const allocations = checkedAllocations(input.allocations, amountCents, {
     members: BUYERS,
     mealGroup: await currentMealGroup(),
   });
 
-  const store = input.store ? String(input.store).trim() : "";
-  const description = input.description
-    ? String(input.description).trim()
-    : "";
+  const store = optionalText(input.store, "Store", MAX_STORE_LEN);
+  const description = optionalText(
+    input.description,
+    "Description",
+    MAX_DESCRIPTION_LEN
+  );
   const occurredOn = validateOccurredOn(input.occurredOn);
   const name = expenseDisplayName(store, occurredOn);
 
@@ -1466,13 +1930,13 @@ export type UpdateExpenseInput = {
 export async function updateExpenseRepo(
   input: UpdateExpenseInput
 ): Promise<Expense[]> {
-  if (!input.id) throw new Error("id required");
+  const id = requireId(input.id);
   const patch: Partial<typeof expensesTable.$inferInsert> = {};
 
   if (input.amountCents !== undefined) {
     const cents = Math.round(Number(input.amountCents));
     if (!Number.isFinite(cents) || cents <= 0) {
-      throw new Error("Amount must be greater than zero");
+      throw new ValidationError("Amount must be greater than zero");
     }
     patch.amountCents = cents;
   }
@@ -1480,8 +1944,9 @@ export async function updateExpenseRepo(
     patch.paidBy = validatePaidBy(input.paidBy);
   }
   if (input.description !== undefined) {
-    const d = String(input.description).trim();
-    patch.description = d || null;
+    patch.description =
+      optionalText(input.description, "Description", MAX_DESCRIPTION_LEN) ||
+      null;
   }
   if (input.receiptUrl !== undefined) {
     patch.receiptUrl = input.receiptUrl || null;
@@ -1495,52 +1960,42 @@ export async function updateExpenseRepo(
 
   // Store and date both feed into the auto-name; allocations have to be
   // re-checked against the row's final amount. Either way we need the
-  // current row, so fetch it once.
-  const needsRow =
-    input.store !== undefined ||
-    input.occurredOn !== undefined ||
-    input.allocations !== undefined ||
-    input.amountCents !== undefined;
-  let row: typeof expensesTable.$inferSelect | null = null;
-  if (needsRow) {
-    const existing = await db
-      .select()
-      .from(expensesTable)
-      .where(eq(expensesTable.id, input.id))
-      .limit(1);
-    if (existing.length === 0) throw new Error("Expense not found");
-    row = existing[0];
-  }
+  // current row, and an unknown id has to 404 rather than update nothing.
+  const existing = await db
+    .select()
+    .from(expensesTable)
+    .where(eq(expensesTable.id, id))
+    .limit(1);
+  if (existing.length === 0) throw new NotFoundError();
+  const row = existing[0];
 
-  if (row) {
-    const finalAmount = patch.amountCents ?? row.amountCents;
-    if (input.allocations !== undefined) {
-      // Names already on this row's snapshot stay valid even if they have
-      // left the household, so an untouched edit round-trips.
-      const allowed = allocationsFromStored(row.allocations, row.amountCents)
-        .flatMap((a) => a.splitAmong)
-        .filter((n) => !isBuyer(n));
-      patch.allocations = normalizeAllocations(input.allocations, finalAmount, {
-        members: BUYERS,
-        mealGroup: await currentMealGroup(),
-        allowed,
-      });
-    } else if (finalAmount !== row.amountCents) {
-      // The amount moved but the client didn't re-send the split. A single
-      // line can simply be restated at the new total; anything with a real
-      // split would be guesswork, so we make the user redo it.
-      const current = allocationsFromStored(row.allocations, row.amountCents);
-      if (current.length !== 1) {
-        throw new Error("Amount changed; re-enter the allocations");
-      }
-      patch.allocations = [{ ...current[0], amountCents: finalAmount }];
+  const finalAmount = patch.amountCents ?? row.amountCents;
+  if (input.allocations !== undefined) {
+    // Names already on this row's snapshot stay valid even if they have
+    // left the household, so an untouched edit round-trips.
+    const allowed = allocationsFromStored(row.allocations, row.amountCents)
+      .flatMap((a) => a.splitAmong)
+      .filter((n) => !isBuyer(n));
+    patch.allocations = checkedAllocations(input.allocations, finalAmount, {
+      members: BUYERS,
+      mealGroup: await currentMealGroup(),
+      allowed,
+    });
+  } else if (finalAmount !== row.amountCents) {
+    // The amount moved but the client didn't re-send the split. A single
+    // line can simply be restated at the new total; anything with a real
+    // split would be guesswork, so we make the user redo it.
+    const current = allocationsFromStored(row.allocations, row.amountCents);
+    if (current.length !== 1) {
+      throw new ValidationError("Amount changed; re-enter the allocations");
     }
+    patch.allocations = [{ ...current[0], amountCents: finalAmount }];
   }
 
-  if (row && (input.store !== undefined || input.occurredOn !== undefined)) {
+  if (input.store !== undefined || input.occurredOn !== undefined) {
     const newStore =
       input.store !== undefined
-        ? String(input.store).trim()
+        ? optionalText(input.store, "Store", MAX_STORE_LEN)
         : row.store || "";
     const newOccurredOn =
       input.occurredOn !== undefined
@@ -1551,22 +2006,25 @@ export async function updateExpenseRepo(
     patch.name = expenseDisplayName(newStore, newOccurredOn);
   }
 
-  await db.update(expensesTable).set(patch).where(eq(expensesTable.id, input.id));
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError("Nothing to update");
+  }
+  await db.update(expensesTable).set(patch).where(eq(expensesTable.id, id));
   return listExpensesRepo();
 }
 
 export async function deleteExpenseRepo(
   id: string
 ): Promise<{ expenses: Expense[]; removedReceiptFileId: string | null }> {
-  if (!id) throw new Error("id required");
+  const expenseId = requireId(id);
   const existing = await db
     .select({ receiptFileId: expensesTable.receiptFileId })
     .from(expensesTable)
-    .where(eq(expensesTable.id, id))
+    .where(eq(expensesTable.id, expenseId))
     .limit(1);
-  const removedReceiptFileId =
-    existing.length > 0 ? existing[0].receiptFileId : null;
-  await db.delete(expensesTable).where(eq(expensesTable.id, id));
+  if (existing.length === 0) throw new NotFoundError();
+  const removedReceiptFileId = existing[0].receiptFileId;
+  await db.delete(expensesTable).where(eq(expensesTable.id, expenseId));
   return {
     expenses: await listExpensesRepo(),
     removedReceiptFileId,
@@ -1696,19 +2154,14 @@ function cleanSharedFieldId(raw: unknown): string {
 }
 
 function sanitizeSharedAccountName(raw: unknown): string {
-  const name = String(raw ?? "").trim();
-  if (!name) throw new Error("Place / account name required");
-  if (name.length > MAX_SHARED_NAME_LEN) {
-    throw new Error("Place / account name is too long");
-  }
-  return name;
+  return requireText(raw, "Place / account name", MAX_SHARED_NAME_LEN);
 }
 
 function sanitizeSharedAccountFields(raw: unknown): SharedAccountField[] {
   if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) throw new Error("Fields must be an array");
+  if (!Array.isArray(raw)) throw new ValidationError("Fields must be an array");
   if (raw.length > MAX_SHARED_FIELDS) {
-    throw new Error(`Shared account can have at most ${MAX_SHARED_FIELDS} fields`);
+    throw new ValidationError(`Shared account can have at most ${MAX_SHARED_FIELDS} fields`);
   }
 
   const out: SharedAccountField[] = [];
@@ -1716,7 +2169,7 @@ function sanitizeSharedAccountFields(raw: unknown): SharedAccountField[] {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
     const kind = cleanSharedKind(o.kind);
-    const labelRaw = String(o.label ?? "").trim();
+    const labelRaw = stripControlChars(String(o.label ?? "")).trim();
     const label =
       labelRaw.slice(0, MAX_SHARED_LABEL_LEN) ||
       (kind === "image" ? "Image" : kind === "password" ? "Password" : "Field");
@@ -1724,13 +2177,13 @@ function sanitizeSharedAccountFields(raw: unknown): SharedAccountField[] {
 
     if (kind === "image") {
       if (value.length > MAX_SHARED_IMAGE_DATA_URL_LEN) {
-        throw new Error("Image is too large. Use a smaller photo.");
+        throw new ValidationError("Image is too large. Use a smaller photo.");
       }
       if (value && !/^data:image\/[a-z0-9.+-]+;base64,/i.test(value)) {
-        throw new Error("Images must be stored as image data URLs");
+        throw new ValidationError("Images must be stored as image data URLs");
       }
     } else if (value.length > MAX_SHARED_TEXT_VALUE_LEN) {
-      throw new Error("Field value is too long");
+      throw new ValidationError("Field value is too long");
     }
 
     const field: SharedAccountField = {
@@ -1739,8 +2192,8 @@ function sanitizeSharedAccountFields(raw: unknown): SharedAccountField[] {
       kind,
       value,
     };
-    const filename = String(o.filename ?? "").trim();
-    const mimeType = String(o.mimeType ?? "").trim();
+    const filename = stripControlChars(String(o.filename ?? "")).trim();
+    const mimeType = stripControlChars(String(o.mimeType ?? "")).trim();
     if (kind === "image") {
       if (filename) field.filename = filename.slice(0, 180);
       if (mimeType && mimeType.startsWith("image/")) {
@@ -1848,13 +2301,13 @@ export async function listSharedAccountsRepo(): Promise<SharedAccount[]> {
 }
 
 export async function getSharedAccountRepo(id: string): Promise<SharedAccount> {
-  if (!id) throw new Error("id required");
+  const accountId = requireId(id);
   const rows = await db
     .select()
     .from(sharedAccountsTable)
-    .where(eq(sharedAccountsTable.id, id))
+    .where(eq(sharedAccountsTable.id, accountId))
     .limit(1);
-  if (rows.length === 0) throw new Error("Shared account not found");
+  if (rows.length === 0) throw new NotFoundError();
   return rowToSharedAccount(rows[0]);
 }
 
@@ -1891,7 +2344,7 @@ export type UpdateSharedAccountInput = {
 export async function updateSharedAccountRepo(
   input: UpdateSharedAccountInput
 ): Promise<SharedAccount[]> {
-  if (!input.id) throw new Error("id required");
+  const id = requireId(input.id);
   const patch: Partial<typeof sharedAccountsTable.$inferInsert> = {};
   if (input.name !== undefined) {
     patch.name = sanitizeSharedAccountName(input.name);
@@ -1904,20 +2357,20 @@ export async function updateSharedAccountRepo(
   const updated = await db
     .update(sharedAccountsTable)
     .set({ ...patch, updatedAt: sql`NOW()` })
-    .where(eq(sharedAccountsTable.id, input.id))
+    .where(eq(sharedAccountsTable.id, id))
     .returning({ id: sharedAccountsTable.id });
-  if (updated.length === 0) throw new Error("Shared account not found");
+  if (updated.length === 0) throw new NotFoundError();
   return listSharedAccountsRepo();
 }
 
 export async function deleteSharedAccountRepo(
   id: string
 ): Promise<SharedAccount[]> {
-  if (!id) throw new Error("id required");
+  const accountId = requireId(id);
   const deleted = await db
     .delete(sharedAccountsTable)
-    .where(eq(sharedAccountsTable.id, id))
+    .where(eq(sharedAccountsTable.id, accountId))
     .returning({ id: sharedAccountsTable.id });
-  if (deleted.length === 0) throw new Error("Shared account not found");
+  if (deleted.length === 0) throw new NotFoundError();
   return listSharedAccountsRepo();
 }

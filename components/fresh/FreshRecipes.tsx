@@ -318,14 +318,17 @@ export default function FreshRecipes({
                           <button
                             type="button"
                             className="fresh-text-btn"
-                            disabled={markerBusy}
-                            onClick={() =>
-                              removeNoMealMarker(recipe, () =>
-                                openSlotEditor(weekStart, d)
-                              )
-                            }
+                            onClick={() => openSlotEditor(weekStart, d)}
                           >
                             Plan
+                          </button>
+                          <button
+                            type="button"
+                            className="fresh-text-btn"
+                            disabled={markerBusy}
+                            onClick={() => removeNoMealMarker(recipe)}
+                          >
+                            Clear
                           </button>
                         </div>
                       );
@@ -446,11 +449,10 @@ export default function FreshRecipes({
           onFavoritesChange={setFavorites}
           onClose={() => setEditing(null)}
           onResult={(next, msg) => {
-            if (next.length > 0) data.setRecipes(next);
+            if (next) data.setRecipes(next);
             data.showToast(msg);
           }}
           onError={(msg) => data.showToast("Error: " + msg)}
-          escapeDisabled={Boolean(addingToGrocery)}
           onOpenAddToGrocery={setAddingToGrocery}
         />
       ) : null}

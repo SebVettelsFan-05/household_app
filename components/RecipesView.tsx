@@ -259,11 +259,10 @@ export default function RecipesView({
           onFavoritesChange={setFavorites}
           onClose={() => setEditing(null)}
           onResult={(next, msg) => {
-            if (next.length > 0) onRecipesChange(next);
+            if (next) onRecipesChange(next);
             onToast(msg);
           }}
           onError={(msg) => onToast("Error: " + msg)}
-          escapeDisabled={Boolean(addingToGrocery)}
           onOpenAddToGrocery={setAddingToGrocery}
         />
       ) : null}

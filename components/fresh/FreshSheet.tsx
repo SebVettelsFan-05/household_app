@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { IconX } from "@/components/fresh/icons";
+import { useEscapeLayer } from "@/lib/escapeStack";
 
 export type SheetSize = "default" | "wide";
 
@@ -23,6 +24,9 @@ type Props = {
  * Dismissal goes through the backdrop element itself, which swallows the
  * click. A window-level click-away listener would let the same click also
  * activate whatever sits underneath the sheet.
+ *
+ * Escape and the focus trap go through the shared layer stack, so a lightbox
+ * opened from inside a sheet closes alone and leaves the form standing.
  */
 export default function FreshSheet({
   title,
@@ -32,13 +36,8 @@ export default function FreshSheet({
   actions,
   size = "default",
 }: Props) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useEscapeLayer(onClose, true, sheetRef);
 
   // The FAB sits in the same corner as a sheet's sticky action row, so
   // fresh.css hides it while a sheet is open (`.fresh:has(.fresh-sheet-bg)`).
@@ -50,6 +49,8 @@ export default function FreshSheet({
       }}
     >
       <div
+        ref={sheetRef}
+        tabIndex={-1}
         className={`fresh-sheet${size === "wide" ? " fresh-sheet-wide" : ""}`}
         role="dialog"
         aria-modal="true"

@@ -86,6 +86,27 @@ export function ensureTables(): Promise<void> {
       ALTER TABLE recipes
       ADD COLUMN IF NOT EXISTS no_meal BOOLEAN NOT NULL DEFAULT FALSE
     `);
+    // One meal per day: the slot check in the repo is a read-then-write, so
+    // two housemates saving the same slot at the same moment can both pass
+    // it. The index is the real guarantee.
+    //
+    // It is created only when the table is already clean. A production
+    // database carrying historical duplicates must still boot — it just
+    // doesn't get the constraint until someone clears them out.
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM recipes GROUP BY week_start, day HAVING count(*) > 1
+        ) THEN
+          RAISE NOTICE 'recipes has duplicate (week_start, day) rows; skipping recipes_week_day_meal_idx';
+        ELSE
+          CREATE UNIQUE INDEX IF NOT EXISTS recipes_week_day_meal_idx
+            ON recipes (week_start, day);
+        END IF;
+      END
+      $$;
+    `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS favorite_recipes (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

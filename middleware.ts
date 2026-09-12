@@ -8,7 +8,8 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
  *   - /login                     — the sign-in page itself
  *   - /api/auth/*                — password + Google OAuth endpoints
  *   - /_next/*                   — Next's static assets
- *   - anything with a "." in it  — favicon, icons, robots.txt, …
+ *   - anything with a "." in it  — favicon, icons, robots.txt, … but only
+ *                                  outside /api, which is always gated
  *
  * Everything else demands a valid `hh_session` cookie. Page requests get
  * redirected to /login (with ?next=<path>) so the user lands back where they
@@ -36,8 +37,12 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    // Everything EXCEPT auth endpoints, the login page, Next's asset pipeline,
-    // and any path that looks like a static file (contains a dot).
+    // Pages and assets: everything EXCEPT auth endpoints, the login page,
+    // Next's asset pipeline, and anything that looks like a static file
+    // (contains a dot).
     "/((?!api/auth/|login|_next/|.*\\..*).*)",
+    // The API separately, because API paths are allowed to contain dots —
+    // /api/shared-accounts/x.y must not slip past the dot exclusion above.
+    "/api/((?!auth/).*)",
   ],
 };

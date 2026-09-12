@@ -11,6 +11,7 @@ import PersonPicker from "@/components/PersonPicker";
 import ReceiptLightbox from "@/components/ReceiptLightbox";
 import { addExpense } from "@/lib/client";
 import { normalizeAllocations } from "@/lib/allocations";
+import { todayYmd } from "@/lib/dates";
 import {
   currentExpenseMonth,
   firstDayOfMonth,
@@ -27,14 +28,6 @@ type Props = {
   onError: (message: string) => void;
 };
 
-function todayYmd(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 const ACCEPT = "image/*,application/pdf";
 
 export default function AddExpenseForm({
@@ -43,10 +36,12 @@ export default function AddExpenseForm({
   onError,
 }: Props) {
   const currentMonthStart = firstDayOfMonth(currentExpenseMonth());
+  // The household calendar, not the browser's — see FreshAddExpenseSheet.
+  const today = todayYmd();
   const [store, setStore] = useState("");
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState("");
-  const [occurredOn, setOccurredOn] = useState<string>(todayYmd);
+  const [occurredOn, setOccurredOn] = useState<string>(today);
   const [description, setDescription] = useState("");
   const [receipt, setReceipt] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -192,6 +187,7 @@ export default function AddExpenseForm({
             id="e-date"
             type="date"
             min={currentMonthStart}
+            max={today}
             value={occurredOn}
             onChange={(e) => setOccurredOn(e.target.value)}
             onKeyDown={onEnter}

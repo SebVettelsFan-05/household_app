@@ -6,7 +6,11 @@ import EditGroceryModal from "@/components/EditGroceryModal";
 import FreshSheet from "@/components/fresh/FreshSheet";
 import { Avatar } from "@/components/fresh/people";
 import { IconCheck, IconPlus } from "@/components/fresh/icons";
-import { moveDoneGroceryToInventory, updateGrocery } from "@/lib/client";
+import {
+  moveDoneGroceryToInventory,
+  ROW_GONE_MESSAGE,
+  updateGrocery,
+} from "@/lib/client";
 import { buildColorLookup } from "@/lib/categoryColors";
 import { fmtQty } from "@/lib/format";
 import { findInventoryMatch } from "@/lib/inventoryMatch";
@@ -126,6 +130,7 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
     try {
       const res = await updateGrocery({ id: item.id, done: !item.done });
       data.setGrocery(res.grocery);
+      if (res.gone) data.showToast(ROW_GONE_MESSAGE);
     } catch (err) {
       data.showToast(
         "Error: " + (err instanceof Error ? err.message : String(err))

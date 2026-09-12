@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { extractRecipeFromHtml, parseServings } from "./recipeScraper";
+import {
+  extractRecipeFromHtml,
+  isPrivateAddress,
+  parseServings,
+  publicUrlBlockReason,
+  readCappedText,
+} from "./recipeScraper";
 
 const page = (body: string) =>
   `<!doctype html><html><head><title>Fallback Title - Some Site</title></head><body>${body}</body></html>`;
@@ -242,4 +248,205 @@ test("microdata recipeYield is picked up too", () => {
   const r = extractRecipeFromHtml(html);
   assert.equal(r?.source, "microdata");
   assert.equal(r?.servings, 3);
+});
+/* ---------- Outbound address guard (pure, no network) ---------- */
+
+test("loopback, private, link-local and unspecified IPv4 are blocked", () => {
+  for (const ip of [
+    "127.0.0.1",
+    "127.1.2.3",
+    "10.0.0.1",
+    "10.255.255.255",
+    "172.16.0.1",
+    "172.31.255.255",
+    "192.168.1.1",
+    "169.254.169.254",
+    "0.0.0.0",
+  ]) {
+    assert.equal(isPrivateAddress(ip), true, `${ip} should be blocked`);
+  }
+});
+
+test("carrier-grade NAT, multicast and reserved IPv4 are blocked", () => {
+  for (const ip of [
+    "100.64.0.1", // 100.64.0.0/10 CGNAT — reaches the ISP's own network
+    "100.127.255.255",
+    "224.0.0.1", // 224.0.0.0/4 multicast
+    "239.255.255.255",
+    "240.0.0.1", // 240.0.0.0/4 reserved
+    "255.255.255.255", // broadcast
+  ]) {
+    assert.equal(isPrivateAddress(ip), true, `${ip} should be blocked`);
+  }
+});
+
+test("the hosts either side of the CGNAT and multicast ranges still pass", () => {
+  for (const ip of ["100.63.255.255", "100.128.0.1", "223.255.255.255"]) {
+    assert.equal(isPrivateAddress(ip), false, `${ip} should be allowed`);
+  }
+});
+
+test("IPv6 multicast is blocked", () => {
+  for (const ip of ["ff00::1", "ff02::1", "ff05::1:3", "ffff::1"]) {
+    assert.equal(isPrivateAddress(ip), true, `${ip} should be blocked`);
+  }
+});
+
+test("6to4 is judged by the IPv4 address it wraps", () => {
+  // 2002:<v4>::/16 routes to the embedded address, so 2002:0a00:0001:: is
+  // just another spelling of 10.0.0.1.
+  assert.equal(isPrivateAddress("2002:0a00:0001::1"), true); // 10.0.0.1
+  assert.equal(isPrivateAddress("2002:7f00:0001::1"), true); // 127.0.0.1
+  assert.equal(isPrivateAddress("2002:a9fe:a9fe::1"), true); // 169.254.169.254
+  assert.equal(isPrivateAddress("2002:c0a8:0101::1"), true); // 192.168.1.1
+  assert.equal(isPrivateAddress("2002:0808:0808::1"), false); // 8.8.8.8
+});
+
+test("NAT64 is judged by the IPv4 address it wraps", () => {
+  assert.equal(isPrivateAddress("64:ff9b::10.0.0.1"), true);
+  assert.equal(isPrivateAddress("64:ff9b::127.0.0.1"), true);
+  assert.equal(isPrivateAddress("64:ff9b::169.254.169.254"), true);
+  assert.equal(isPrivateAddress("64:ff9b::a00:1"), true); // same, in hex
+  assert.equal(isPrivateAddress("64:ff9b::8.8.8.8"), false);
+});
+
+test("public IPv4 is allowed, including neighbours of private ranges", () => {
+  for (const ip of [
+    "8.8.8.8",
+    "93.184.216.34",
+    "9.255.255.255",
+    "11.0.0.1",
+    "172.15.255.255",
+    "172.32.0.1",
+    "192.167.255.255",
+    "192.169.0.1",
+    "169.253.255.255",
+  ]) {
+    assert.equal(isPrivateAddress(ip), false, `${ip} should be allowed`);
+  }
+});
+
+test("loopback, link-local and unique-local IPv6 are blocked", () => {
+  for (const ip of [
+    "::1",
+    "::",
+    "fe80::1",
+    "febf:ffff::1",
+    "fc00::1",
+    "fd12:3456:789a::1",
+  ]) {
+    assert.equal(isPrivateAddress(ip), true, `${ip} should be blocked`);
+  }
+});
+
+test("public IPv6 is allowed", () => {
+  for (const ip of ["2001:4860:4860::8888", "2606:2800:220:1:248:1893:25c8:1946"]) {
+    assert.equal(isPrivateAddress(ip), false, `${ip} should be allowed`);
+  }
+});
+
+test("IPv4 smuggled through an IPv6 literal is judged by the inner address", () => {
+  assert.equal(isPrivateAddress("::ffff:127.0.0.1"), true);
+  assert.equal(isPrivateAddress("::ffff:7f00:1"), true);
+  assert.equal(isPrivateAddress("::ffff:10.0.0.1"), true);
+  assert.equal(isPrivateAddress("::ffff:169.254.169.254"), true);
+  assert.equal(isPrivateAddress("::ffff:8.8.8.8"), false);
+});
+
+test("anything that is not a parseable address counts as blocked", () => {
+  for (const junk of ["", "not-an-ip", "999.1.1.1", "1.2.3", "::gggg"]) {
+    assert.equal(isPrivateAddress(junk), true, `${junk} should be blocked`);
+  }
+});
+
+test("a normal recipe URL passes the URL guard", () => {
+  assert.equal(publicUrlBlockReason("https://example.com/recipes/stew"), null);
+  assert.equal(publicUrlBlockReason("http://example.com:80/x"), null);
+  assert.equal(publicUrlBlockReason("https://web.archive.org/web/2id_/x"), null);
+});
+
+test("the URL guard refuses internal hosts and addresses", () => {
+  for (const url of [
+    "http://localhost/secret",
+    "http://anything.localhost/secret",
+    "http://LOCALHOST:80/secret",
+    "http://127.0.0.1:4321/secret",
+    "http://10.0.0.1/",
+    "http://192.168.0.5/admin",
+    "http://169.254.169.254/latest/meta-data/",
+    "http://[::1]/",
+    "http://[::ffff:127.0.0.1]/",
+  ]) {
+    assert.ok(publicUrlBlockReason(url), `${url} should be refused`);
+  }
+});
+
+test("the URL guard refuses non-web schemes and ports", () => {
+  assert.ok(publicUrlBlockReason("file:///etc/passwd"));
+  assert.ok(publicUrlBlockReason("ftp://example.com/x"));
+  assert.ok(publicUrlBlockReason("gopher://example.com/x"));
+  assert.ok(publicUrlBlockReason("http://example.com:22/"));
+  assert.ok(publicUrlBlockReason("http://example.com:5432/"));
+  assert.ok(publicUrlBlockReason("not a url at all"));
+});
+
+test("decimal and octal spellings of a loopback address are still refused", () => {
+  // WHATWG URL canonicalises these to 127.0.0.1 before the guard sees them.
+  assert.ok(publicUrlBlockReason("http://2130706433/"));
+  assert.ok(publicUrlBlockReason("http://0177.0.0.1/"));
+});
+
+/* ---------- response body cap ---------- */
+
+// A response whose body streams `chunk` forever until the reader gives up.
+function endlessResponse(chunk: Uint8Array, headers?: HeadersInit): Response {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (cancelled) return;
+      controller.enqueue(chunk);
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return new Response(body, { headers });
+}
+
+test("a body past the cap stops being read instead of buffering forever", async () => {
+  const chunk = new Uint8Array(64 * 1024).fill(0x61); // "a"
+  const text = await readCappedText(endlessResponse(chunk));
+  assert.equal(text.length, 4_000_000);
+  assert.equal(text.endsWith("a"), true);
+});
+
+test("a body under the cap is returned whole", async () => {
+  const res = new Response("<html>hi</html>");
+  assert.equal(await readCappedText(res), "<html>hi</html>");
+});
+
+test("a character split across two chunks survives the decode", async () => {
+  // "é" is two bytes; hand them over one chunk apart.
+  const bytes = new TextEncoder().encode("café au lait");
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, 4));
+      controller.enqueue(bytes.subarray(4));
+      controller.close();
+    },
+  });
+  assert.equal(await readCappedText(new Response(body)), "café au lait");
+});
+
+test("a declared charset is honoured, and a bogus one falls back to UTF-8", async () => {
+  const latin1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9]);
+  const asLatin1 = new Response(latin1, {
+    headers: { "content-type": "text/html; charset=iso-8859-1" },
+  });
+  assert.equal(await readCappedText(asLatin1), "café");
+
+  const bogus = new Response(new TextEncoder().encode("café"), {
+    headers: { "content-type": "text/html; charset=not-a-charset" },
+  });
+  assert.equal(await readCappedText(bogus), "café");
 });

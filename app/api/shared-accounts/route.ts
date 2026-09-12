@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureTables } from "@/lib/migrate";
+import { apiError } from "@/lib/errors";
 import {
   addSharedAccountRepo,
   deleteSharedAccountRepo,
@@ -9,17 +10,13 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function err(message: string, status = 500) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function GET() {
   try {
     await ensureTables();
     const accounts = await listSharedAccountsRepo();
     return NextResponse.json({ ok: true, accounts });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }
 
@@ -39,7 +36,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true, ...res });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }
 
@@ -54,7 +51,7 @@ export async function PATCH(req: NextRequest) {
     });
     return NextResponse.json({ ok: true, accounts });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }
 
@@ -65,6 +62,6 @@ export async function DELETE(req: NextRequest) {
     const accounts = await deleteSharedAccountRepo(id);
     return NextResponse.json({ ok: true, accounts });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e));
+    return apiError(e);
   }
 }

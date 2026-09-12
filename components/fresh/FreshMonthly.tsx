@@ -19,6 +19,7 @@ import {
   fmtTripDate,
   useMonthlyBreakdown,
   ymLabel,
+  type MonthlyBillsStore,
   type MonthStoreGroup,
 } from "@/lib/monthlyBills";
 import { fmtMoney } from "@/lib/money";
@@ -27,6 +28,8 @@ import { BUYERS, type Expense } from "@/lib/types";
 type Props = {
   expenses: Expense[];
   onToast: (msg: string) => void;
+  /** Owned by the Expenses screen so every reader sees one edit at once. */
+  bills: MonthlyBillsStore;
 };
 
 /**
@@ -36,8 +39,8 @@ type Props = {
  * Every number and every edit goes through `useMonthlyBreakdown`, the same
  * hook the classic breakdown renders, so the two screens cannot drift apart.
  */
-export default function FreshMonthly({ expenses, onToast }: Props) {
-  const view = useMonthlyBreakdown(expenses, onToast);
+export default function FreshMonthly({ expenses, onToast, bills }: Props) {
+  const view = useMonthlyBreakdown(expenses, onToast, bills);
   const [openStore, setOpenStore] = useState<string | null>(null);
   const [newFixedName, setNewFixedName] = useState("");
   const [newFixedAmount, setNewFixedAmount] = useState("");
@@ -180,11 +183,20 @@ export default function FreshMonthly({ expenses, onToast }: Props) {
       <section className="fresh-card">
         <div className="fresh-card-head">
           <h2 className="fresh-h2">Receipts</h2>
+          {/* The shared amount, so this header plus rent plus the bills add
+              up to "Total for <month>". The face value follows it whenever a
+              receipt carried a personal line. */}
           <span className="fresh-sub">
             {view.oneTime.count} expense{view.oneTime.count === 1 ? "" : "s"}{" "}
             <strong className="fresh-num">
-              {fmtMoney(view.oneTime.total)}
+              {fmtMoney(view.oneTime.sharedTotal)}
             </strong>
+            {view.oneTime.sharedTotal !== view.oneTime.total ? (
+              <span className="fresh-sub-faint">
+                {" "}
+                of {fmtMoney(view.oneTime.total)}
+              </span>
+            ) : null}
           </span>
         </div>
         {view.oneTime.rows.length === 0 ? (

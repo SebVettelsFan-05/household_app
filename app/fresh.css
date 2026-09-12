@@ -769,6 +769,11 @@ body:has(.fresh) {
   font-size: 14px;
   color: var(--ink-soft);
 }
+/* The quieter half of a two-part figure, e.g. "$461.69 of $484.11" on the
+   month's Receipts header when a receipt carried a personal line. */
+.fresh-sub-faint {
+  opacity: 0.7;
+}
 .fresh-head-link {
   display: inline-flex;
   align-items: center;
@@ -995,8 +1000,12 @@ button.fresh-row-main {
   font-size: 14px;
   color: var(--ink-soft);
 }
+/* Store names are typed by hand, so one long unbroken word ("Loblawsatthe
+   corner") has to break rather than push the row's amount off the screen. */
 .fresh-row-store {
   font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 /* "have 800g": the house already owns some of what this row asks for. It
    rides on the meta line rather than adding a third line to the row. */
@@ -1042,6 +1051,8 @@ button.fresh-row-main {
 .fresh-person-name {
   font-weight: 600;
   color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .fresh-avatar {
   flex: none;
