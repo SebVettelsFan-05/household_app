@@ -59,9 +59,11 @@ export async function POST(req: NextRequest) {
     await ensureTables();
     const { history, validCategories } = await loadCategoryContext();
 
+    // Same floor as the scraper: an unweighable line is 1 g, flagged
+    // approximate, never 0, so it can be pushed to the grocery list at once.
     const ingredients: RecipeIngredient[] = kept.map((p) => ({
       name: p.name,
-      quantity: p.quantity,
+      quantity: Math.max(1, p.quantity),
       category: guessCategoryOrFallback(p.name, history, validCategories),
     }));
 
@@ -76,7 +78,7 @@ export async function POST(req: NextRequest) {
             } left out`,
           }
         : {}),
-      hasApproximate: kept.some((p) => p.approximate),
+      hasApproximate: kept.some((p) => p.approximate || p.quantity <= 0),
     };
     return NextResponse.json(result);
   } catch (e) {
