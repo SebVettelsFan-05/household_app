@@ -240,7 +240,7 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
       </div>
 
       <div
-        className="fresh-seg fresh-seg-sm"
+        className="fresh-seg"
         role="group"
         aria-label="Sort inventory"
       >

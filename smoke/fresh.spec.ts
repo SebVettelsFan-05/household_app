@@ -555,6 +555,49 @@ test("Escape closes only the layer on top, with the form left standing", async (
   await expect(page.locator(".fresh-sheet")).toHaveCount(0);
 });
 
+test("using a favorite opens the recipe editor with it filled in", async () => {
+  const name = "Fresh Smoke Favorite Template";
+  const created = await (
+    await page.request.post("/api/favorites", {
+      data: { name, link: "https://example.com/template", servings: 4, ingredients: [] },
+    })
+  ).json();
+  const fav = created.favorites.find((f: { name: string }) => f.name === name);
+  try {
+    await gotoTab(page, "Recipes");
+    await page.getByRole("button", { name: "Favorites" }).first().click();
+    const row = page.locator(".favorite-row, .favorite-item, li", { hasText: name }).first();
+    await row.getByRole("button", { name: "Use" }).click();
+    // The Favorites sheet closes and the editor opens in the same commit;
+    // the sheet's history pop must not close the editor it just opened.
+    await expect(page.locator(".fresh-sheet, .modal").filter({ hasText: "Add recipe" })).toBeVisible();
+    await expect(page.locator("#r-name")).toHaveValue(name);
+    await page.waitForTimeout(400);
+    await expect(page.locator("#r-name")).toHaveValue(name);
+    // Back closes the editor and leaves the app on Recipes.
+    await page.goBack();
+    await expect(page.locator("#r-name")).toHaveCount(0);
+    await expect(page.locator(".fresh-title")).toHaveText("Recipes");
+  } finally {
+    if (fav) await page.request.delete(`/api/favorites/${encodeURIComponent(fav.id)}`);
+  }
+});
+
+test("Back closes a sheet even after another sheet closed itself", async () => {
+  await gotoTab(page, "Recipes");
+  const archive = page.getByRole("button", { name: "Archive" }).first();
+  await archive.click();
+  await expect(page.locator(".fresh-sheet")).toBeVisible();
+  await page.locator(".fresh-sheet").getByRole("button", { name: /close/i }).first().click();
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  // The self-initiated pop above must not swallow the next real Back.
+  await archive.click();
+  await expect(page.locator(".fresh-sheet")).toBeVisible();
+  await page.goBack();
+  await expect(page.locator(".fresh-sheet")).toHaveCount(0);
+  await expect(page.locator(".fresh-title")).toHaveText("Recipes");
+});
+
 test("closing a sheet hands the keyboard back to whatever opened it", async () => {
   await gotoTab(page, "Recipes");
   const opener = page.getByRole("button", { name: "Favorites" }).first();
