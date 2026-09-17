@@ -59,6 +59,19 @@ export default function EditExpenseModal({
 
   const totalCents = parseCents(amount) ?? 0;
 
+  // Names on the saved snapshot who are no longer household members. The
+  // server accepts them on an edit so a settled month keeps the people it
+  // was settled against (docs/SHARED_KITCHEN.md); the pre-flight check has
+  // to accept them too, or a receipt naming someone who moved out can never
+  // be edited again.
+  const departed = Array.from(
+    new Set(
+      (item.allocations ?? [])
+        .flatMap((a) => a.splitAmong)
+        .filter((name) => !(BUYERS as readonly string[]).includes(name))
+    )
+  );
+
   const hasExistingReceipt = Boolean(item.receiptUrl);
   const existingIsImage =
     hasExistingReceipt &&
@@ -115,7 +128,11 @@ export default function EditExpenseModal({
     // the people it was settled against.
     const payload = allocationsForSubmit(allocations, { keepSnapshots: true });
     try {
-      normalizeAllocations(payload, cents, { members: BUYERS, mealGroup });
+      normalizeAllocations(payload, cents, {
+        members: BUYERS,
+        mealGroup,
+        allowed: departed,
+      });
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
       return;

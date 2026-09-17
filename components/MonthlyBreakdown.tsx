@@ -223,11 +223,11 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                 cents={view.rent.alloc[name] || undefined}
                 onCommit={(cents) => view.rent.commitFor(name, cents)}
                 ariaLabel={`${name}'s rent share`}
-                disabled={monthLocked}
+                disabled={!canEditMonth}
               />
             </div>
           ))}
-          {view.rent.overridden && !isCurrentMonth && !monthLocked ? (
+          {view.rent.overridden && !isCurrentMonth && canEditMonth ? (
             <button
               type="button"
               className="cat-mgr-link"
@@ -268,7 +268,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                     </span>
                   ) : null}
                 </span>
-                {overridden && !isCurrentMonth && !monthLocked ? (
+                {overridden && !isCurrentMonth && canEditMonth ? (
                   <button
                     type="button"
                     className="monthly-remove"
@@ -279,7 +279,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                     ↺
                   </button>
                 ) : null}
-                {!r.protected && !monthLocked ? (
+                {!r.protected && canEditMonth ? (
                   <button
                     type="button"
                     className="monthly-remove"
@@ -294,7 +294,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                   cents={monthCents || undefined}
                   onCommit={(cents) => view.fixed.commitAmount(r.id, cents)}
                   ariaLabel={`${r.name} amount`}
-                  disabled={monthLocked}
+                  disabled={!canEditMonth}
                 />
               </div>
             );
@@ -348,7 +348,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                 key={line.id}
               >
                 <span className="monthly-row-name">{line.name}</span>
-                {!line.protected && !monthLocked ? (
+                {!line.protected && canEditMonth ? (
                   <button
                     type="button"
                     className="monthly-remove"
@@ -363,7 +363,7 @@ export default function MonthlyBreakdown({ expenses, onToast }: Props) {
                   cents={cents}
                   onCommit={(c) => view.variable.setAmount(line.name, c)}
                   ariaLabel={`${line.name} amount`}
-                  disabled={monthLocked}
+                  disabled={!canEditMonth}
                 />
               </div>
             );

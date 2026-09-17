@@ -14,7 +14,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { sharedCents } from "./allocations";
-import { getSetting, putSetting } from "./client";
+import {
+  getSetting,
+  getSettingWithVersion,
+  putSetting,
+  SettingConflictError,
+} from "./client";
 import { currentExpenseMonth, FIRST_EXPENSE_MONTH } from "./expenseMonths";
 import { computeSettlement, type Settlement, type SettlementBill } from "./settlement";
 import { parseCents } from "./money";
@@ -229,13 +234,77 @@ export function isRentTrivial(r: RentState): boolean {
   return r.schedule.length === 0 && Object.keys(r.overrides).length === 0;
 }
 
+function earlierMonth(a: string | undefined, b: string | undefined): string {
+  const x = a || FIRST_EXPENSE_MONTH;
+  const y = b || FIRST_EXPENSE_MONTH;
+  return x <= y ? x : y;
+}
+
 /**
- * Drops the legacy rent entry (moved to its own per-person block) and
- * ensures every protected mainstay (Internet, Rental insurance) is present
- * with the correct flags. Pure — safe to call on backend payloads too.
+ * Folds two fixed bills that share a name into one. The row that started
+ * first survives (a protected mainstay always survives) so the merged bill
+ * keeps the longest history, and the other row hands over its schedule
+ * entries and overrides. Where both booked the same month the survivor's
+ * amount wins, and a bill still running on either row keeps running.
+ */
+function mergeFixedPair(a: FixedRecurring, b: FixedRecurring): FixedRecurring {
+  const aStartsFirst =
+    (a.activeFrom || FIRST_EXPENSE_MONTH) <=
+    (b.activeFrom || FIRST_EXPENSE_MONTH);
+  // A protected mainstay always survives: its id is what the loader hangs
+  // the household's conventions (Internet is fronted by Arthur) on.
+  const keepA = a.protected ? true : b.protected ? false : aStartsFirst;
+  const keep = keepA ? a : b;
+  const drop = keepA ? b : a;
+  const schedule = [...keep.schedule];
+  for (const entry of drop.schedule) {
+    if (!schedule.some((s) => s.from === entry.from)) schedule.push(entry);
+  }
+  schedule.sort((x, y) => x.from.localeCompare(y.from));
+  return {
+    ...keep,
+    activeFrom: earlierMonth(keep.activeFrom, drop.activeFrom),
+    inactiveFrom:
+      keep.inactiveFrom && drop.inactiveFrom
+        ? keep.inactiveFrom > drop.inactiveFrom
+          ? keep.inactiveFrom
+          : drop.inactiveFrom
+        : undefined,
+    schedule,
+    overrides: { ...drop.overrides, ...keep.overrides },
+  };
+}
+
+/**
+ * Collapses fixed bills that share a name, case-insensitively, into one row.
+ * Two rows with the same name are two charges every month they overlap, and
+ * the editor only ever showed the months' own rows, so a list that already
+ * went out with a duplicate heals itself the next time it is read.
+ */
+export function dedupeFixed(arr: FixedRecurring[]): FixedRecurring[] {
+  const out: FixedRecurring[] = [];
+  const indexByName = new Map<string, number>();
+  for (const row of arr) {
+    const key = row.name.trim().toLowerCase();
+    const at = indexByName.get(key);
+    if (at === undefined) {
+      indexByName.set(key, out.length);
+      out.push(row);
+    } else {
+      out[at] = mergeFixedPair(out[at], row);
+    }
+  }
+  return out;
+}
+
+/**
+ * Drops the legacy rent entry (moved to its own per-person block), collapses
+ * same-named duplicates and ensures every protected mainstay (Internet,
+ * Rental insurance) is present with the correct flags. Pure — safe to call
+ * on backend payloads too.
  */
 export function mergeProtected(arr: FixedRecurring[]): FixedRecurring[] {
-  const next = arr.filter((r) => r.id !== LEGACY_RENT_ID);
+  const next = dedupeFixed(arr.filter((r) => r.id !== LEGACY_RENT_ID));
   for (const p of PROTECTED_FIXED) {
     const existing = next.find((r) => r.id === p.id);
     if (!existing) {
@@ -368,20 +437,146 @@ export function normalizeVariableState(state: VariableState): VariableState {
     seen.add(key);
   }
 
-  for (const bucket of Object.values(state.amounts)) {
-    for (const name of Object.keys(bucket)) {
+  // Amounts recorded under a name that has no line of its own: give them a
+  // line back, starting at the first month that actually has an amount —
+  // never at FIRST_EXPENSE_MONTH, which would charge the household for
+  // months the utility was never billed in. A line the user retired is
+  // already in `seen` with its `inactiveFrom` intact, so amounts left in
+  // later months can never bring it back.
+  const revived = new Map<string, { name: string; from: string }>();
+  for (const [month, bucket] of Object.entries(state.amounts)) {
+    for (const [name, cents] of Object.entries(bucket)) {
+      if (!cents || cents <= 0) continue;
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
-      lines.push({
-        id: makeRecurringId("variable", name),
-        name,
-        activeFrom: FIRST_EXPENSE_MONTH,
-      });
-      seen.add(key);
+      const found = revived.get(key);
+      if (!found || month < found.from) revived.set(key, { name, from: month });
     }
+  }
+  for (const { name, from } of revived.values()) {
+    lines.push({
+      id: makeRecurringId("variable", name),
+      name,
+      activeFrom: from,
+    });
   }
 
   return { lines, amounts: state.amounts };
+}
+
+/**
+ * Why `name` cannot be added to either recurring list, or null when it is
+ * free. Both lists are checked whichever one is being added to, and every
+ * month is checked, not just the one on screen: two rows with the same name
+ * are two charges in every month they overlap, and a row starting in a later
+ * month is invisible on this month's editor.
+ */
+/** A bill or line that stopped at or before `month` is free to come back. */
+function retiredBy(entry: { inactiveFrom?: string }, month: string): boolean {
+  return Boolean(entry.inactiveFrom && entry.inactiveFrom <= month);
+}
+
+/** The same-named fixed bill that is still running as of `month`, if any. */
+export function liveFixedNamed(
+  name: string,
+  fixed: readonly FixedRecurring[],
+  month: string
+): FixedRecurring | undefined {
+  const key = name.trim().toLowerCase();
+  return fixed.find((r) => r.name.trim().toLowerCase() === key && !retiredBy(r, month));
+}
+
+/** The same-named fixed bill that has been retired as of `month`, if any. */
+export function retiredFixedNamed(
+  name: string,
+  fixed: readonly FixedRecurring[],
+  month: string
+): FixedRecurring | undefined {
+  const key = name.trim().toLowerCase();
+  return fixed.find((r) => r.name.trim().toLowerCase() === key && retiredBy(r, month));
+}
+
+export function retiredVariableNamed(
+  name: string,
+  variable: VariableState,
+  month: string
+): VariableRecurring | undefined {
+  const key = name.trim().toLowerCase();
+  return variable.lines.find((l) => l.name.trim().toLowerCase() === key && retiredBy(l, month));
+}
+
+/**
+ * Why `name` cannot be added as a new bill in `month`: it already names a
+ * fixed bill or a utility that is still running (in any month, since bill
+ * names key the amounts). A retired one is not a conflict; adding it back
+ * reactivates it instead.
+ */
+export function billNameConflict(
+  name: string,
+  fixed: readonly FixedRecurring[],
+  variable: VariableState,
+  month: string
+): string | null {
+  const key = name.trim().toLowerCase();
+  if (!key) return null;
+  const bill = liveFixedNamed(name, fixed, month);
+  if (bill) {
+    return `${bill.name} is already a fixed bill, from ${ymLabel(
+      bill.activeFrom || FIRST_EXPENSE_MONTH
+    )}`;
+  }
+  const line = variable.lines.find(
+    (l) => l.name.trim().toLowerCase() === key && !retiredBy(l, month)
+  );
+  if (line) {
+    return `${line.name} is already a variable utility, from ${ymLabel(
+      line.activeFrom || FIRST_EXPENSE_MONTH
+    )}`;
+  }
+  return null;
+}
+
+/**
+ * "Stop from this month forward" for one utility line: its amounts go from
+ * this month and every later month, and the line itself is retired when
+ * earlier months recorded amounts for it or deleted when they did not.
+ *
+ * Dropping those amounts is the whole point. They are keyed by name, so any
+ * left behind hand the line straight back (see `normalizeVariableState`) and
+ * the household keeps paying for a utility it no longer has.
+ */
+export function stopVariableFromMonth(
+  state: VariableState,
+  id: string,
+  month: string
+): VariableState {
+  const line = state.lines.find((l) => l.id === id);
+  if (!line || line.protected) return state;
+  const key = line.name.trim().toLowerCase();
+  const amounts: VariableMap = {};
+  let earlier = false;
+  for (const [m, bucket] of Object.entries(state.amounts)) {
+    if (m < month) {
+      amounts[m] = bucket;
+      for (const [n, cents] of Object.entries(bucket)) {
+        if (n.trim().toLowerCase() === key && cents > 0) earlier = true;
+      }
+      continue;
+    }
+    const kept = Object.fromEntries(
+      Object.entries(bucket).filter(([n]) => n.trim().toLowerCase() !== key)
+    );
+    if (Object.keys(kept).length > 0) amounts[m] = kept;
+  }
+  if (!earlier) {
+    return { lines: state.lines.filter((l) => l.id !== id), amounts };
+  }
+  return {
+    lines: state.lines.map((l) =>
+      l.id === id ? { ...l, inactiveFrom: month } : l
+    ),
+    amounts,
+  };
 }
 
 export function parseVariableState(raw: unknown): VariableState {
@@ -416,29 +611,32 @@ export function loadVariable(): VariableState {
   }
 }
 
+export function parseRentState(raw: unknown): RentState {
+  if (!raw || typeof raw !== "object") return { schedule: [], overrides: {} };
+  const r = raw as { schedule?: unknown; overrides?: unknown };
+  const schedule = Array.isArray(r.schedule)
+    ? (r.schedule as RentAllocSchedule[]).filter(
+        (s) =>
+          s &&
+          typeof s.from === "string" &&
+          s.alloc &&
+          typeof s.alloc === "object"
+      )
+    : [];
+  const overrides =
+    r.overrides && typeof r.overrides === "object"
+      ? (r.overrides as Record<string, RentAlloc>)
+      : {};
+  return { schedule, overrides };
+}
+
 export function loadRent(): RentState {
   const empty: RentState = { schedule: [], overrides: {} };
   if (typeof window === "undefined") return empty;
   try {
     const raw = window.localStorage.getItem(LS_RENT_V1);
     if (!raw) return empty;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return empty;
-    const r = parsed as { schedule?: unknown; overrides?: unknown };
-    const schedule = Array.isArray(r.schedule)
-      ? (r.schedule as RentAllocSchedule[]).filter(
-          (s) =>
-            s &&
-            typeof s.from === "string" &&
-            s.alloc &&
-            typeof s.alloc === "object"
-        )
-      : [];
-    const overrides =
-      r.overrides && typeof r.overrides === "object"
-        ? (r.overrides as Record<string, RentAlloc>)
-        : {};
-    return { schedule, overrides };
+    return parseRentState(JSON.parse(raw) as unknown);
   } catch {
     return empty;
   }
@@ -690,6 +888,13 @@ export function useMonthlyBills(
   // through a ref rather than closed over.
   const toastRef = useRef(onToast);
   toastRef.current = onToast;
+  // The version each key was last seen at. Sent back on every push, so a
+  // save landing on top of another housemate's comes back as a conflict
+  // instead of quietly erasing it.
+  const versionRef = useRef<Record<string, string | null>>({});
+  // One in-flight write per key, so each save sends the version the one
+  // before it produced.
+  const queueRef = useRef<Record<string, Promise<void>>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -708,17 +913,29 @@ export function useMonthlyBills(
     }
 
     function migrate(key: string, value: unknown, label: string) {
-      putSetting(key, value).catch((err) => {
-        console.warn(`[settings] migrate ${label} failed`, err);
-      });
+      // No version check: this is the first write the row has ever had.
+      putSetting(key, value)
+        .then((res) => {
+          if (res.updatedAt) versionRef.current[key] = res.updatedAt;
+        })
+        .catch((err) => {
+          console.warn(`[settings] migrate ${label} failed`, err);
+        });
     }
 
     Promise.all([
-      getSetting<FixedRecurring[]>(BE_FIXED).catch(() => null),
-      getSetting<unknown>(BE_VARIABLE).catch(() => null),
-      getSetting<RentState>(BE_RENT).catch(() => null),
-    ]).then(([beFixed, beVariable, beRent]) => {
+      getSettingWithVersion<FixedRecurring[]>(BE_FIXED).catch(() => null),
+      getSettingWithVersion<unknown>(BE_VARIABLE).catch(() => null),
+      getSettingWithVersion<RentState>(BE_RENT).catch(() => null),
+    ]).then(([readFixed, readVariable, readRent]) => {
       if (cancelled) return;
+
+      versionRef.current[BE_FIXED] = readFixed?.updatedAt ?? null;
+      versionRef.current[BE_VARIABLE] = readVariable?.updatedAt ?? null;
+      versionRef.current[BE_RENT] = readRent?.updatedAt ?? null;
+      const beFixed = readFixed?.value ?? null;
+      const beVariable = readVariable?.value ?? null;
+      const beRent = readRent?.value ?? null;
 
       const parsedFixed = Array.isArray(beFixed)
         ? beFixed
@@ -777,20 +994,78 @@ export function useMonthlyBills(
     };
   }, []);
 
-  function push(key: string, value: unknown, label: string) {
-    if (!hydratedRef.current) return; // mount-time setState, not a real edit
-    putSetting(key, value).catch((err) => {
-      console.warn(`[settings] push ${key} failed`, err);
-      toastRef.current(`Couldn't sync ${label}, saved locally only`);
-    });
-  }
-
   function cache(key: string, value: unknown, failure: string) {
     try {
       window.localStorage.setItem(key, JSON.stringify(value));
     } catch {
       toastRef.current(failure);
     }
+  }
+
+  /**
+   * A 409: somebody else saved this key while this device was editing it.
+   * Their row is the truth — it becomes this device's state, cache and
+   * version — and the toast says whose numbers are on screen now, instead of
+   * leaving an edit the server refused looking saved.
+   */
+  function adoptServerValue(key: string, conflict: SettingConflictError) {
+    versionRef.current[key] = conflict.updatedAt;
+    if (key === BE_FIXED) {
+      const parsed = Array.isArray(conflict.value)
+        ? conflict.value
+            .map(parseFixedEntry)
+            .filter((x): x is FixedRecurring => x !== null)
+        : [];
+      const merged = sortFixed(mergeProtected(parsed));
+      setFixed(merged);
+      cache(LS_FIXED_V3, merged, "Couldn't save recurring bills");
+    } else if (key === BE_VARIABLE) {
+      const parsed =
+        conflict.value && typeof conflict.value === "object"
+          ? parseVariableState(conflict.value)
+          : emptyVariable();
+      setVariable(parsed);
+      cache(LS_VARIABLE_V3, parsed, "Couldn't save utility amounts");
+    } else if (key === BE_RENT) {
+      const parsed = parseRentState(conflict.value);
+      setRent(parsed);
+      cache(LS_RENT_V1, parsed, "Couldn't save rent allocations");
+    }
+    toastRef.current("Someone else changed the bills; showing their version");
+  }
+
+  async function write(key: string, value: unknown) {
+    const res = await putSetting(key, value, versionRef.current[key] ?? null);
+    if (res.updatedAt) {
+      versionRef.current[key] = res.updatedAt;
+      return;
+    }
+    // The server reported no version. Read it back, or the next push would
+    // check against the version this one just replaced and conflict with
+    // itself. (A server that stamps no version at all leaves it null, which
+    // means "no check" — the old last-write-wins behaviour.)
+    const read = await getSettingWithVersion(key).catch(() => null);
+    if (read) versionRef.current[key] = read.updatedAt;
+  }
+
+  function push(key: string, value: unknown, label: string) {
+    if (!hydratedRef.current) return; // mount-time setState, not a real edit
+    // One write per key at a time. Two edits in quick succession — an amount
+    // typed and a row removed inside one round trip — would otherwise both
+    // carry the version from before the first of them, and the second would
+    // come back as a conflict with this device's own save.
+    const queue = queueRef.current[key] ?? Promise.resolve();
+    queueRef.current[key] = queue
+      .catch(() => {})
+      .then(() => write(key, value))
+      .catch((err) => {
+        if (err instanceof SettingConflictError) {
+          adoptServerValue(key, err);
+          return;
+        }
+        console.warn(`[settings] push ${key} failed`, err);
+        toastRef.current(`Couldn't sync ${label}, saved locally only`);
+      });
   }
 
   return {
@@ -912,7 +1187,11 @@ export function useMonthlyBreakdown(
   const currentMonth = currentExpenseMonth();
   const isCurrentMonth = month === currentMonth;
   const monthLocked = month < currentMonth;
-  const canEditMonth = !monthLocked;
+  // Nothing is editable until the shared bills have been read. An edit made
+  // in that window is written to this device only — the store has no version
+  // to save against yet, and the hydration that follows overwrites it — so
+  // the numbers show (from the cache) but the fields wait.
+  const canEditMonth = !monthLocked && !store.loading;
   const canGoPrev = month > FIRST_EXPENSE_MONTH;
 
   const { fixed, variable, rent, persistFixed, persistVariable, persistRent } =
@@ -1037,14 +1316,14 @@ export function useMonthlyBreakdown(
       total: rentTotal,
       overridden: rentOverridden,
       commitFor(name, cents) {
-        if (monthLocked) return;
+        if (!canEditMonth) return;
         const nextAlloc: RentAlloc = { ...monthRent };
         if (cents === null || cents <= 0) delete nextAlloc[name];
         else nextAlloc[name] = cents;
         persistRent(setRentAlloc(rent, month, currentMonth, nextAlloc));
       },
       clearOverride() {
-        if (monthLocked || !rentOverridden) return;
+        if (!canEditMonth || !rentOverridden) return;
         persistRent(clearRentOverride(rent, month));
       },
     },
@@ -1055,7 +1334,7 @@ export function useMonthlyBreakdown(
       amountFor: (bill) => amountForMonth(bill, month),
       isOverridden: (bill) => hasOverride(bill, month),
       commitAmount(id, cents) {
-        if (monthLocked) return;
+        if (!canEditMonth) return;
         // A negative amount is dropped by the settlement math but would still
         // be counted in this section's header, so the parts would stop adding
         // up to the total. Refuse it instead.
@@ -1070,7 +1349,7 @@ export function useMonthlyBreakdown(
         );
       },
       clearOverride(id) {
-        if (monthLocked) return;
+        if (!canEditMonth) return;
         persistFixed(
           fixed.map((r) => (r.id === id ? clearBillOverride(r, month) : r))
         );
@@ -1087,11 +1366,29 @@ export function useMonthlyBreakdown(
           onToast("Amount must be greater than $0");
           return false;
         }
-        if (
-          fixedForMonth.some((r) => r.name.toLowerCase() === name.toLowerCase())
-        ) {
-          onToast(name + " is already active this month");
+        const conflict = billNameConflict(name, fixed, variable, month);
+        if (conflict) {
+          onToast(conflict);
           return false;
+        }
+        // Re-adding a bill that was stopped brings the same bill back from
+        // this month, keeping its history, rather than creating a twin.
+        const retired = retiredFixedNamed(name, fixed, month);
+        if (retired) {
+          persistFixed(
+            fixed.map((r) =>
+              r.id === retired.id
+                ? {
+                    ...r,
+                    inactiveFrom: undefined,
+                    schedule: [...r.schedule.filter((s) => s.from !== month), { from: month, cents }].sort(
+                      (x, y) => x.from.localeCompare(y.from)
+                    ),
+                  }
+                : r
+            )
+          );
+          return true;
         }
         persistFixed([
           ...fixed,
@@ -1126,7 +1423,7 @@ export function useMonthlyBreakdown(
       total: variableTotal,
       amountFor: (line) => monthVariable[line.name],
       setAmount(name, cents) {
-        if (monthLocked) return;
+        if (!canEditMonth) return;
         if (cents !== null && cents < 0) {
           onToast("Amount must be greater than $0");
           return;
@@ -1146,14 +1443,12 @@ export function useMonthlyBreakdown(
           onToast("Name required");
           return false;
         }
-        if (
-          variableLines.some(
-            (line) => line.name.toLowerCase() === name.toLowerCase()
-          )
-        ) {
-          onToast(name + " is already active this month");
+        const conflict = billNameConflict(name, fixed, variable, month);
+        if (conflict) {
+          onToast(conflict);
           return false;
         }
+        const retiredLine = retiredVariableNamed(name, variable, month);
         let nextAmounts = variable.amounts;
         const trimmed = amountText.trim();
         if (trimmed) {
@@ -1168,10 +1463,14 @@ export function useMonthlyBreakdown(
           };
         }
         persistVariable({
-          lines: [
-            ...variable.lines,
-            { id: makeRecurringId("variable", name), name, activeFrom: month },
-          ],
+          lines: retiredLine
+            ? variable.lines.map((l) =>
+                l.id === retiredLine.id ? { ...l, inactiveFrom: undefined } : l
+              )
+            : [
+                ...variable.lines,
+                { id: makeRecurringId("variable", name), name, activeFrom: month },
+              ],
           amounts: nextAmounts,
         });
         return true;
@@ -1180,19 +1479,7 @@ export function useMonthlyBreakdown(
         if (!canEditMonth) return;
         const line = variable.lines.find((r) => r.id === id);
         if (!line || line.protected) return;
-        if ((line.activeFrom || FIRST_EXPENSE_MONTH) >= month) {
-          persistVariable({
-            ...variable,
-            lines: variable.lines.filter((r) => r.id !== id),
-          });
-          return;
-        }
-        persistVariable({
-          ...variable,
-          lines: variable.lines.map((r) =>
-            r.id === id ? { ...r, inactiveFrom: month } : r
-          ),
-        });
+        persistVariable(stopVariableFromMonth(variable, id, month));
       },
     },
 

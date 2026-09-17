@@ -180,6 +180,12 @@ type FixedSetting = {
 
 function validateRecurringFixed(value: unknown): FixedSetting[] {
   if (!Array.isArray(value)) fail("recurring_fixed", "must be an array");
+  // Two bills with the same name are indistinguishable everywhere the
+  // household reads them — the bills list, the month's breakdown, the
+  // settlement's bill total — so the amount gets charged twice and neither
+  // row can be told from the other to fix it. Compared case-insensitively
+  // because that is how the bill lists are merged on read.
+  const seenNames = new Set<string>();
   return value.map((entry, i) => {
     const field = `recurring_fixed[${i}]`;
     const e = asObject(entry, field);
@@ -198,6 +204,11 @@ function validateRecurringFixed(value: unknown): FixedSetting[] {
     if (e.inactiveFrom !== undefined) {
       row.inactiveFrom = asMonthKey(e.inactiveFrom, `${field}.inactiveFrom`);
     }
+    const key = row.name.toLowerCase();
+    if (seenNames.has(key)) {
+      fail(`${field}.name`, `duplicates another bill named "${row.name}"`);
+    }
+    seenNames.add(key);
     const paidBy = asPayer(e.paidBy, `${field}.paidBy`);
     if (paidBy) row.paidBy = paidBy;
     return row;

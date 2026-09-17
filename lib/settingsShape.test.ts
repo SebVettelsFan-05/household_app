@@ -170,6 +170,28 @@ test("recurring_fixed rejects a missing id", () => {
   );
 });
 
+test("recurring_fixed rejects two bills with the same name", () => {
+  const bills = (second: string) => [
+    { id: "a", name: "Internet", schedule: [], overrides: {} },
+    { id: "b", name: second, schedule: [], overrides: {} },
+  ];
+  // Both rows would be charged, and neither could be told from the other.
+  rejects("recurring_fixed", bills("Internet"), "recurring_fixed[1].name");
+  // Case and surrounding space don't make it a different bill.
+  rejects("recurring_fixed", bills("internet"), "duplicates another bill");
+  rejects("recurring_fixed", bills("  INTERNET  "), "duplicates another bill");
+  // The message names the bill so the user can find it.
+  rejects("recurring_fixed", bills("internet"), '"internet"');
+});
+
+test("recurring_fixed keeps two bills whose names differ", () => {
+  const value = [
+    { id: "a", name: "Internet", schedule: [], overrides: {} },
+    { id: "b", name: "Internet 2", schedule: [], overrides: {} },
+  ];
+  assert.deepEqual(validateSettingValue("recurring_fixed", value), value);
+});
+
 /* ---------- recurring_variable ---------- */
 
 test("recurring_variable round-trips a well-formed value", () => {
