@@ -46,7 +46,7 @@
   /* Geometry */
   --r-card: 18px;
   --r-control: 14px;
-  --top-h: 64px;
+  --top-h: 60px;
   --nav-h: 56px;
   /* The FAB rides above the nav, and the last content block has to clear
      both. Named here so the three rules that need the number agree. */
@@ -200,7 +200,7 @@ body:has(.fresh) {
 }
 .fresh .modal h2,
 .fresh .add-card h2 {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 650;
 }
 .fresh .add-card,
@@ -235,6 +235,7 @@ body:has(.fresh) {
   font-size: 13px;
   font-weight: 600;
   color: var(--ink-soft);
+  margin-bottom: 4px;
 }
 
 .fresh .field input[type="text"],
@@ -289,8 +290,22 @@ body:has(.fresh) {
   border-width: 1.5px;
 }
 .fresh .alloc-chip {
-  min-height: 36px;
+  min-height: 34px;
   font-size: 14px;
+}
+/* Classic category pills sit next to fresh chips inside the sheets; give
+   them the same height and weight instead of the classic 46px card look. */
+.fresh .cat-pill {
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--card);
+}
+.fresh .cat-pills {
+  gap: 6px;
 }
 .fresh .alloc-chip.active,
 .fresh .filter-pill.active,
@@ -349,10 +364,10 @@ body:has(.fresh) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  min-height: 120px;
-  padding: 20px 14px;
+  min-height: 96px;
+  padding: 14px;
   border: 2px dashed color-mix(in srgb, var(--section) 45%, var(--hairline));
   border-radius: var(--r-card);
   background: color-mix(in srgb, var(--section) 5%, var(--card));
@@ -363,8 +378,8 @@ body:has(.fresh) {
 }
 .fresh .receipt-picker-cta::before {
   content: "";
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   background: currentColor;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5h3.5L8.2 6h7.6l1.7 2.5H21V19H3V8.5Z'/%3E%3Ccircle cx='12' cy='13.5' r='3.5'/%3E%3C/svg%3E")
     center / contain no-repeat;
@@ -459,14 +474,14 @@ body:has(.fresh) {
   justify-content: space-between;
   gap: 12px;
   min-height: var(--top-h);
-  padding: 8px 16px;
+  padding: 6px 16px;
   background: color-mix(in srgb, var(--paper) 88%, transparent);
   backdrop-filter: blur(12px);
   border-bottom: 1.5px solid var(--hairline);
 }
 .fresh-title {
   margin: 0;
-  font-size: 30px;
+  font-size: 28px;
   line-height: 1.05;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -543,11 +558,11 @@ body:has(.fresh) {
   margin: 0 auto;
   /* Clear the tab bar, the FAB above it, and a 16px breath under the last
      block, plus whatever iOS reserves for its home indicator. */
-  padding: 20px 16px
+  padding: 16px 16px
     calc(var(--nav-h) + var(--fab-h) + 16px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 /* Screens without an action button (Home, More) only need to clear the
    tab bar. */
@@ -639,13 +654,13 @@ body:has(.fresh) {
   .fresh-rail {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     position: sticky;
     top: var(--top-h);
     align-self: start;
     max-height: calc(100vh - var(--top-h));
     overflow-y: auto;
-    padding: 20px 14px;
+    padding: 16px 14px;
     border-right: 1.5px solid var(--hairline);
   }
   /* Two-column screens use the whole content area; every other screen
@@ -653,7 +668,7 @@ body:has(.fresh) {
      rail, is exactly as wide on every section. */
   .fresh-main {
     max-width: none;
-    padding: 28px 32px 72px;
+    padding: 20px 32px 64px;
   }
   .fresh:not([data-section="expenses"]):not([data-section="recipes"])
     .fresh-main {
@@ -666,15 +681,15 @@ body:has(.fresh) {
 
 @media (max-width: 719px) {
   .fresh {
-    --top-h: 56px;
+    --top-h: 52px;
   }
   .fresh-title {
-    font-size: 26px;
+    font-size: 24px;
   }
   /* The action pill, not `min-height`, is what set the old bar's height, so
      the padding around it comes down with the token. */
   .fresh-top {
-    padding: 4px 16px;
+    padding: 2px 16px;
   }
   .fresh-top-actions {
     padding: 2px;
@@ -692,7 +707,8 @@ body:has(.fresh) {
   color: var(--ink-soft);
   font-size: 15px;
   font-weight: 600;
-  padding: 11px 14px;
+  min-height: 40px;
+  padding: 0 14px;
   border-radius: 999px;
   cursor: pointer;
 }
@@ -711,7 +727,7 @@ body:has(.fresh) {
 .fresh-rail-sep {
   height: 1.5px;
   background: var(--hairline);
-  margin: 14px 10px;
+  margin: 10px 10px;
 }
 .fresh-rail-count {
   min-width: 22px;
@@ -740,6 +756,14 @@ body:has(.fresh) {
   outline: 2px solid var(--section);
   outline-offset: 2px;
 }
+/* The check's tap box is larger than its drawn circle; ring the circle. */
+.fresh-check:focus-visible {
+  outline: none;
+}
+.fresh-check:focus-visible::before {
+  outline: 2px solid var(--section);
+  outline-offset: 2px;
+}
 
 /* ---------------------------------------------------------------- *
  * Primitives
@@ -750,23 +774,23 @@ body:has(.fresh) {
   border: 1.5px solid var(--hairline);
   border-radius: var(--r-card);
   box-shadow: var(--card-shadow);
-  padding: 16px;
+  padding: 14px;
 }
 .fresh-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .fresh-h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: 17px;
   font-weight: 650;
   color: var(--ink);
 }
 .fresh-sub {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink-soft);
 }
 /* The quieter half of a two-part figure, e.g. "$461.69 of $484.11" on the
@@ -778,11 +802,12 @@ body:has(.fresh) {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  min-height: 34px;
   background: none;
   border: none;
-  padding: 6px 0;
+  padding: 0;
   color: var(--section);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -795,7 +820,7 @@ body:has(.fresh) {
   align-items: center;
   justify-content: space-between;
   gap: 8px 12px;
-  margin: 0 0 6px;
+  margin: 0 0 2px;
 }
 .fresh-num {
   font-variant-numeric: tabular-nums;
@@ -806,10 +831,10 @@ body:has(.fresh) {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 48px;
+  min-height: 40px;
   border: 1.5px solid var(--ink);
   border-radius: 999px;
-  padding: 0 20px;
+  padding: 0 18px;
   font-size: 16px;
   font-weight: 700;
   color: var(--ink);
@@ -820,8 +845,8 @@ body:has(.fresh) {
   background: var(--sunk);
 }
 .fresh-btn-small {
-  min-height: 38px;
-  padding: 0 14px;
+  min-height: 34px;
+  padding: 0 12px;
   font-size: 14px;
 }
 .fresh-btn-primary {
@@ -847,14 +872,14 @@ body:has(.fresh) {
 .fresh-btn-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 .fresh-text-btn {
   background: none;
   border: none;
-  padding: 10px 6px;
+  padding: 8px 6px;
   color: var(--ink-soft);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -868,20 +893,20 @@ body:has(.fresh) {
 .fresh-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 .fresh-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-height: 36px;
+  gap: 6px;
+  min-height: 34px;
   border: 1.5px solid var(--hairline);
   border-radius: 999px;
   background: var(--card);
   color: var(--ink);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
-  padding: 0 16px;
+  padding: 0 12px;
   cursor: pointer;
 }
 .fresh-chip:hover {
@@ -902,7 +927,7 @@ body:has(.fresh) {
 .fresh-seg {
   display: inline-flex;
   gap: 4px;
-  padding: 4px;
+  padding: 3px;
   background: var(--sunk);
   border-radius: 999px;
   align-self: flex-start;
@@ -911,9 +936,9 @@ body:has(.fresh) {
   background: transparent;
   border: none;
   border-radius: 999px;
-  min-height: 40px;
-  padding: 0 20px;
-  font-size: 15px;
+  min-height: 34px;
+  padding: 0 18px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ink-soft);
   cursor: pointer;
@@ -922,11 +947,6 @@ body:has(.fresh) {
   background: var(--section);
   color: var(--on-section);
   font-weight: 700;
-}
-.fresh-seg-sm .fresh-seg-btn {
-  min-height: 36px;
-  padding: 0 14px;
-  font-size: 14px;
 }
 /* The week switcher is the widest control on Recipes, so on a phone it
    spans the content width as two equal halves and lands on the gutters. */
@@ -942,23 +962,23 @@ body:has(.fresh) {
   }
 }
 
-/* Rows: hairline separated, 56px tall, whole row tappable. */
+/* Rows: hairline separated, 48px tall, whole row tappable. */
 .fresh-rows {
   border-top: 1.5px solid var(--hairline);
 }
 .fresh-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  min-height: 56px;
+  min-height: 48px;
   text-align: left;
   background: transparent;
   border: none;
   border-bottom: 1.5px solid var(--hairline);
-  padding: 8px 0;
+  padding: 6px 0;
   color: var(--ink);
-  font-size: 16px;
+  font-size: 15px;
   cursor: pointer;
 }
 .fresh-row:hover {
@@ -980,14 +1000,15 @@ button.fresh-row-main {
 }
 .fresh-row-title {
   display: block;
-  font-size: 16px;
+  font-size: 15px;
+  line-height: 1.25;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .fresh-row-desc {
   display: block;
   margin-top: 1px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
@@ -995,9 +1016,9 @@ button.fresh-row-main {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
-  margin-top: 5px;
-  font-size: 14px;
+  gap: 4px 8px;
+  margin-top: 2px;
+  font-size: 13px;
   color: var(--ink-soft);
 }
 /* Store names are typed by hand, so one long unbroken word ("Loblawsatthe
@@ -1012,8 +1033,8 @@ button.fresh-row-main {
 .fresh-row-warn {
   flex: none;
   border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
+  padding: 2px 7px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 15%, var(--card));
@@ -1021,12 +1042,12 @@ button.fresh-row-main {
 .fresh-row-qty,
 .fresh-row-amount {
   flex: none;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   white-space: nowrap;
 }
 .fresh-row-note {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink-soft);
   white-space: nowrap;
 }
@@ -1036,8 +1057,8 @@ button.fresh-row-main {
   color: var(--ink-soft);
 }
 .fresh-date-head {
-  padding: 4px 0 8px;
-  font-size: 14px;
+  padding: 2px 0 4px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--ink-soft);
 }
@@ -1045,7 +1066,7 @@ button.fresh-row-main {
 .fresh-person {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
 }
 .fresh-person-name {
@@ -1068,7 +1089,7 @@ button.fresh-row-main {
 .fresh-badge {
   display: inline-block;
   border-radius: 999px;
-  padding: 3px 10px;
+  padding: 2px 9px;
   font-size: 13px;
   font-weight: 600;
   background: var(--sunk);
@@ -1085,7 +1106,7 @@ button.fresh-row-main {
 .fresh-pill-note {
   display: inline-block;
   border-radius: 999px;
-  padding: 3px 10px;
+  padding: 2px 9px;
   font-size: 13px;
   font-weight: 600;
   background: color-mix(in srgb, var(--ink) 7%, transparent);
@@ -1094,18 +1115,18 @@ button.fresh-row-main {
 
 .fresh-cat-dot {
   display: inline-block;
-  width: 11px;
-  height: 11px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  margin-right: 9px;
+  margin-right: 7px;
   vertical-align: middle;
 }
 
 .fresh-pool-tag {
   display: inline-block;
   border-radius: 999px;
-  padding: 5px 14px;
-  font-size: 14px;
+  padding: 4px 12px;
+  font-size: 13px;
   font-weight: 700;
   color: #fff;
   background: var(--ink);
@@ -1139,34 +1160,34 @@ button.fresh-row-main {
 }
 
 .fresh-empty {
-  padding: 24px 4px;
+  padding: 16px 4px;
   color: var(--ink-soft);
-  font-size: 15px;
+  font-size: 14px;
 }
 .fresh-empty strong {
   display: block;
   color: var(--ink);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   margin-bottom: 4px;
 }
 .fresh-error {
-  padding: 16px;
+  padding: 14px;
   border: 1.5px solid var(--c-danger);
   border-radius: var(--r-card);
   color: var(--c-danger);
-  font-size: 15px;
+  font-size: 14px;
   background: var(--card);
 }
 .fresh-form-error {
   margin: 12px 0 0;
   color: var(--c-danger);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 .fresh-field-hint {
   margin: 6px 0 0;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink-soft);
 }
 
@@ -1174,19 +1195,19 @@ button.fresh-row-main {
   background: var(--sunk);
   border-radius: var(--r-control);
   height: 16px;
-  margin: 10px 0;
+  margin: 8px 0;
 }
 .fresh-skel-line {
   width: 60%;
-  height: 26px;
+  height: 24px;
 }
 .fresh-skel-row {
-  height: 56px;
+  height: 48px;
 }
 .fresh-skel-card {
-  height: 140px;
+  height: 120px;
   border-radius: var(--r-card);
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 /* FAB: sits above the nav and clear of the last row. */
@@ -1263,7 +1284,8 @@ button.fresh-row-main {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 16px 12px;
+  min-height: 52px;
+  padding: 4px 16px 8px;
   border-bottom: 1.5px solid var(--hairline);
 }
 .fresh-sheet-heading {
@@ -1280,7 +1302,7 @@ button.fresh-row-main {
 .fresh-sheet-sub {
   display: block;
   margin-top: 2px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink-soft);
 }
 .fresh-sheet-head .fresh-icon-btn {
@@ -1356,7 +1378,7 @@ button.fresh-row-main {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 /* The submit reads as the sheet's action row: it sticks to the bottom of the
    scrolling body instead of hiding under the last field. */
@@ -1378,14 +1400,14 @@ button.fresh-row-main {
  * ---------------------------------------------------------------- */
 
 .fresh-field {
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 .fresh-field > label {
   display: block;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink-soft);
-  margin-bottom: 7px;
+  margin-bottom: 4px;
 }
 .fresh-input {
   width: 100%;
@@ -1438,7 +1460,7 @@ button.fresh-row-main {
 .fresh-field-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: 10px;
 }
 .fresh-field-row .fresh-field {
   min-width: 0;
@@ -1465,7 +1487,7 @@ button.fresh-row-main {
 .fresh-home {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 /*
@@ -1486,7 +1508,7 @@ button.fresh-row-main {
   color: var(--paper);
   box-shadow: 0 2px 4px rgba(26, 23, 20, 0.1),
     0 14px 30px color-mix(in srgb, var(--c-recipes-hero) 34%, transparent);
-  padding: 20px 18px;
+  padding: 16px;
 }
 .fresh-tonight-tap {
   display: block;
@@ -1500,16 +1522,16 @@ button.fresh-row-main {
 }
 .fresh-tonight-when {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--paper);
   opacity: 0.92;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .fresh-tonight-dish,
 .fresh-tonight-quiet {
   display: block;
-  font-size: 30px;
+  font-size: 26px;
   line-height: 1.08;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -1521,8 +1543,8 @@ button.fresh-row-main {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  margin-top: 14px;
-  font-size: 15px;
+  margin-top: 10px;
+  font-size: 14px;
 }
 .fresh-tonight-nocook {
   color: var(--paper);
@@ -1546,7 +1568,7 @@ button.fresh-row-main {
 }
 /* Inverted: paper plate, wash-coloured label. */
 .fresh-tonight .fresh-btn-primary {
-  margin-top: 18px;
+  margin-top: 14px;
   background: var(--paper);
   border-color: var(--paper);
   color: var(--c-recipes-hero);
@@ -1565,13 +1587,13 @@ button.fresh-row-main {
 .fresh-money-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  min-height: 48px;
+  min-height: 44px;
   background: none;
   border: none;
   border-bottom: 1.5px solid var(--hairline);
-  padding: 8px 0;
+  padding: 6px 0;
   color: var(--ink);
   text-align: left;
   cursor: pointer;
@@ -1582,12 +1604,12 @@ button.fresh-row-main {
 .fresh-money-name {
   flex: 1;
   min-width: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
 }
 .fresh-money-amount {
   flex: none;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1606,14 +1628,15 @@ button.fresh-row-main {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-top: 14px;
-  font-size: 15px;
+  min-height: 40px;
+  padding-top: 10px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ink-soft);
 }
 .fresh-money-total .fresh-num {
   color: var(--ink);
-  font-size: 18px;
+  font-size: 17px;
 }
 
 .fresh-counter {
@@ -1626,28 +1649,27 @@ button.fresh-row-main {
   border-left: 4px solid var(--ink);
   border-radius: var(--r-card);
   box-shadow: var(--card-shadow);
-  padding: 14px 12px;
+  padding: 12px 14px;
   color: var(--ink);
   cursor: pointer;
 }
 .fresh-counter-num {
-  font-size: 30px;
+  font-size: 26px;
   line-height: 1;
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 .fresh-counter-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ink-soft);
 }
 .fresh-counter-wide {
   text-align: left;
-  padding: 16px 16px;
 }
 .fresh-counter-names {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink-soft);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1675,9 +1697,9 @@ button.fresh-row-main {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 8px 2px;
-  min-height: 64px;
+  gap: 2px;
+  padding: 4px 2px;
+  min-height: 56px;
   background: var(--card);
   border: 1.5px solid var(--hairline);
   border-radius: var(--r-control);
@@ -1691,10 +1713,12 @@ button.fresh-row-main {
 }
 .fresh-strip-letter {
   font-size: 12px;
+  line-height: 1.1;
   font-weight: 700;
 }
 .fresh-strip-num {
   font-size: 17px;
+  line-height: 1.1;
   font-weight: 700;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
@@ -1718,7 +1742,7 @@ button.fresh-row-main {
 .fresh-weeks {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 24px;
+  gap: 20px;
 }
 .fresh-week {
   min-width: 0;
@@ -1746,7 +1770,7 @@ button.fresh-row-main {
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
   justify-content: flex-end;
   padding-right: 5px;
 }
@@ -1786,13 +1810,13 @@ button.fresh-row-main {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   background: var(--card);
   border: 1.5px solid var(--hairline);
   border-left: 6px solid var(--cook, var(--ink-soft));
   border-radius: var(--r-card);
   box-shadow: var(--card-shadow);
-  padding: 10px 16px;
+  padding: 12px 14px;
 }
 .fresh-day-card-tap {
   display: block;
@@ -1807,8 +1831,8 @@ button.fresh-row-main {
 }
 .fresh-day-dish {
   display: block;
-  margin-top: 3px;
-  font-size: 22px;
+  margin-top: 2px;
+  font-size: 20px;
   line-height: 1.15;
   font-weight: 650;
   letter-spacing: -0.015em;
@@ -1818,14 +1842,14 @@ button.fresh-row-main {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
-  margin-top: 10px;
-  font-size: 15px;
+  gap: 6px 8px;
+  margin-top: 6px;
+  font-size: 14px;
 }
 .fresh-day-card-actions {
   min-width: 0;
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .fresh-day-empty {
@@ -1834,8 +1858,8 @@ button.fresh-row-main {
   gap: 8px;
   border: 2px dashed var(--hairline);
   border-radius: var(--r-card);
-  padding: 8px 12px 8px 16px;
-  min-height: 56px;
+  padding: 6px 10px 6px 14px;
+  min-height: 48px;
 }
 .fresh-day-add {
   flex: 1;
@@ -1843,25 +1867,25 @@ button.fresh-row-main {
   text-align: left;
   background: none;
   border: none;
-  padding: 8px 0;
+  padding: 6px 0;
   color: inherit;
   cursor: pointer;
 }
 .fresh-day-add-text {
   display: block;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--section);
 }
 .fresh-day-off {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   border: 1.5px solid var(--hairline);
   border-radius: var(--r-card);
   background: var(--sunk);
-  padding: 8px 12px 8px 16px;
-  min-height: 56px;
+  padding: 6px 10px 6px 14px;
+  min-height: 48px;
 }
 .fresh-day-off .fresh-day-when {
   flex: none;
@@ -1869,7 +1893,7 @@ button.fresh-row-main {
 .fresh-day-off-text {
   flex: 1;
   min-width: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--ink-soft);
 }
@@ -1879,22 +1903,35 @@ button.fresh-row-main {
  * ---------------------------------------------------------------- */
 
 .fresh-check {
+  /* A 24px circle drawn inside a 34px tap target. */
+  position: relative;
   flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  border: 2px solid var(--hairline);
-  background: var(--card);
+  width: 34px;
+  height: 34px;
+  margin: -5px;
+  border: none;
+  background: transparent;
   color: var(--on-section);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
 }
-.fresh-check:hover {
+.fresh-check::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 999px;
+  border: 2px solid var(--hairline);
+  background: var(--card);
+}
+.fresh-check > * {
+  position: relative;
+}
+.fresh-check:hover::before {
   border-color: var(--section);
 }
-.fresh-check.checked {
+.fresh-check.checked::before {
   border-color: var(--section);
   background: var(--section);
 }
@@ -1910,7 +1947,7 @@ button.fresh-row-main {
 .fresh-expenses {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 /* The Month screen carries its own month-aware settlement card; the side
    column belongs to the Receipts screen and is only rendered there. */
@@ -1918,14 +1955,14 @@ button.fresh-row-main {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 @media (min-width: 900px) {
   .fresh-expenses {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 340px;
     align-items: start;
-    gap: 24px;
+    gap: 20px;
   }
   /* One column, full width. It must not stay a flex row here: the grid rule
      above also sets `align-items: start`, which in a column shrinks the
@@ -1935,7 +1972,7 @@ button.fresh-row-main {
   }
   .fresh-expenses[data-segment="receipts"] > .fresh-settlement-col {
     position: sticky;
-    top: calc(var(--top-h) + 24px);
+    top: calc(var(--top-h) + 20px);
   }
 }
 .fresh-row.locked {
@@ -1949,10 +1986,10 @@ button.fresh-row-main {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-bottom: 14px;
+  padding-bottom: 10px;
 }
 .fresh-settle-total-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ink-soft);
 }
@@ -1970,13 +2007,13 @@ button.fresh-row-main {
 .fresh-settle-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
   min-height: 48px;
   background: none;
   border: none;
   border-bottom: 1.5px solid var(--hairline);
-  padding: 8px 0;
+  padding: 6px 0;
   color: var(--ink);
   text-align: left;
   cursor: pointer;
@@ -1987,16 +2024,16 @@ button.fresh-row-main {
 .fresh-settle-name {
   flex: 1;
   min-width: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
 }
 .fresh-settle-parts {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
-  font-size: 14px;
+  gap: 4px 12px;
+  font-size: 13px;
   color: var(--ink-soft);
-  padding: 4px 0 12px 42px;
+  padding: 2px 0 10px 38px;
   border-bottom: 1.5px solid var(--hairline);
 }
 
@@ -2007,7 +2044,7 @@ button.fresh-row-main {
 .fresh-month {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 @media (min-width: 900px) {
   /* A bill row is a name and one amount; stretched across the full content
@@ -2038,7 +2075,7 @@ button.fresh-row-main {
 .fresh-month-label {
   min-width: 0;
   font-family: var(--font-display) !important;
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink);
@@ -2048,22 +2085,22 @@ button.fresh-row-main {
 .fresh-trips {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 4px 0 14px;
+  gap: 10px;
+  padding: 2px 0 10px;
   border-bottom: 1.5px solid var(--hairline);
 }
 .fresh-trip {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
 }
 .fresh-trip-thumb {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   overflow: hidden;
   border: 1.5px solid var(--hairline);
@@ -2092,33 +2129,33 @@ button.fresh-row-main {
    breakdown; the description, when there is one, follows it quietly. */
 .fresh-trip-title {
   display: block;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .fresh-trip-desc {
   display: block;
   margin-top: 1px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
 .fresh-trip-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 5px;
+  gap: 5px;
+  margin-top: 4px;
 }
 .fresh-trip-link {
   display: inline-block;
-  margin-top: 6px;
-  font-size: 14px;
+  margin-top: 4px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--section);
 }
 .fresh-trip-amount {
   flex: none;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -2131,14 +2168,14 @@ button.fresh-row-main {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 68px;
-  padding: 8px 0;
+  min-height: 48px;
+  padding: 6px 0;
   border-bottom: 1.5px solid var(--hairline);
 }
 .fresh-bill-name {
   flex: 1;
   min-width: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -2161,8 +2198,8 @@ button.fresh-row-main {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  width: 124px;
-  height: 52px;
+  width: 112px;
+  height: 44px;
   padding: 0 12px;
   border: 1.5px solid var(--hairline);
   border-radius: var(--r-control);
@@ -2198,7 +2235,7 @@ button.fresh-row-main {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 .fresh-bill-add .fresh-input:first-child {
   flex: 2 1 140px;
@@ -2227,8 +2264,8 @@ button.fresh-row-main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
   background: var(--sunk);
   color: var(--ink);
@@ -2251,7 +2288,7 @@ button.fresh-row-main {
   }
   .fresh-weeks {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 24px;
+    gap: 20px;
   }
 }
 
@@ -2437,8 +2474,6 @@ button.fresh-row-main {
 
 /* Category filter chips carry the category colour like classic's pills. */
 .fresh-chip-cat .fresh-cat-dot {
-  width: 9px;
-  height: 9px;
   margin-right: 0;
 }
 
@@ -2446,13 +2481,13 @@ button.fresh-row-main {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 40px;
-  padding: 0 14px;
+  min-height: 34px;
+  padding: 0 12px;
   border: 1.5px solid var(--hairline);
   border-radius: 999px;
   background: var(--card);
   color: var(--section);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   text-decoration: none;
   max-width: 100%;
@@ -2473,63 +2508,7 @@ button.fresh-row-main {
   border-color: var(--section);
 }
 
-/* ---- Grocery: a denser list ----
-   The shopping list is read standing in an aisle, so it sits one step
-   tighter than the rest of the shell: a little less vertical padding in the
-   rows, smaller category headers, and sections closer together. One step,
-   not two, or the list stops reading as the same app. */
-.fresh[data-section="grocery"] .fresh-main {
-  gap: 12px;
-}
-.fresh[data-section="grocery"] .fresh-chips {
-  gap: 6px;
-}
-.fresh[data-section="grocery"] .fresh-chip {
-  min-height: 34px;
-  padding: 0 12px;
-  font-size: 14px;
-}
-.fresh[data-section="grocery"] .fresh-section-head {
-  margin: 0 0 2px;
-}
-.fresh[data-section="grocery"] .fresh-h2 {
-  font-size: 17px;
-}
-.fresh[data-section="grocery"] .fresh-h2 .fresh-cat-dot {
-  width: 9px;
-  height: 9px;
-  margin-right: 7px;
-}
-.fresh[data-section="grocery"] .fresh-sub {
-  font-size: 13px;
-}
-.fresh[data-section="grocery"] .fresh-row {
-  min-height: 50px;
-  padding: 6px 0;
-  gap: 10px;
-}
-.fresh[data-section="grocery"] .fresh-row-title {
-  font-size: 15px;
-  line-height: 1.25;
-}
-.fresh[data-section="grocery"] .fresh-row-meta {
-  margin-top: 2px;
-  font-size: 13px;
-  gap: 4px 8px;
-}
-.fresh[data-section="grocery"] .fresh-row-meta .fresh-avatar {
-  width: 16px;
-  height: 16px;
-  font-size: 9px;
-}
-.fresh[data-section="grocery"] .fresh-row-warn {
-  font-size: 11px;
-  padding: 2px 7px;
-}
-.fresh[data-section="grocery"] .fresh-row-qty {
-  font-size: 15px;
-}
-.fresh[data-section="grocery"] .fresh-check {
-  width: 24px;
-  height: 24px;
+/* Reused classic search field inside the fresh Passwords screen. */
+.fresh .search-row input {
+  min-height: 44px;
 }

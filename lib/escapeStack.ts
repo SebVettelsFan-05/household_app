@@ -38,13 +38,52 @@ function currentLayerId(): number | null {
   return typeof state?.hhLayer === "number" ? state.hhLayer : null;
 }
 
+/**
+ * The entry a closing layer asked the browser to pop, until that pop lands.
+ * `history.back()` is asynchronous, so a layer opened in the same commit (the
+ * recipe editor a favorite opens as the Favorites sheet closes) has already
+ * pushed its own entry on top by the time the pop arrives. Without this the
+ * handler would read that layer as "above the landed entry" and close it the
+ * moment it opened.
+ */
+let pendingSelfPop: number | null = null;
+let popListening = false;
+
 function onPopState() {
+  // In practice the browser lands on the entry below the closed layer's (a
+  // tab entry, or the layer beneath), never on the closed layer's own.
+  const landed = currentLayerId();
+  if (pendingSelfPop !== null) {
+    const popped = pendingSelfPop;
+    pendingSelfPop = null;
+    // Layers that pushed after the pop was issued now sit on forward entries
+    // the browser just walked away from. Give each a fresh entry, in order,
+    // so Back keeps closing them one at a time.
+    const stranded = layers.filter(
+      (l) => l.historyId !== null && l.historyId > popped
+    );
+    if (stranded.length > 0) {
+      for (const l of stranded) {
+        l.historyId = nextHistoryId++;
+        window.history.pushState(
+          { ...window.history.state, hhLayer: l.historyId },
+          ""
+        );
+      }
+      return;
+    }
+  }
   // Back walked past the entry of every layer stacked above the one it landed
   // on, so those layers go with it — the top one first.
-  const landed = currentLayerId();
   for (let i = layers.length - 1; i >= 0; i -= 1) {
     if (layers[i].historyId === landed) break;
     layers[i].onClose();
+  }
+  // An entry no open layer owns (a layer that closed while another was
+  // opening) is not a screen the user can stand on: step past it.
+  if (landed !== null && !layers.some((l) => l.historyId === landed)) {
+    pendingSelfPop = landed;
+    window.history.back();
   }
 }
 
@@ -156,7 +195,14 @@ export function useEscapeLayer(
     };
     if (layers.length === 0) {
       window.addEventListener("keydown", onKeyDown);
+    }
+    // The popstate listener stays registered for the life of the page. A
+    // layer that closes itself fires a pop that lands after it is gone; if
+    // nobody were listening then, `pendingSelfPop` would never clear and the
+    // next real Back press would be read as that stale pop and swallowed.
+    if (!popListening) {
       window.addEventListener("popstate", onPopState);
+      popListening = true;
     }
     layers.push(layer);
     el?.focus();
@@ -180,13 +226,13 @@ export function useEscapeLayer(
       if (i >= 0) layers.splice(i, 1);
       if (layers.length === 0) {
         window.removeEventListener("keydown", onKeyDown);
-        window.removeEventListener("popstate", onPopState);
       }
       // Take this layer's entry back out of the history — but only when the
       // browser is still standing on it. If Back is what closed the layer,
       // that entry is already behind us and popping again would walk off the
       // tab the user came from.
       if (layer.historyId !== null && currentLayerId() === layer.historyId) {
+        pendingSelfPop = layer.historyId;
         window.history.back();
       }
       // Hand the keyboard back to whatever opened this layer. React has

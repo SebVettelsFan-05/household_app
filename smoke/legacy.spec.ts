@@ -315,6 +315,50 @@ test("a grocery row lands under its category, with no pool tag", async () => {
   await shot("06-grocery-category");
 });
 
+test("using a favorite opens the classic recipe editor filled in", async () => {
+  const name = "Smoke Favorite Template";
+  const created = await (
+    await page.request.post("/api/favorites", {
+      data: { name, link: "https://example.com/classic-template", servings: 4, ingredients: [] },
+    })
+  ).json();
+  const fav = created.favorites.find((f: { name: string }) => f.name === name);
+  try {
+    await gotoTab("Recipes");
+    await page.getByRole("button", { name: /Favorites/ }).first().click();
+    await page.locator(".modal").filter({ hasText: name }).waitFor();
+    await page
+      .locator(".favorite-actions", { has: page.locator("xpath=..", { hasText: name }) })
+      .first()
+      .getByRole("button", { name: "Use" })
+      .click();
+    // The favorites modal closes and the editor opens in one commit; the
+    // modal's history pop must not close the editor.
+    await expect(page.locator("#r-name")).toHaveValue(name);
+    await page.waitForTimeout(400);
+    await expect(page.locator("#r-name")).toHaveValue(name);
+    await page.goBack();
+    await expect(page.locator("#r-name")).toHaveCount(0);
+    await expect(page.locator(".tab.active")).toHaveText(/Recipes/);
+  } finally {
+    if (fav) await page.request.delete(`/api/favorites/${encodeURIComponent(fav.id)}`);
+  }
+});
+
+test("Back closes a classic modal even after another modal closed itself", async () => {
+  await gotoTab("Recipes");
+  const archive = page.getByRole("button", { name: /Archive/ }).first();
+  await archive.click();
+  await page.locator(".modal-bg").waitFor();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  await archive.click();
+  await page.locator(".modal-bg").waitFor();
+  await page.goBack();
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  await expect(page.locator(".tab.active")).toHaveText(/Recipes/);
+});
+
 test("a slot can be marked as no shared meal", async () => {
   await gotoTab("Recipes");
   await expect(page.locator(".recipe-grid").first()).toBeVisible();

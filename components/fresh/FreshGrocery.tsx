@@ -193,7 +193,7 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
               <span className="fresh-row-store">{item.store}</span>
             ) : null}
             <span className="fresh-person">
-              <Avatar name={item.addedBy} size={20} />
+              <Avatar name={item.addedBy} size={18} />
               <span className="fresh-person-name">{item.addedBy}</span>
             </span>
             {haveQty ? (

@@ -180,7 +180,7 @@ export default function FreshHome({
                     className="fresh-money-row"
                     onClick={onOpenMonth}
                   >
-                    <Avatar name={line.name} size={32} />
+                    <Avatar name={line.name} size={28} />
                     <span className="fresh-money-name">{line.name}</span>
                     <span
                       className={

@@ -161,7 +161,7 @@ export default function FreshExpenses({
                           ) : null}
                           <span className="fresh-row-meta">
                             <span className="fresh-person">
-                              <Avatar name={e.paidBy} size={20} />
+                              <Avatar name={e.paidBy} size={18} />
                               <span className="fresh-person-name">
                                 {e.paidBy}
                               </span>

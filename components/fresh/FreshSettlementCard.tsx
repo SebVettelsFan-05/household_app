@@ -72,7 +72,7 @@ export default function FreshSettlementCard({
                   aria-expanded={open}
                   onClick={() => setOpenName(open ? null : line.name)}
                 >
-                  <Avatar name={line.name} size={30} />
+                  <Avatar name={line.name} size={28} />
                   <span className="fresh-settle-name">{line.name}</span>
                   <span
                     className={
