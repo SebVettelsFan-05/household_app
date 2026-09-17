@@ -132,6 +132,7 @@ docker exec household-dev-pg psql -U dev -d household_dev -c "TRUNCATE items, gr
 npm run seed:local
 ```
 
-`npm run smoke` runs both Playwright suites; they create and remove their
-own fixtures but also clear the current cooking week and this month's
-bills, so reseed after a run if you want to look at the app.
+`npm run smoke` runs every Playwright suite under `smoke/` (fresh, legacy,
+auth, money); they create and remove their own fixtures but also clear the
+current cooking week and this month's bills, so reseed after a run if you
+want to look at the app.

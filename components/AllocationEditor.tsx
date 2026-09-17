@@ -101,6 +101,35 @@ export function allocationsForSubmit(
   });
 }
 
+/**
+ * The people a line's checklist offers: the household roster, plus any name
+ * already on the line that the roster no longer has. A receipt settled with
+ * a housemate who has since moved out keeps naming them, and the server
+ * keeps such a snapshot on edit, so the editor has to show them too.
+ */
+export function splitPeople(
+  splitAmong: readonly string[],
+  members: readonly string[]
+): string[] {
+  return [...members, ...splitAmong.filter((n) => !members.includes(n))];
+}
+
+/**
+ * The line's new `splitAmong` after tapping `name`. A departed name stays on
+ * the line while other people are toggled — it can only come off by being
+ * tapped itself, never as a side effect of editing somebody else.
+ */
+export function toggleSplitMember(
+  splitAmong: readonly string[],
+  name: string,
+  members: readonly string[]
+): string[] {
+  if (splitAmong.includes(name)) return splitAmong.filter((m) => m !== name);
+  return splitPeople(splitAmong, members).filter(
+    (m) => m === name || splitAmong.includes(m)
+  );
+}
+
 type Props = {
   totalCents: number;
   value: EditableAllocation[];
@@ -202,11 +231,9 @@ export default function AllocationEditor({
   }
 
   function toggleMember(index: number, name: string) {
-    const current = value[index].splitAmong;
-    const next = current.includes(name)
-      ? current.filter((m) => m !== name)
-      : members.filter((m) => m === name || current.includes(m));
-    patch(index, { splitAmong: next });
+    patch(index, {
+      splitAmong: toggleSplitMember(value[index].splitAmong, name, members),
+    });
   }
 
   function addLine() {
@@ -278,7 +305,7 @@ export default function AllocationEditor({
 
           {line.kind === "custom" ? (
             <PersonCheckList
-              people={members}
+              people={splitPeople(line.splitAmong, members)}
               selected={line.splitAmong}
               onToggle={(m) => toggleMember(i, m)}
               disabled={disabled}

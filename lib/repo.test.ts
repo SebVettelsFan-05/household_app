@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { planMoveDone, runWritesAtomically } from "./repo";
+import {
+  isPastMonth,
+  monthOf,
+  PAST_MONTH_LOCKED_MESSAGE,
+  planMoveDone,
+  runWritesAtomically,
+  validateOccurredOn,
+} from "./repo";
 import type { MoveDoneGroceryRow, MoveDoneInventoryRow } from "./repo";
 import { isValidationError } from "./errors";
 import type { Db } from "@/db/client";
 import type { BatchItem } from "drizzle-orm/batch";
+import { todayYmd } from "./dates";
 
 const CATS = ["Produce", "Dairy", "Other"];
 
@@ -286,4 +294,43 @@ test("a driver without batch runs the writes inside a transaction", async () => 
   assert.deepEqual(ran, ["a", "b"]);
   // Bound to the transaction handle, not the pool, or they'd commit outside.
   assert.deepEqual(handles, [tx]);
+});
+
+/* ---------- The past-month lock ---------- */
+
+test("a month is the first seven characters of the date", () => {
+  assert.equal(monthOf("2026-09-17"), "2026-09");
+  assert.equal(monthOf("2026-01-01"), "2026-01");
+});
+
+test("only a month before today's month is past", () => {
+  const today = "2026-09-17";
+  // Same month, either side of today: still open.
+  assert.equal(isPastMonth("2026-09-01", today), false);
+  assert.equal(isPastMonth("2026-09-30", today), false);
+  // Previous month, and across a year boundary.
+  assert.equal(isPastMonth("2026-08-31", today), true);
+  assert.equal(isPastMonth("2025-12-31", today), true);
+  assert.equal(isPastMonth("2026-10-01", today), false);
+  // December looking back at January of the same year, and January looking
+  // back at December — plain string ordering handles both.
+  assert.equal(isPastMonth("2026-01-31", "2026-12-01"), true);
+  assert.equal(isPastMonth("2026-12-31", "2027-01-01"), true);
+  assert.equal(isPastMonth("2027-01-01", "2026-12-31"), false);
+});
+
+test("a date in a settled month is refused on the way in", () => {
+  assert.throws(() => validateOccurredOn("2020-01-15"), (e: unknown) => {
+    assert.ok(isValidationError(e));
+    assert.equal(e.message, PAST_MONTH_LOCKED_MESSAGE);
+    return true;
+  });
+});
+
+test("a date in the current month is accepted", () => {
+  const firstOfThisMonth = `${monthOf(todayYmd())}-01`;
+  assert.equal(validateOccurredOn(firstOfThisMonth), firstOfThisMonth);
+  assert.equal(validateOccurredOn(todayYmd()), todayYmd());
+  // Empty means "today", which is never locked.
+  assert.equal(validateOccurredOn(""), todayYmd());
 });

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  apiError,
+  ConflictError,
   describeApiError,
   isValidationError,
   NotFoundError,
@@ -48,4 +50,36 @@ test("isValidationError only recognises validation errors", () => {
   assert.equal(isValidationError(new ValidationError("x")), true);
   assert.equal(isValidationError(new Error("x")), false);
   assert.equal(isValidationError(new NotFoundError()), false);
+});
+
+test("a lost race answers 409 with its own message", () => {
+  const d = describeApiError(
+    new ConflictError("Someone else changed this since you loaded it")
+  );
+  assert.equal(d.status, 409);
+  assert.equal(d.message, "Someone else changed this since you loaded it");
+});
+
+test("a conflict response carries what the row holds now", async () => {
+  const res = apiError(
+    new ConflictError("Someone else changed this since you loaded it", {
+      updatedAt: "2026-09-17T12:00:00.000Z",
+      value: { lines: [] },
+    })
+  );
+  assert.equal(res.status, 409);
+  assert.deepEqual(await res.json(), {
+    ok: false,
+    error: "Someone else changed this since you loaded it",
+    updatedAt: "2026-09-17T12:00:00.000Z",
+    value: { lines: [] },
+  });
+});
+
+test("other errors carry nothing but ok and error", async () => {
+  const res = apiError(new ValidationError("Amount must be greater than zero"));
+  assert.deepEqual(await res.json(), {
+    ok: false,
+    error: "Amount must be greater than zero",
+  });
 });

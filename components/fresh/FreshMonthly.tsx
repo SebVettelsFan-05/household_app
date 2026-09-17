@@ -232,13 +232,13 @@ export default function FreshMonthly({ expenses, onToast, bills }: Props) {
                   cents={view.rent.alloc[name] || undefined}
                   onCommit={(cents) => view.rent.commitFor(name, cents)}
                   ariaLabel={`${name}'s rent share`}
-                  disabled={monthLocked}
+                  disabled={!canEditMonth}
                 />
               </span>
             </div>
           ))}
         </div>
-        {view.rent.overridden && !isCurrentMonth && !monthLocked ? (
+        {view.rent.overridden && !isCurrentMonth && canEditMonth ? (
           <button
             type="button"
             className="fresh-btn fresh-btn-small"
@@ -272,7 +272,7 @@ export default function FreshMonthly({ expenses, onToast, bills }: Props) {
                     </span>
                   ) : null}
                 </span>
-                {overridden && !isCurrentMonth && !monthLocked ? (
+                {overridden && !isCurrentMonth && canEditMonth ? (
                   <button
                     type="button"
                     className="fresh-icon-btn fresh-bill-btn"
@@ -283,7 +283,7 @@ export default function FreshMonthly({ expenses, onToast, bills }: Props) {
                     <IconRefresh size={16} />
                   </button>
                 ) : null}
-                {!r.protected && !monthLocked ? (
+                {!r.protected && canEditMonth ? (
                   <button
                     type="button"
                     className="fresh-icon-btn fresh-bill-btn"
@@ -303,7 +303,7 @@ export default function FreshMonthly({ expenses, onToast, bills }: Props) {
                     cents={view.fixed.amountFor(r) || undefined}
                     onCommit={(cents) => view.fixed.commitAmount(r.id, cents)}
                     ariaLabel={`${r.name} amount`}
-                    disabled={monthLocked}
+                    disabled={!canEditMonth}
                   />
                 </span>
               </div>
@@ -361,7 +361,7 @@ export default function FreshMonthly({ expenses, onToast, bills }: Props) {
           {view.variable.rows.map((line) => (
             <div className="fresh-bill-row" key={line.id}>
               <span className="fresh-bill-name">{line.name}</span>
-              {!line.protected && !monthLocked ? (
+              {!line.protected && canEditMonth ? (
                 <button
                   type="button"
                   className="fresh-icon-btn fresh-bill-btn"
@@ -381,7 +381,7 @@ export default function FreshMonthly({ expenses, onToast, bills }: Props) {
                   cents={view.variable.amountFor(line)}
                   onCommit={(c) => view.variable.setAmount(line.name, c)}
                   ariaLabel={`${line.name} amount`}
-                  disabled={monthLocked}
+                  disabled={!canEditMonth}
                 />
               </span>
             </div>

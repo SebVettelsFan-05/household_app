@@ -43,7 +43,7 @@ import {
   normalizeAllocations,
   type ResolveContext,
 } from "./allocations";
-import { NotFoundError, ValidationError } from "./errors";
+import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import {
   DEFAULT_CATEGORIES,
   DEFAULT_EXPENSE_CATEGORIES,
@@ -1795,6 +1795,25 @@ function expenseDisplayName(store: string, occurredOn: string): string {
   return trimmedStore ? `${trimmedStore} ${label}` : `Expense ${label}`;
 }
 
+/**
+ * Past months are settled: the money has been sent, so their receipts are
+ * frozen. Every write path checks this, not just the UI — a PATCH that moved
+ * a receipt back a month used to change a settled month's totals and leave a
+ * row the app itself refuses to edit.
+ *
+ * Both arguments are YYYY-MM-DD in the household timezone; the month is the
+ * first seven characters and plain string ordering is correct for both.
+ */
+export const PAST_MONTH_LOCKED_MESSAGE = "Past months are locked";
+
+export function monthOf(occurredOn: string): string {
+  return occurredOn.slice(0, 7);
+}
+
+export function isPastMonth(occurredOn: string, today: string): boolean {
+  return monthOf(occurredOn) < monthOf(today);
+}
+
 export function validateOccurredOn(input: string | undefined): string {
   // Defaulting uses the household timezone, not the server's: an expense
   // logged on Friday evening in Toronto must not land on Saturday because
@@ -1809,7 +1828,15 @@ export function validateOccurredOn(input: string | undefined): string {
   if (occurredOn > today) {
     throw new ValidationError("Date can't be in the future");
   }
+  if (isPastMonth(occurredOn, today)) {
+    throw new ValidationError(PAST_MONTH_LOCKED_MESSAGE);
+  }
   return occurredOn;
+}
+
+/** The month a stored row settles in; legacy rows fall back to their added date. */
+function rowMonth(row: { occurredOn: string | null; added: Date }): string {
+  return monthOf(row.occurredOn || formatDate(row.added));
 }
 
 export async function listExpensesRepo(): Promise<Expense[]> {
@@ -1968,6 +1995,10 @@ export async function updateExpenseRepo(
     .limit(1);
   if (existing.length === 0) throw new NotFoundError();
   const row = existing[0];
+  // The month this row already settles in is frozen, whatever the edit is.
+  if (isPastMonth(rowMonth(row), todayYmd())) {
+    throw new ValidationError(PAST_MONTH_LOCKED_MESSAGE);
+  }
 
   const finalAmount = patch.amountCents ?? row.amountCents;
   if (input.allocations !== undefined) {
@@ -2018,11 +2049,20 @@ export async function deleteExpenseRepo(
 ): Promise<{ expenses: Expense[]; removedReceiptFileId: string | null }> {
   const expenseId = requireId(id);
   const existing = await db
-    .select({ receiptFileId: expensesTable.receiptFileId })
+    .select({
+      receiptFileId: expensesTable.receiptFileId,
+      occurredOn: expensesTable.occurredOn,
+      added: expensesTable.added,
+    })
     .from(expensesTable)
     .where(eq(expensesTable.id, expenseId))
     .limit(1);
   if (existing.length === 0) throw new NotFoundError();
+  // Deleting a settled receipt changes what the month owed just as surely
+  // as editing it, so the lock covers it too.
+  if (isPastMonth(rowMonth(existing[0]), todayYmd())) {
+    throw new ValidationError(PAST_MONTH_LOCKED_MESSAGE);
+  }
   const removedReceiptFileId = existing[0].receiptFileId;
   await db.delete(expensesTable).where(eq(expensesTable.id, expenseId));
   return {
@@ -2031,22 +2071,22 @@ export async function deleteExpenseRepo(
   };
 }
 
-export async function clearExpensesRepo(): Promise<{
-  expenses: Expense[];
-  removedReceiptFileIds: string[];
-}> {
-  // Collect any receipts we need to clean up before the rows are gone.
-  const rows = await db
-    .select({ receiptFileId: expensesTable.receiptFileId })
-    .from(expensesTable);
-  const removedReceiptFileIds = rows
-    .map((r) => r.receiptFileId)
-    .filter((id): id is string => Boolean(id));
-  await db.delete(expensesTable);
-  return { expenses: [], removedReceiptFileIds };
-}
 
 /* ---------- Household settings (shared monthly state) ---------- */
+
+/**
+ * `updated_at` rendered by Postgres as a canonical ISO-8601 string.
+ *
+ * This string *is* the version a client holds, and it is compared as a
+ * string, so a round trip never depends on how a driver reads back a
+ * `timestamp without time zone` or on the server's timezone. Milliseconds
+ * rather than microseconds, so a client that passes the value through
+ * `new Date(...).toISOString()` still matches.
+ */
+const settingUpdatedAtIso = sql<string>`to_char(${settingsTable.updatedAt}, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+
+export const SETTING_CONFLICT_MESSAGE =
+  "Someone else changed this since you loaded it";
 
 export async function getSettingRepo(key: string): Promise<unknown | null> {
   const rows = await db
@@ -2058,20 +2098,76 @@ export async function getSettingRepo(key: string): Promise<unknown | null> {
   return rows[0].value;
 }
 
+/** The stored value plus the version a later write has to match. */
+export async function getSettingVersionedRepo(key: string): Promise<{
+  value: unknown;
+  updatedAt: string | null;
+}> {
+  const rows = await db
+    .select({ value: settingsTable.value, updatedAt: settingUpdatedAtIso })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, key))
+    .limit(1);
+  if (rows.length === 0) return { value: null, updatedAt: null };
+  return { value: rows[0].value, updatedAt: rows[0].updatedAt };
+}
+
+/**
+ * Writes one setting, optionally only if nobody else has written it since.
+ *
+ * These rows carry whole-household state: the bill list, the rent shares.
+ * A blind write is a lost update — two housemates open the bills page, both
+ * save, and the second silently erases the first one's line. So a client
+ * that read the row passes the `updatedAt` it saw and the write applies only
+ * against that version; otherwise it gets a `ConflictError` carrying what is
+ * actually stored. `expectedUpdatedAt` of `null` means "there was no row".
+ *
+ * Omitting `expectedUpdatedAt` keeps the old last-write-wins behaviour, for
+ * the seed script and any client that predates the version.
+ */
 export async function putSettingRepo(
   key: string,
-  value: unknown
-): Promise<void> {
-  // Last-write-wins. Concurrent edits from two housemates aren't expected
-  // to overlap here (rent/utility numbers change rarely), so no need for
-  // optimistic concurrency yet.
-  await db
-    .insert(settingsTable)
-    .values({ key, value: value as object })
-    .onConflictDoUpdate({
-      target: settingsTable.key,
-      set: { value: value as object, updatedAt: sql`NOW()` },
-    });
+  value: unknown,
+  expectedUpdatedAt?: string | null
+): Promise<{ updatedAt: string }> {
+  if (expectedUpdatedAt === undefined) {
+    const rows = await db
+      .insert(settingsTable)
+      .values({ key, value: value as object })
+      .onConflictDoUpdate({
+        target: settingsTable.key,
+        set: { value: value as object, updatedAt: sql`NOW()` },
+      })
+      .returning({ updatedAt: settingUpdatedAtIso });
+    return { updatedAt: rows[0].updatedAt };
+  }
+
+  // The version check is part of the statement, not a read followed by a
+  // write, so two saves landing at once can't both pass it.
+  const rows =
+    expectedUpdatedAt === null
+      ? await db
+          .insert(settingsTable)
+          .values({ key, value: value as object })
+          .onConflictDoNothing()
+          .returning({ updatedAt: settingUpdatedAtIso })
+      : await db
+          .update(settingsTable)
+          .set({ value: value as object, updatedAt: sql`NOW()` })
+          .where(
+            and(
+              eq(settingsTable.key, key),
+              sql`${settingUpdatedAtIso} = ${expectedUpdatedAt}`
+            )
+          )
+          .returning({ updatedAt: settingUpdatedAtIso });
+  if (rows.length === 0) {
+    throw new ConflictError(
+      SETTING_CONFLICT_MESSAGE,
+      await getSettingVersionedRepo(key)
+    );
+  }
+  return { updatedAt: rows[0].updatedAt };
 }
 
 /* ---------- Shared passwords / accounts ---------- */

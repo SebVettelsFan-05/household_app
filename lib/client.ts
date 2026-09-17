@@ -701,19 +701,54 @@ export async function deleteSharedAccount(id: string) {
 
 // Shared rent + recurring bill state. Kept generic so adding another shared
 // blob later is just an ALLOWED_KEYS append on the server.
-export async function getSetting<T>(key: string): Promise<T | null> {
+/** A setting plus the version stamp a later write can check itself against. */
+export type VersionedSetting<T> = {
+  value: T | null;
+  /** ISO timestamp of the stored row, or null when there is no row yet. */
+  updatedAt: string | null;
+};
+
+/**
+ * Thrown by `putSetting` when the stored row has moved on since the version
+ * the caller sent: somebody else saved over the same key. Carries what the
+ * server now holds so the caller can show their version instead of silently
+ * keeping its own.
+ */
+export class SettingConflictError extends Error {
+  readonly value: unknown;
+  readonly updatedAt: string | null;
+
+  constructor(message: string, value: unknown, updatedAt: string | null) {
+    super(message);
+    this.name = "SettingConflictError";
+    this.value = value;
+    this.updatedAt = updatedAt;
+  }
+}
+
+function asIso(raw: unknown): string | null {
+  return typeof raw === "string" && raw ? raw : null;
+}
+
+export async function getSettingWithVersion<T>(
+  key: string
+): Promise<VersionedSetting<T>> {
   const res = await fetch(`/api/settings/${encodeURIComponent(key)}`, {
     cache: "no-store",
   });
   signOutIfUnauthorized(res);
   const body = (await res.json().catch(() => null)) as
-    | { ok: true; value: T | null }
+    | { ok: true; value: T | null; updatedAt?: unknown }
     | { ok: false; error: string }
     | null;
   if (!body || !body.ok) {
     throw new Error(body && "error" in body ? body.error : "Failed to load setting");
   }
-  return body.value;
+  return { value: body.value, updatedAt: asIso(body.updatedAt) };
+}
+
+export async function getSetting<T>(key: string): Promise<T | null> {
+  return (await getSettingWithVersion<T>(key)).value;
 }
 
 /** Current meal group. Empty list means "everyone" (legacy behaviour). */
@@ -729,17 +764,41 @@ export async function putMealGroup(group: MealGroup): Promise<void> {
   await putSetting(MEAL_GROUP_KEY, { members: group.members.filter(isBuyer) });
 }
 
-export async function putSetting<T>(key: string, value: T): Promise<void> {
+/**
+ * Writes a setting. Pass `expectedUpdatedAt` (the version the value was read
+ * at, or null when there was no row) to make the write conditional: the
+ * server answers 409 if the row has changed since, and this throws
+ * `SettingConflictError` carrying the current row. Omitting it — what the
+ * seed script and the meal group do — writes unconditionally, last write
+ * wins.
+ *
+ * Returns the row's new version when the server reports one, so the next
+ * conditional write from this device checks against its own last write
+ * rather than conflicting with it.
+ */
+export async function putSetting<T>(
+  key: string,
+  value: T,
+  expectedUpdatedAt?: string | null
+): Promise<{ updatedAt: string | null }> {
   const res = await fetch(`/api/settings/${encodeURIComponent(key)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ value }),
+    body: JSON.stringify(
+      expectedUpdatedAt === undefined ? { value } : { value, expectedUpdatedAt }
+    ),
   });
   signOutIfUnauthorized(res);
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as
-      | { error?: string }
-      | null;
-    throw new Error(body?.error || `HTTP ${res.status}`);
+  const body = (await res.json().catch(() => null)) as
+    | { error?: string; value?: unknown; updatedAt?: unknown }
+    | null;
+  if (res.status === 409) {
+    throw new SettingConflictError(
+      body?.error || "This setting was changed somewhere else",
+      body?.value ?? null,
+      asIso(body?.updatedAt)
+    );
   }
+  if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+  return { updatedAt: asIso(body?.updatedAt) };
 }

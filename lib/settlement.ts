@@ -77,16 +77,19 @@ export function splitCents(total: number, names: readonly string[]): Map<string,
  * still owes, and is still owed, for the months they were here).
  */
 export function settlementRoster(input: SettlementInput): string[] {
-  const roster = [...input.members];
+  const extras = new Set<string>();
   const add = (name: string) => {
-    if (name && !roster.includes(name)) roster.push(name);
+    if (name && !input.members.includes(name)) extras.add(name);
   };
   for (const e of input.expenses) {
     add(e.paidBy);
     for (const a of e.allocations) for (const n of a.splitAmong) add(n);
   }
   for (const b of input.bills) if (b.paidBy) add(b.paidBy);
-  return roster;
+  // Members first in roster order, then departed names alphabetically, so
+  // the order (and with it who carries a leftover cent) never depends on
+  // the order receipts were entered.
+  return [...input.members, ...[...extras].sort((x, y) => x.localeCompare(y))];
 }
 
 export function computeSettlement(input: SettlementInput): Settlement {
@@ -118,12 +121,17 @@ export function computeSettlement(input: SettlementInput): Settlement {
   for (const e of input.expenses) {
     for (const a of e.allocations) {
       if (a.kind === "personal") continue;
-      const participants = inRoster(a.splitAmong);
-      if (participants.length === 0) continue;
+      // A shared line always charges somebody: if its snapshot names nobody
+      // the roster can place (unreachable through the app, which validates
+      // on write), the whole household carries it rather than the payer
+      // silently eating it.
+      const named = inRoster(a.splitAmong);
+      const participants = named.length > 0 ? named : [...members];
       sharedExpenses += a.amountCents;
       bump(paid, e.paidBy, a.amountCents);
       const isMeals = a.kind === "meals";
-      const key = `${isMeals ? "m" : "h"}|${participants.join("|")}`;
+      // JSON so a name containing the separator can never collide keys.
+      const key = JSON.stringify([isMeals ? "m" : "h", participants]);
       const pool = pools.get(key);
       if (pool) pool.cents += a.amountCents;
       else pools.set(key, { cents: a.amountCents, participants, meals: isMeals });
@@ -136,14 +144,16 @@ export function computeSettlement(input: SettlementInput): Settlement {
     }
   }
 
-  // Recurring bills are split over the current household only.
+  // Recurring bills are split over the current household only, pooled for
+  // the month and split once so the leftover cents do not land on the same
+  // first name for every bill. Credit for a fronted bill is per bill.
   let billsTotal = 0;
   for (const b of input.bills) {
     if (b.cents <= 0) continue;
     billsTotal += b.cents;
     if (b.paidBy) bump(paid, b.paidBy, b.cents);
-    for (const [name, cents] of splitCents(b.cents, input.members)) bump(bills, name, cents);
   }
+  for (const [name, cents] of splitCents(billsTotal, input.members)) bump(bills, name, cents);
 
   let rentTotal = 0;
   for (const m of members) rentTotal += input.rent[m] ?? 0;

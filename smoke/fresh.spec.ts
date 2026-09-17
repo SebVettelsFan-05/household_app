@@ -598,6 +598,87 @@ test("Back closes a sheet even after another sheet closed itself", async () => {
   await expect(page.locator(".fresh-title")).toHaveText("Recipes");
 });
 
+test("a worked month settles to the hand-computed cents in every view", async () => {
+  // docs/SETTLEMENT_MATH.md, "Worked month". Expected values are computed by
+  // hand there, not derived from the code under test.
+  const api = page.request;
+  const receipt = { name: "receipt.png", mimeType: "image/png", buffer: TINY_PNG };
+  const post = async (store: string, paidBy: string, amountCents: number, allocations: unknown[]) => {
+    const res = await api.post("/api/expenses", {
+      multipart: { amountCents: String(amountCents), store, paidBy, occurredOn: TODAY, allocations: JSON.stringify(allocations), receipt },
+    });
+    expect(res.ok()).toBeTruthy();
+  };
+  await clearMonthExpenses(api);
+  const put = async (key: string, value: unknown) => {
+    const res = await api.put(`/api/settings/${key}`, { data: { value } });
+    expect(res.ok(), `${key}: ${await res.text()}`).toBeTruthy();
+  };
+  await put("meal_group", { members: ["Arthur", "Eli", "Minh"] });
+  await put("rent_alloc", {
+    schedule: [{ from: "2026-05", alloc: { Arthur: 80000, Daniel: 80000, Eli: 70000, Ibrahim: 70000, Minh: 70000 } }],
+    overrides: {},
+  });
+  await put("recurring_fixed", [
+    { id: "fixed-mainstay-internet", name: "Internet", protected: true, paidBy: "Arthur", activeFrom: "2026-05", schedule: [{ from: "2026-05", cents: 8999 }], overrides: {} },
+    { id: "fixed-mainstay-rental-insurance", name: "Rental insurance", protected: true, activeFrom: "2026-05", schedule: [{ from: "2026-05", cents: 3250 }], overrides: {} },
+  ]);
+  await post("Costco", "Arthur", 14000, [
+    { kind: "meals", amountCents: 9000 },
+    { kind: "house", amountCents: 3000 },
+    { kind: "personal", amountCents: 2000 },
+  ]);
+  await post("No Frills", "Eli", 4380, [{ kind: "meals", amountCents: 4380 }]);
+  await post("Pizza", "Daniel", 5820, [{ kind: "custom", amountCents: 5820, splitAmong: ["Daniel", "Eli", "Minh"] }]);
+  await post("Shoppers", "Minh", 3145, [{ kind: "house", amountCents: 3145 }]);
+
+  // Positive = send to the joint account. Hand-computed in the doc.
+  const expected = { Arthur: 67140, Daniel: 79799, Eli: 75699, Ibrahim: 73679, Minh: 76933 };
+  try {
+    await clearBillCache(page);
+    await page.reload();
+    await gotoTab(page, "Expenses");
+    await page.getByRole("tab", { name: "Month" }).click();
+    // Bills and rent hydrate after the rows first paint; the month total is
+    // the signal that everything is in.
+    await expect(page.locator(".fresh-month")).toContainText("$4,075.94");
+    expect(await freshSettlement(page)).toEqual(expected);
+
+    // Home's money block reads the same store.
+    await gotoTab(page, "Home");
+    await expect(page.locator(".fresh-money-total")).toContainText("$4,075.94");
+    const home = await page.locator(".fresh-money-rows").evaluate((root) => {
+      const out: Record<string, number> = {};
+      for (const row of root.querySelectorAll(".fresh-money-row")) {
+        const name = row.querySelector(".fresh-money-name")?.textContent ?? "";
+        const amt = row.querySelector(".fresh-money-amount");
+        const cents = Math.round(parseFloat((amt?.textContent ?? "").replace(/[^0-9.]/g, "") || "0") * 100);
+        out[name] = amt?.classList.contains("withdraw") ? -cents : cents;
+      }
+      return out;
+    });
+    expect(home).toEqual(expected);
+
+    // And the classic split card, which has its own rendering path.
+    await page.evaluate(() => window.localStorage.setItem("hh_ui", "classic"));
+    await page.reload();
+    await page.locator(".wrap").waitFor();
+    await page.locator(".tab-bar button", { hasText: "Expenses" }).click();
+    await page.getByRole("button", { name: "Monthly", exact: true }).click();
+    await page.locator(".split-card").waitFor();
+    await expect(page.locator(".monthly-card")).toContainText("$4,075.94");
+    expect(await classicSettlement(page)).toEqual(expected);
+  } finally {
+    await page.evaluate(() => window.localStorage.setItem("hh_ui", "fresh"));
+    await api.put("/api/settings/recurring_fixed", { data: { value: [] } });
+    await api.put("/api/settings/rent_alloc", { data: { value: { schedule: [], overrides: {} } } });
+    await clearMonthExpenses(api);
+    await seedSplitExpense(api);
+    await clearBillCache(page);
+    await page.reload();
+  }
+});
+
 test("closing a sheet hands the keyboard back to whatever opened it", async () => {
   await gotoTab(page, "Recipes");
   const opener = page.getByRole("button", { name: "Favorites" }).first();
@@ -659,13 +740,14 @@ test("Back walks the tabs and closes a sheet without leaving the app", async () 
   await settleHistory();
   await gotoTab(page, "Home");
   await gotoTab(page, "Grocery");
-  expect(new URL(page.url()).hash).toBe("#grocery");
+  await expect(page).toHaveURL(/#grocery$/);
   await gotoTab(page, "Recipes");
-  expect(new URL(page.url()).hash).toBe("#recipes");
+  await expect(page).toHaveURL(/#recipes$/);
 
   // A reload lands on the tab the user was on, not back on Home.
   await page.reload();
   await expect(page.locator(".fresh-title")).toHaveText("Recipes");
+  await settleHistory();
 
   await page.goBack();
   await expect(page.locator(".fresh-title")).toHaveText("Grocery");
@@ -1036,6 +1118,8 @@ test("the fresh month and the classic breakdown settle to the same numbers", asy
   await page.getByRole("tab", { name: "Month" }).click();
   await page.locator(".fresh-month").waitFor();
   await page.locator(".fresh-month .fresh-settle-row").first().waitFor();
+  // $120 receipt plus the $89.99 Internet bill: wait for hydration to land.
+  await expect(page.locator(".fresh-month")).toContainText("$209.99");
   const internetRow = page.locator(".fresh-month .fresh-bill-row", { hasText: "Internet" });
   await expect(internetRow).toBeVisible();
   await expect(internetRow).not.toContainText("Paid by");
