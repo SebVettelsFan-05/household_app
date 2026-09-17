@@ -47,7 +47,7 @@ type CacheEntry = {
 };
 const CACHE = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24h
-const PARSER_VERSION = "v5";
+const PARSER_VERSION = "v6";
 const cacheKey = (url: string) => `${PARSER_VERSION}:${url}`;
 
 // Same-instance rate cap. Generous because this is a household app, not a
@@ -174,9 +174,7 @@ export async function POST(req: NextRequest) {
         name: scraped.name ?? "",
         description: scraped.description ?? "",
         ingredients: parsedIngredients,
-        hasApproximate: parsedIngredients.some(
-          (ingredient) => ingredient.approximate
-        ),
+        hasApproximate: parsedIngredients.some((ingredient) => ingredient.approximate || ingredient.quantity <= 0),
         servings: scraped.servings ?? 0,
         source: scraped.source,
       };
@@ -201,10 +199,11 @@ export async function POST(req: NextRequest) {
         );
         return {
           name: parsed.name,
-          // 0 grams is a "fill me in" signal — UI shows it clearly so the
-          // user knows the conversion wasn't possible (no unit, weird unit,
-          // or count-based like "1 onion").
-          quantity: parsed.quantity,
+          // A line the parser could not weigh comes back as 1 g rather
+          // than 0, so every fetched ingredient can go straight onto the
+          // grocery list; it is flagged approximate so the user is told to
+          // check it.
+          quantity: Math.max(1, parsed.quantity),
           category,
         };
       }
