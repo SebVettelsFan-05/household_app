@@ -1879,3 +1879,97 @@ button:active { transform: scale(0.98); }
 .scale-note {
   margin: 0 0 8px; font-size: 12px; color: var(--ink-soft);
 }
+
+/* ---------------------------------------------------------------- *
+ * Swipe to delete
+ *
+ * Shared by both looks: the classic rows below and the fresh ones in
+ * fresh.css sit inside the same two-layer wrapper (components/SwipeRow).
+ * An idle row is styled exactly as it was before — no clipping, no
+ * background, no transform — so nothing about the list changes until a
+ * finger is actually on it.
+ * ---------------------------------------------------------------- */
+
+.swipe-row {
+  position: relative;
+  /* The browser keeps vertical panning; sideways movement comes to us. */
+  touch-action: pan-y;
+  /* Fixed either side of the theme: the danger tokens go salmon in dark
+     mode, which is not a colour that says "this deletes". */
+  --swipe-red: #b3261e;
+  --swipe-btn-right: 10px;
+}
+:root[data-theme="dark"] .swipe-row {
+  --swipe-red: #c9382c;
+}
+/* Clipped only while the row is moving or open, so an idle row keeps its
+   card shadow and its focus ring uncut. */
+.swipe-row.is-active {
+  overflow: clip;
+}
+.swipe-row.is-swiping {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.swipe-back {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--swipe-red) 14%, transparent);
+}
+/* Past the delete threshold the whole strip goes red: releasing now deletes,
+   and that has to be unmistakable without an animation to say it. */
+.swipe-row.is-armed .swipe-back {
+  background: var(--swipe-red);
+}
+.swipe-delete {
+  position: absolute;
+  top: 50%;
+  right: var(--swipe-btn-right);
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--swipe-red);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.swipe-row.is-armed .swipe-delete {
+  background: #fff;
+  color: var(--swipe-red);
+}
+.swipe-delete:focus-visible {
+  outline: 2px solid var(--swipe-red);
+  outline-offset: 2px;
+}
+.swipe-row.is-armed .swipe-delete:focus-visible {
+  outline-color: #fff;
+}
+/* The row itself, which is what moves. It has to be opaque or the red reads
+   through it; in the classic look the row card already is. */
+.swipe-front {
+  position: relative;
+  z-index: 1;
+  border-radius: inherit;
+}
+/* A ticked-off classic row is drawn at 55% opacity, so it is not opaque:
+   the button would ghost through it at rest and the red while it moves.
+   At rest the back layer is simply not drawn; in motion the front layer
+   carries the page colour, which is what the dimmed card was already
+   blending with. */
+.swipe-row:not(.is-active) .swipe-back {
+  visibility: hidden;
+}
+.cat-group > .swipe-row.is-active > .swipe-front {
+  background: var(--bg);
+}
+/* Classic rows are rounded cards, so the red behind them is clipped to the
+   same silhouette rather than squaring off their corners. */
+.cat-group > .swipe-row {
+  border-radius: 12px;
+}

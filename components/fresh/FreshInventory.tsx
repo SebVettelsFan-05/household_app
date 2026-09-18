@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import AddItemForm from "@/components/AddItemForm";
 import EditModal from "@/components/EditModal";
 import FreshSheet from "@/components/fresh/FreshSheet";
+import SwipeRow from "@/components/SwipeRow";
 import { IconPlus, IconSearch } from "@/components/fresh/icons";
+import { useItemDelete } from "@/lib/rowDelete";
 import { buildColorLookup } from "@/lib/categoryColors";
 import { expiryStatus, fmtQty } from "@/lib/format";
 import { sortCategories } from "@/lib/normalize";
@@ -69,6 +71,10 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("name");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // At most one row shows its delete button at a time.
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+
+  const removeRow = useItemDelete(data.items, data.setItems, data.showToast);
 
   const editing = editingId
     ? (data.items.find((i) => i.id === editingId) ?? null)
@@ -159,38 +165,46 @@ export default function FreshInventory({ data, onManageCategories }: Props) {
     const expiryLabel =
       status.cls === "" ? farExpiryLabel(item.expiry) : status.label;
     return (
-      <button
+      <SwipeRow
         key={item.id}
-        type="button"
-        className="fresh-row"
-        onClick={() => setEditingId(item.id)}
+        id={item.id}
+        openId={swipedId}
+        onOpenChange={setSwipedId}
+        label={`Delete ${item.name}`}
+        onDelete={() => void removeRow(item)}
       >
-        <span className="fresh-row-main">
-          <span className="fresh-row-title">{item.name}</span>
-          <span className="fresh-row-meta">
-            {withCategory ? (
-              <span className="fresh-row-note">{item.category}</span>
-            ) : null}
-            {expiryLabel ? (
-              <span
-                className={`fresh-badge${
-                  status.cls === "expired"
-                    ? " danger"
-                    : status.cls === "expiring"
-                      ? " warn"
-                      : ""
-                }`}
-              >
-                {expiryLabel}
-              </span>
-            ) : null}
+        <button
+          type="button"
+          className="fresh-row"
+          onClick={() => setEditingId(item.id)}
+        >
+          <span className="fresh-row-main">
+            <span className="fresh-row-title">{item.name}</span>
+            <span className="fresh-row-meta">
+              {withCategory ? (
+                <span className="fresh-row-note">{item.category}</span>
+              ) : null}
+              {expiryLabel ? (
+                <span
+                  className={`fresh-badge${
+                    status.cls === "expired"
+                      ? " danger"
+                      : status.cls === "expiring"
+                        ? " warn"
+                        : ""
+                  }`}
+                >
+                  {expiryLabel}
+                </span>
+              ) : null}
+            </span>
           </span>
-        </span>
-        <span className="fresh-row-qty fresh-num">
-          {qty.num}
-          {qty.unit}
-        </span>
-      </button>
+          <span className="fresh-row-qty fresh-num">
+            {qty.num}
+            {qty.unit}
+          </span>
+        </button>
+      </SwipeRow>
     );
   }
 

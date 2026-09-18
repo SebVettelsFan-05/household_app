@@ -2682,3 +2682,19 @@ button.fresh-row-main {
 .fresh .search-row input {
   min-height: 44px;
 }
+
+/* ---------------------------------------------------------------- *
+ * Swipe to delete, fresh side
+ *
+ * The shared two-layer wrapper lives in globals.css; these are the two
+ * things it cannot know: fresh rows are transparent and sit straight on the
+ * paper, and the fresh look has no rounded row cards to clip to.
+ * ---------------------------------------------------------------- */
+
+.fresh .swipe-front {
+  background: var(--paper);
+}
+/* Rows drawn inside a card sit on the card's own ground instead. */
+.fresh .fresh-card .swipe-front {
+  background: var(--card);
+}

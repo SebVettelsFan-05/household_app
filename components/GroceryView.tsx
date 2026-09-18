@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import AddGroceryForm from "@/components/AddGroceryForm";
 import EditGroceryModal from "@/components/EditGroceryModal";
 import GroceryItemRow from "@/components/GroceryItemRow";
+import SwipeRow from "@/components/SwipeRow";
+import type { ToastAction } from "@/components/Toast";
 import {
   clearGrocery,
   moveDoneGroceryToInventory,
@@ -12,6 +14,7 @@ import {
 } from "@/lib/client";
 import { buildColorLookup, getCategoryColor } from "@/lib/categoryColors";
 import { sortCategories } from "@/lib/normalize";
+import { useGroceryDelete } from "@/lib/rowDelete";
 import type { CategoryDef, GroceryItem, Item } from "@/lib/types";
 
 type SortMode = "store" | "name";
@@ -29,7 +32,8 @@ type Props = {
   loadError: string | null;
   onGroceryChange: (next: GroceryItem[]) => void;
   onItemsChange: (next: Item[]) => void;
-  onToast: (msg: string) => void;
+  /** The shell's toast; an action turns it into the Undo toast. */
+  onToast: (msg: string, action?: ToastAction) => void;
   onManageCategories: () => void;
 };
 
@@ -48,6 +52,10 @@ export default function GroceryView({
   const [busy, setBusy] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("store");
   const [hideDone, setHideDone] = useState(false);
+  // At most one row shows its delete button at a time.
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+
+  const removeRow = useGroceryDelete(grocery, onGroceryChange, onToast);
 
   const colorFor = useMemo(() => buildColorLookup(categories), [categories]);
 
@@ -267,14 +275,22 @@ export default function GroceryView({
                   <span className="cat-group-count">{g.items.length}</span>
                 </div>
                 {g.items.map((it) => (
-                  <GroceryItemRow
+                  <SwipeRow
                     key={it.id}
-                    item={it}
-                    color={colorFor(it.category)}
-                    busy={busy}
-                    onToggle={toggle}
-                    onOpen={setEditingId}
-                  />
+                    id={it.id}
+                    openId={swipedId}
+                    onOpenChange={setSwipedId}
+                    label={`Delete ${it.name}`}
+                    onDelete={() => void removeRow(it)}
+                  >
+                    <GroceryItemRow
+                      item={it}
+                      color={colorFor(it.category)}
+                      busy={busy}
+                      onToggle={toggle}
+                      onOpen={setEditingId}
+                    />
+                  </SwipeRow>
                 ))}
               </div>
             );

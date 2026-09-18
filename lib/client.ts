@@ -35,6 +35,7 @@ import type {
   UpdateExpenseCategoryResponse,
   ListSharedAccountsResponse,
   AllocationKind,
+  GroceryPool,
   MealGroup,
 } from "./types";
 import { isBuyer, MEAL_GROUP_KEY } from "./types";
@@ -224,6 +225,9 @@ export type AddGroceryInput = {
   categoryReviewed?: boolean;
   store?: string;
   addedBy: string;
+  // Dormant in the UI (every row is "house"), but an Undo that re-posts a
+  // deleted row should put back exactly what that row carried.
+  pool?: GroceryPool;
 };
 
 export async function addGrocery(input: AddGroceryInput) {

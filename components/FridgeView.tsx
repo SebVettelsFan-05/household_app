@@ -5,8 +5,11 @@ import AddItemForm from "@/components/AddItemForm";
 import EditModal from "@/components/EditModal";
 import FilterRow from "@/components/FilterRow";
 import ItemRow from "@/components/ItemRow";
+import SwipeRow from "@/components/SwipeRow";
+import type { ToastAction } from "@/components/Toast";
 import { buildColorLookup, getCategoryColor } from "@/lib/categoryColors";
 import { sortCategories } from "@/lib/normalize";
+import { useItemDelete } from "@/lib/rowDelete";
 import type { CategoryDef, Item, SortMode } from "@/lib/types";
 
 type FridgeSortMode = Exclude<SortMode, "newest">;
@@ -36,7 +39,8 @@ type Props = {
   loading: boolean;
   loadError: string | null;
   onItemsChange: (next: Item[]) => void;
-  onToast: (msg: string) => void;
+  /** The shell's toast; an action turns it into the Undo toast. */
+  onToast: (msg: string, action?: ToastAction) => void;
   onManageCategories: () => void;
 };
 
@@ -55,6 +59,10 @@ export default function FridgeView({
   const [filterCats, setFilterCats] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  // At most one row shows its delete button at a time.
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+
+  const removeRow = useItemDelete(items, onItemsChange, onToast);
 
   // Prune the selection when categories disappear (deleted from manage),
   // so an old filter doesn't keep silently hiding everything.
@@ -222,12 +230,20 @@ export default function FridgeView({
                   <span className="cat-group-count">{g.items.length}</span>
                 </div>
                 {g.items.map((it) => (
-                  <ItemRow
+                  <SwipeRow
                     key={it.id}
-                    item={it}
-                    color={colorFor(it.category)}
-                    onClick={setEditingId}
-                  />
+                    id={it.id}
+                    openId={swipedId}
+                    onOpenChange={setSwipedId}
+                    label={`Delete ${it.name}`}
+                    onDelete={() => void removeRow(it)}
+                  >
+                    <ItemRow
+                      item={it}
+                      color={colorFor(it.category)}
+                      onClick={setEditingId}
+                    />
+                  </SwipeRow>
                 ))}
               </div>
             );
