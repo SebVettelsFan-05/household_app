@@ -142,6 +142,39 @@ right. Section header on the right shows the week's cook tally as person
 discs with a count badge. Favorites and Archive as two secondary buttons
 under the strip.
 
+Moving a dinner. Every planned day and every no-meal day carries a grab
+handle at its right: a 34px icon button labelled "Move". Tapping it
+lifts that dinner. The card is outlined in the section colour, a hint
+bar reads "Moving <dish>, tap a day" with a Cancel button beside it, and
+every other day row and every cell of the 7-day strip turns into a
+dashed drop target that fills with the section colour under the pointer
+or the focus ring. Tapping one lands the dinner: an empty day takes it,
+a planned day trades days with it and the cooks travel with their
+dinners, and a no-meal day sends its marker to the day that was vacated.
+Escape and Cancel drop the lift without writing anything. The hint bar
+is an overlay and takes no layout space — in the flow it pushed the list
+70-100px down the page the moment a dinner was picked up, moving the day
+the finger was already aimed at. On a phone it floats above the tab bar
+(under the top bar it covered the week strip, and the strip is how a
+dinner crosses weeks there); on a wide screen it sits under the top bar,
+centred in the content column. The classic look has no fixed chrome at
+all, so its bar floats at the bottom of the viewport. The same handle
+drags, and only the handle, so tapping a card to edit it and scrolling
+the list still work: 6px of travel with a mouse, a 200ms hold with a
+finger (a swipe that starts on the handle scrolls the page instead), and
+Space then the arrow keys with a keyboard. What rides under the pointer
+is a plain pill with the dish name; nothing about the gesture depends on
+a transition or a keyframe. A finished move raises a toast with an Undo
+button that puts the dinner back — the shell's one toast, the same slot
+every other message uses, so two never stack; the next plain message
+simply replaces it. Tapping Next week while a dinner is in the air keeps
+it in the air, which is how a dinner crosses weeks on a phone; on a wide
+screen both weeks are already on the page. The classic look has the same
+two gestures over its card grid, and both editors treat a changed
+Day/Week the way a drop does: an empty day is a plain save, a planned
+day asks "Swap with …?" first, and a no-meal day needs no asking — the
+marker is not deleted, it takes the day being vacated.
+
 Grocery. Filter chips All / Meals / House / Personal. Then sections by pool
 in the order Meals, House, Personal, each with its tag and count. Rows: a
 24px circular checkbox, name, quantity in grams right-aligned in tabular

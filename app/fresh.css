@@ -1896,6 +1896,165 @@ button.fresh-row-main {
   font-size: 15px;
   font-weight: 600;
   color: var(--ink-soft);
+  /* The row also carries the move handle and two actions; keep the label
+     to one line so the row never grows on a phone. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 419px) {
+  .fresh-day-off {
+    gap: 6px;
+    padding-right: 6px;
+  }
+}
+
+/* ---- Moving a dinner to another day ---- */
+
+/* Each day sits in its own positioned box so the whole day can be covered
+   by one drop target while a card is in the air. */
+.fresh-day-slot {
+  position: relative;
+  min-width: 0;
+}
+.fresh-day-slot .fresh-day-card {
+  position: relative;
+}
+/* The handle sits in the card's corner; keep the dish out from under it. */
+.fresh-day-slot .fresh-day-card-tap {
+  padding-right: 40px;
+}
+.fresh-move-handle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1.5px solid var(--hairline);
+  background: var(--card);
+  color: var(--ink-soft);
+  cursor: grab;
+}
+.fresh-day-card .fresh-move-handle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.fresh-move-handle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.fresh-move-handle:focus-visible {
+  outline: 2px solid var(--section);
+  outline-offset: 2px;
+}
+
+/* The card in the air. An outline, not a transform: animations are off. */
+.fresh-day-slot.is-moving {
+  outline: 2px solid var(--section);
+  outline-offset: 3px;
+  border-radius: var(--r-card);
+}
+.fresh-move-target {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 2px dashed var(--section);
+  border-radius: var(--r-card);
+  background: transparent;
+  cursor: pointer;
+}
+.fresh-move-target:hover,
+.fresh-move-target:focus-visible,
+.fresh-day-slot.is-over .fresh-move-target {
+  border-style: solid;
+  background: color-mix(in srgb, var(--section) 14%, transparent);
+}
+.fresh-move-target:focus-visible {
+  outline: 2px solid var(--section);
+  outline-offset: 2px;
+}
+.fresh-strip-day.is-target {
+  border-color: var(--section);
+  border-style: dashed;
+}
+.fresh-strip-day.is-over {
+  border-style: solid;
+  background: color-mix(in srgb, var(--section) 18%, transparent);
+}
+
+/* An overlay, and deliberately not a block in the flow: sitting between the
+   tools and the list it pushed every day row 70-100px down the page the
+   moment a card was picked up, which moved the day the finger was already
+   aimed at. Fixed, it takes no layout space and stays on screen while the
+   list is scrolled to the landing day. Above the content, below the top bar
+   and the sheets. */
+.fresh-move-bar {
+  position: fixed;
+  /* On a phone it rides above the tab bar. Under the top bar it covered the
+     upper half of the week strip, and tapping the strip is the only way a
+     dinner crosses into next week on a phone. */
+  bottom: calc(var(--nav-h) + 12px + env(safe-area-inset-bottom));
+  left: 16px;
+  right: 16px;
+  margin: 0 auto;
+  max-width: 608px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border: 2px solid var(--section);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+.fresh-move-bar-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.fresh-move-cancel {
+  flex: none;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fresh-move-cancel:focus-visible {
+  outline: 2px solid var(--section);
+  outline-offset: 2px;
+}
+
+/* The copy that rides under the pointer during a drag. dnd-kit sizes the
+   overlay to the handle it was dragged from, which is 34px wide, so the
+   pill positions itself out of that box rather than wrapping inside it. */
+.fresh-move-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: 60vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--section);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: var(--card-shadow);
+  cursor: grabbing;
 }
 
 /* ---------------------------------------------------------------- *
@@ -2289,6 +2448,17 @@ button.fresh-row-main {
   .fresh-weeks {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 20px;
+  }
+  /* No tab bar here and both weeks are already on the page, so the hint
+     goes back under the top bar, centred in the content column: the shell
+     minus the 240px rail, off the same edge the FAB measures itself from. */
+  .fresh-move-bar {
+    top: calc(var(--top-h) + 8px);
+    bottom: auto;
+    left: calc(max(32px, (100% - var(--shell-w)) / 2 + 32px) + 240px);
+    right: max(32px, (100% - var(--shell-w)) / 2 + 32px);
+    margin: 0;
+    max-width: none;
   }
 }
 

@@ -300,7 +300,7 @@ export default function FreshApp({ data, onSwitchUi }: Props) {
         />
       ) : null}
 
-      <Toast message={data.toast} />
+      <Toast message={data.toast} action={data.toastAction ?? undefined} />
     </div>
   );
 }

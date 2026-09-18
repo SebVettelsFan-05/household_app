@@ -3,6 +3,7 @@ import {
   test,
   type APIRequestContext,
   type Browser,
+  type Dialog,
   type Page,
 } from "@playwright/test";
 import fs from "node:fs";
@@ -1433,6 +1434,551 @@ test("a Saturday dinner is a real slot in both shells", async () => {
   for (const r of list.recipes) {
     if (r.name === name) await page.request.delete(`/api/recipes/${encodeURIComponent(r.id)}`);
   }
+});
+
+/* ---------- moving dinners ---------- */
+
+type SmokeRecipe = {
+  id: string;
+  weekStart: string;
+  day: number;
+  assignedTo: string;
+  name: string;
+  description: string;
+  noMeal: boolean;
+};
+
+const MOVE_A = "Fresh Smoke Bun cha";
+const MOVE_B = "Fresh Smoke Congee";
+
+async function recipeRows(api: APIRequestContext): Promise<SmokeRecipe[]> {
+  const body = await (await api.get("/api/recipes")).json();
+  return body.recipes ?? [];
+}
+
+/**
+ * Clears both visible weeks and plants exactly these rows. A row with no
+ * name is a no-meal marker. The days are fixed numbers, never "today", so a
+ * move test reads the same whichever day of the week it runs on.
+ */
+async function planWeeks(
+  api: APIRequestContext,
+  rows: { weekStart?: string; day: number; name?: string; cook?: string }[]
+) {
+  for (const r of await recipeRows(api)) {
+    await api.delete(`/api/recipes/${encodeURIComponent(r.id)}`);
+  }
+  for (const row of rows) {
+    await api.post("/api/recipes", {
+      data: {
+        weekStart: row.weekStart ?? WEEK_START,
+        day: row.day,
+        assignedTo: row.cook ?? "",
+        name: row.name ?? "",
+        ingredients: [],
+        noMeal: row.name ? undefined : true,
+      },
+    });
+  }
+}
+
+/** "<week>/<day>" for a named dinner, straight from the API. */
+async function slotOf(api: APIRequestContext, name: string): Promise<string> {
+  const row = (await recipeRows(api)).find((r) => r.name === name);
+  return row ? `${row.weekStart}/${row.day}` : "gone";
+}
+
+/** The same, for the week's no-meal marker. */
+async function markerSlot(api: APIRequestContext): Promise<string> {
+  const row = (await recipeRows(api)).find((r) => r.noMeal);
+  return row ? `${row.weekStart}/${row.day}` : "gone";
+}
+
+/** Puts the suite's own fixture back after a move test rearranged the week. */
+async function restoreFixtureWeek() {
+  await resetFixtures(page.request);
+  await seedFixtureRecipe(page.request);
+  await page.reload();
+}
+
+const thisWeek = () =>
+  page.locator(".fresh-week", { hasText: "This week" }).first();
+
+test("a dinner moves to an empty day, and Undo puts it back", async () => {
+  await planWeeks(page.request, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+
+  await week
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await expect(page.locator(".fresh-move-bar")).toContainText(
+    `Moving ${MOVE_A}`
+  );
+  await page.screenshot({
+    path: path.join(OUT, "recipes-moving-1920.png"),
+    fullPage: true,
+  });
+
+  await week
+    .locator('.fresh-day-slot[data-day="3"]')
+    .getByRole("button", { name: /^Move to / })
+    .click();
+  await expect(
+    week.locator('.fresh-day-slot[data-day="3"] .fresh-day-dish')
+  ).toHaveText(MOVE_A);
+  await expect(page.locator(".fresh-move-bar")).toHaveCount(0);
+  await expect.poll(() => slotOf(page.request, MOVE_A)).toBe(`${WEEK_START}/3`);
+
+  await page.locator(".toast.toast-action .toast-action-btn").click();
+  await expect(
+    week.locator('.fresh-day-slot[data-day="0"] .fresh-day-dish')
+  ).toHaveText(MOVE_A);
+  await expect.poll(() => slotOf(page.request, MOVE_A)).toBe(`${WEEK_START}/0`);
+});
+
+test("dropping a dinner on another day swaps them, cooks and all", async () => {
+  await planWeeks(page.request, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 2, name: MOVE_B, cook: "Minh" },
+  ]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+
+  await week
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await week
+    .locator('.fresh-day-slot[data-day="2"]')
+    .getByRole("button", { name: /^Move to / })
+    .click();
+
+  // The cook travels with the dinner, so Tuesday now reads Eli.
+  const tuesday = week.locator('.fresh-day-slot[data-day="2"]');
+  await expect(tuesday.locator(".fresh-day-dish")).toHaveText(MOVE_A);
+  await expect(tuesday.locator(".fresh-person-name")).toHaveText("Eli");
+  const sunday = week.locator('.fresh-day-slot[data-day="0"]');
+  await expect(sunday.locator(".fresh-day-dish")).toHaveText(MOVE_B);
+  await expect(sunday.locator(".fresh-person-name")).toHaveText("Minh");
+
+  await expect.poll(() => slotOf(page.request, MOVE_A)).toBe(`${WEEK_START}/2`);
+  await expect.poll(() => slotOf(page.request, MOVE_B)).toBe(`${WEEK_START}/0`);
+});
+
+test("a dinner dropped on a no-meal day sends the marker to the day it left", async () => {
+  await planWeeks(page.request, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 4 },
+  ]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+  await expect(
+    week.locator('.fresh-day-slot[data-day="4"] .fresh-day-off')
+  ).toBeVisible();
+
+  await week
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await week
+    .locator('.fresh-day-slot[data-day="4"]')
+    .getByRole("button", { name: /^Move to / })
+    .click();
+
+  await expect(
+    week.locator('.fresh-day-slot[data-day="4"] .fresh-day-dish')
+  ).toHaveText(MOVE_A);
+  await expect(
+    week.locator('.fresh-day-slot[data-day="0"] .fresh-day-off')
+  ).toBeVisible();
+  await expect.poll(() => slotOf(page.request, MOVE_A)).toBe(`${WEEK_START}/4`);
+  await expect.poll(() => markerSlot(page.request)).toBe(`${WEEK_START}/0`);
+});
+
+test("a marker moves too, and Escape drops a pending move", async () => {
+  await planWeeks(page.request, [{ day: 1 }]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+
+  await week
+    .locator('.fresh-day-slot[data-day="1"]')
+    .getByRole("button", { name: "Move" })
+    .click();
+  await expect(page.locator(".fresh-move-bar")).toContainText("Moving");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".fresh-move-bar")).toHaveCount(0);
+  await expect(week.locator(".fresh-move-target")).toHaveCount(0);
+  await expect.poll(() => markerSlot(page.request)).toBe(`${WEEK_START}/1`);
+
+  // Cancel does the same, and then the marker really does move.
+  await week
+    .locator('.fresh-day-slot[data-day="1"]')
+    .getByRole("button", { name: "Move" })
+    .click();
+  await page
+    .locator(".fresh-move-bar")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  await expect(page.locator(".fresh-move-bar")).toHaveCount(0);
+
+  await week
+    .locator('.fresh-day-slot[data-day="1"]')
+    .getByRole("button", { name: "Move" })
+    .click();
+  await week
+    .locator('.fresh-day-slot[data-day="5"]')
+    .getByRole("button", { name: /^Move to / })
+    .click();
+  await expect.poll(() => markerSlot(page.request)).toBe(`${WEEK_START}/5`);
+});
+
+test("the editor moves a dinner onto a marker day rather than deleting it", async () => {
+  await planWeeks(page.request, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 1 },
+  ]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+
+  // Nothing may be asked: a marker is not a dinner the user has to agree to
+  // trade with, and it is not destroyed either — it takes the vacated day.
+  let asked = "";
+  const onDialog = (d: Dialog) => {
+    asked = d.message();
+    void d.accept();
+  };
+  page.on("dialog", onDialog);
+
+  await week
+    .locator('.fresh-day-slot[data-day="0"] .fresh-day-card-tap')
+    .click();
+  await expect(page.getByRole("heading", { name: "Edit recipe" })).toBeVisible();
+  // A field edit rides along with the day change: it must survive the move.
+  await page.locator("#r-desc").fill("Moved onto the marker");
+  await page.locator("#r-day").selectOption("1");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  page.off("dialog", onDialog);
+  expect(asked).toBe("");
+
+  await expect(
+    week.locator('.fresh-day-slot[data-day="1"] .fresh-day-dish')
+  ).toHaveText(MOVE_A);
+  await expect(
+    week.locator('.fresh-day-slot[data-day="0"] .fresh-day-off')
+  ).toBeVisible();
+  await expect.poll(() => slotOf(page.request, MOVE_A)).toBe(`${WEEK_START}/1`);
+  await expect.poll(() => markerSlot(page.request)).toBe(`${WEEK_START}/0`);
+  await expect
+    .poll(async () =>
+      (await recipeRows(page.request)).find((r) => r.name === MOVE_A)
+        ?.description
+    )
+    .toBe("Moved onto the marker");
+});
+
+test("the moving hint floats over the list instead of pushing it down", async () => {
+  await planWeeks(page.request, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+  const row = week.locator('.fresh-day-slot[data-day="3"]');
+  const rowTop = () => row.evaluate((el) => el.getBoundingClientRect().top);
+
+  const before = await rowTop();
+  await week
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await expect(page.locator(".fresh-move-bar")).toBeVisible();
+  // The day the finger was already aimed at has not moved under it.
+  expect(await rowTop()).toBe(before);
+
+  // An overlay covers whatever it is over, so the list is scrolled past it;
+  // what may never be covered is the week strip, which is how a dinner
+  // crosses weeks, nor the first day row under the hand that just picked
+  // a dinner up.
+  const clear = await page.evaluate(() => {
+    const bar = document
+      .querySelector(".fresh-move-bar")!
+      .getBoundingClientRect();
+    const boxes = [
+      document.querySelector(".fresh-week[data-active='true'] .fresh-strip")!,
+      document.querySelector(".fresh-week[data-active='true'] .fresh-day-slot")!,
+    ].map((el) => el.getBoundingClientRect());
+    return boxes.every((b) => b.bottom <= bar.top || b.top >= bar.bottom);
+  });
+  expect(clear).toBe(true);
+
+  await page.locator(".fresh-move-bar").getByRole("button", { name: "Cancel" }).click();
+  expect(await rowTop()).toBe(before);
+});
+
+test("a move and the action after it share the one toast", async () => {
+  await planWeeks(page.request, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+
+  await week
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await week
+    .locator('.fresh-day-slot[data-day="3"]')
+    .getByRole("button", { name: /^Move to / })
+    .click();
+  await expect(page.locator(".toast.toast-action")).toContainText("Undo");
+  expect(await page.locator(".toast").count()).toBe(1);
+
+  // The next plain toast takes that same slot over; it never stacks on it.
+  await week
+    .locator('.fresh-day-slot[data-day="5"]')
+    .getByRole("button", { name: "No meal" })
+    .click();
+  await expect(page.locator(".toast")).toContainText("Marked as no shared meal");
+  expect(await page.locator(".toast").count()).toBe(1);
+  await expect(page.locator(".toast-action-btn")).toHaveCount(0);
+});
+
+test("a mouse drag swaps two dinners", async () => {
+  await planWeeks(page.request, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 2, name: MOVE_B, cook: "Minh" },
+  ]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+
+  const handle = week
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` });
+  const from = await handle.boundingBox();
+  if (!from) throw new Error("no grab handle");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  // Past the 6px the mouse sensor waits for: this is a drag, not a tap.
+  await page.mouse.move(
+    from.x + from.width / 2 + 12,
+    from.y + from.height / 2 + 12,
+    { steps: 4 }
+  );
+  await expect(page.locator(".fresh-move-ghost")).toHaveText(MOVE_A);
+
+  // Measured with the drag already under way: it is the page as it is now
+  // that the pointer has to land on.
+  const target = await week
+    .locator('.fresh-day-slot[data-day="2"]')
+    .boundingBox();
+  if (!target) throw new Error("no target day");
+  await page.mouse.move(
+    target.x + target.width / 2,
+    target.y + target.height / 2,
+    { steps: 8 }
+  );
+  await expect(week.locator('.fresh-day-slot[data-day="2"]')).toHaveClass(
+    /is-over/
+  );
+  // Viewport only, deliberately: a full-page shot resizes the page, and a
+  // resize is exactly what dnd-kit cancels a drag on.
+  await page.screenshot({ path: path.join(OUT, "recipes-dragging-1920.png") });
+  await page.mouse.up();
+
+  await expect.poll(() => slotOf(page.request, MOVE_A)).toBe(`${WEEK_START}/2`);
+  await expect.poll(() => slotOf(page.request, MOVE_B)).toBe(`${WEEK_START}/0`);
+});
+
+test("the arrow keys walk a dinner down the week and Space drops it", async () => {
+  await planWeeks(page.request, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab(page, "Recipes");
+  const week = thisWeek();
+
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await week
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .focus();
+  await page.keyboard.press("Space");
+  await expect(page.locator(".fresh-move-ghost")).toHaveText(MOVE_A);
+  // dnd-kit measures the days it can land on a frame or two after the drag
+  // starts, and an arrow key pressed before that has nothing to step to.
+  await page.waitForTimeout(200);
+  await page.keyboard.press("ArrowDown");
+  await expect(week.locator('.fresh-day-slot[data-day="1"]')).toHaveClass(
+    /is-over/
+  );
+  await page.keyboard.press("ArrowDown");
+  await expect(week.locator('.fresh-day-slot[data-day="2"]')).toHaveClass(
+    /is-over/
+  );
+  await page.keyboard.press("Space");
+  await expect.poll(() => slotOf(page.request, MOVE_A)).toBe(`${WEEK_START}/2`);
+});
+
+test("on a phone a dinner crosses to next week through the strip", async () => {
+  await planWeeks(page.request, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  const context = await browserRef.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+  });
+  await context.addInitScript(() => {
+    try {
+      window.localStorage.setItem("hh_ui", "fresh");
+    } catch {
+      /* ignore */
+    }
+  });
+  const phone = await context.newPage();
+  await login(phone);
+  await phone
+    .locator(".fresh-tabbar button", { hasText: "Recipes" })
+    .first()
+    .click();
+
+  const phoneRow = phone.locator(
+    `.fresh-day-slot[data-week="${WEEK_START}"][data-day="3"]`
+  );
+  const phoneRowTop = () =>
+    phoneRow.evaluate((el) => el.getBoundingClientRect().top);
+  const beforePickUp = await phoneRowTop();
+
+  await phone
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await expect(phone.locator(".fresh-move-bar")).toContainText(
+    `Moving ${MOVE_A}`
+  );
+  // The hint is an overlay: no day row moves under the finger that just
+  // tapped a handle, and the week strip stays uncovered.
+  expect(await phoneRowTop()).toBe(beforePickUp);
+  const stripClear = await phone.evaluate(() => {
+    const bar = document
+      .querySelector(".fresh-move-bar")!
+      .getBoundingClientRect();
+    const strip = document
+      .querySelector(".fresh-strip-phone")!
+      .getBoundingClientRect();
+    return strip.bottom <= bar.top || strip.top >= bar.bottom;
+  });
+  expect(stripClear).toBe(true);
+  await phone.screenshot({ path: path.join(OUT, "recipes-moving-390.png") });
+
+  // Switching weeks must not drop the card that is in the air.
+  await phone.getByRole("tab", { name: "Next week" }).click();
+  await expect(phone.locator(".fresh-move-bar")).toBeVisible();
+  await phone
+    .locator('.fresh-strip-phone .fresh-strip-day[data-day="4"]')
+    .click();
+  await expect
+    .poll(() => slotOf(phone.request, MOVE_A))
+    .toBe(`${addDaysYmd(WEEK_START, 7)}/4`);
+
+  await context.close();
+});
+
+test("on a phone a hold drags a dinner and a swipe only scrolls", async () => {
+  await planWeeks(page.request, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 2, name: MOVE_B, cook: "Minh" },
+    { day: 4, name: "Fresh Smoke Filler", cook: "Arthur" },
+    { day: 5, name: "Fresh Smoke Filler Two", cook: "Arthur" },
+  ]);
+  const context = await browserRef.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+  });
+  await context.addInitScript(() => {
+    try {
+      window.localStorage.setItem("hh_ui", "fresh");
+    } catch {
+      /* ignore */
+    }
+  });
+  const phone = await context.newPage();
+  await login(phone);
+  await phone
+    .locator(".fresh-tabbar button", { hasText: "Recipes" })
+    .first()
+    .click();
+  const cdp = await context.newCDPSession(phone);
+
+  const handle = phone
+    .locator('.fresh-day-slot[data-day="0"]')
+    .getByRole("button", { name: `Move ${MOVE_A}` });
+  const box = await handle.boundingBox();
+  if (!box) throw new Error("no grab handle");
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+
+  // A flick up from the handle is a scroll, not a drag: the touch sensor
+  // waits 200ms and gives up as soon as the finger travels 8px.
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y }],
+  });
+  for (const dy of [12, 40, 90, 150]) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: y - dy }],
+    });
+  }
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await expect(phone.locator(".fresh-move-ghost")).toHaveCount(0);
+  await expect(phone.locator(".fresh-move-bar")).toHaveCount(0);
+  expect(await phone.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+  // Holding still for the delay, and only then moving, is a drag.
+  await phone.evaluate(() => window.scrollTo(0, 0));
+  await phone.waitForTimeout(200);
+  const held = await handle.boundingBox();
+  if (!held) throw new Error("no grab handle");
+  const hx = held.x + held.width / 2;
+  const hy = held.y + held.height / 2;
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: hx, y: hy }],
+  });
+  await phone.waitForTimeout(320);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ x: hx, y: hy + 4 }],
+  });
+  await expect(phone.locator(".fresh-move-ghost")).toHaveText(MOVE_A);
+  const target = await phone
+    .locator(`.fresh-day-slot[data-week="${WEEK_START}"][data-day="2"]`)
+    .boundingBox();
+  if (!target) throw new Error("no target day");
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [
+      { x: target.x + target.width / 2, y: target.y + target.height / 2 },
+    ],
+  });
+  await expect(
+    phone.locator(`.fresh-day-slot[data-week="${WEEK_START}"][data-day="2"]`)
+  ).toHaveClass(/is-over/);
+  await phone.screenshot({ path: path.join(OUT, "recipes-dragging-390.png") });
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+
+  await expect.poll(() => slotOf(phone.request, MOVE_A)).toBe(`${WEEK_START}/2`);
+  await expect.poll(() => slotOf(phone.request, MOVE_B)).toBe(`${WEEK_START}/0`);
+  await context.close();
+  await restoreFixtureWeek();
 });
 
 /* ---------- phone geometry ---------- */

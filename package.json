@@ -9,7 +9,7 @@
     "backup:prod": "node scripts/local/backup-prod.mjs",
     "build": "next build",
     "start": "next start",
-    "test": "tsx --test lib/errors.test.ts lib/repo.test.ts lib/format.test.ts lib/guessCategory.test.ts lib/imageResize.test.ts lib/monthlyBills.test.ts lib/normalize.test.ts lib/parseIngredient.test.ts lib/recipeScraper.test.ts lib/settingsShape.test.ts lib/settlement.test.ts lib/settlement.invariants.test.ts lib/allocationEditor.test.ts",
+    "test": "tsx --test lib/errors.test.ts lib/repo.test.ts lib/format.test.ts lib/guessCategory.test.ts lib/imageResize.test.ts lib/monthlyBills.test.ts lib/normalize.test.ts lib/parseIngredient.test.ts lib/recipeMoves.test.ts lib/recipeScraper.test.ts lib/settingsShape.test.ts lib/settlement.test.ts lib/settlement.invariants.test.ts lib/allocationEditor.test.ts",
     "lint": "next lint",
     "smoke": "playwright test",
     "smoke:legacy": "playwright test smoke/legacy.spec.ts",
@@ -19,6 +19,8 @@
     "seed-from-sheet": "tsx --env-file=.env.local scripts/migrate-from-sheet.ts"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/utilities": "^3.2.2",
     "@neondatabase/serverless": "^1.1.0",
     "@zxing/browser": "^0.2.0",
     "drizzle-orm": "^0.45.2",

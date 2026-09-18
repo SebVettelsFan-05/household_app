@@ -44,6 +44,7 @@ import {
   type ResolveContext,
 } from "./allocations";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { planRecipeMove, type RecipeSlot } from "./recipeMoves";
 import {
   DEFAULT_CATEGORIES,
   DEFAULT_EXPENSE_CATEGORIES,
@@ -1550,6 +1551,51 @@ export async function updateRecipeRepo(
     db.update(recipesTable).set(patch).where(eq(recipesTable.id, id))
   );
   return listRecipesRepo();
+}
+
+/**
+ * Moves a recipe (or a "no meal" marker) onto another day, swapping with
+ * whatever already sits there. Only `week_start` and `day` change — the cook,
+ * the ingredients and `created_at` travel with the row untouched.
+ *
+ * The rewrites go out as one unit. A swap is three statements and the middle
+ * one is a state nobody may ever read: the row being moved is parked outside
+ * the week while the other row takes its day.
+ *
+ * `undo` is the slot the moved row came from; posting it back to this same
+ * operation reverses a move and a swap alike.
+ */
+export async function moveRecipeRepo(
+  id: string,
+  target: RecipeSlot
+): Promise<{ recipes: Recipe[]; undo: RecipeSlot & { id: string } }> {
+  const recipeId = requireId(id);
+  // The same window listRecipesRepo reads: past weeks are history, and a row
+  // outside the window is not something a drag could have picked up.
+  const weeks = [thisWeekStart(), nextWeekStart()];
+  const rows = await db
+    .select({
+      id: recipesTable.id,
+      weekStart: recipesTable.weekStart,
+      day: recipesTable.day,
+    })
+    .from(recipesTable)
+    .where(inArray(recipesTable.weekStart, weeks));
+
+  const plan = planRecipeMove(rows, recipeId, target);
+  if (plan.writes.length > 0) {
+    await withSlotConflict(() =>
+      runWritesAtomically((tx) =>
+        plan.writes.map((w) =>
+          tx
+            .update(recipesTable)
+            .set({ weekStart: w.weekStart, day: w.day })
+            .where(eq(recipesTable.id, w.id))
+        )
+      )
+    );
+  }
+  return { recipes: await listRecipesRepo(), undo: plan.undo };
 }
 
 export async function deleteRecipeRepo(id: string): Promise<Recipe[]> {

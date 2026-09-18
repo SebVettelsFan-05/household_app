@@ -74,6 +74,31 @@ Per-person accounting lives entirely in expense allocations (above).
   name/cook/ingredients, is hidden from the archive and favorites, and
   renders as a quiet card instead of an empty "add recipe" slot.
 
+### Moving dinners (`POST /api/recipes/move`)
+
+Dragging a card onto another day posts `{ id, weekStart, day }` and gets back
+`{ ok: true, recipes, undo }`. The day you drop on is either free — a plain
+move — or already taken, in which case the two rows trade days. Swapping is
+the only sane reading of the gesture: a cook travels with the dinner they
+signed up for, and a `no_meal` marker lands on the day that was vacated
+rather than being destroyed. Markers move and swap under the same rules as
+dinners. Both the row and the day it lands on must be inside this week or
+next (past weeks are read-only history), and dropping a row on the day it
+already occupies writes nothing.
+
+`undo` is the slot the moved row came from. Posting it straight back to the
+same endpoint reverses a move and a swap alike, because the row's old day now
+holds whatever it traded with.
+
+Only `week_start` and `day` change; the cook, ingredients and `created_at`
+travel with the row. A swap is three statements — the moved row parks on
+`day = -1` in its own week, the other row takes the vacated day, then the
+moved row lands — because the unique index on `(week_start, day)` is checked
+per statement, not at commit. The three go out through `runWritesAtomically`,
+so the parked state is never observable. `lib/recipeMoves.ts` decides the
+whole plan in memory (and is unit-tested there); `lib/repo.ts` only executes
+it.
+
 ## Settlement (`lib/settlement.ts`, pure)
 
 Per person, per month:

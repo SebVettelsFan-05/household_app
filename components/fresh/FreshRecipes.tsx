@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { DndContext, DragOverlay, useDroppable } from "@dnd-kit/core";
 import type { RecipeSlot } from "@/components/fresh/FreshApp";
 import { Avatar, personColor } from "@/components/fresh/people";
-import { IconArchive, IconLink, IconStar } from "@/components/fresh/icons";
+import {
+  IconArchive,
+  IconLink,
+  IconMove,
+  IconStar,
+} from "@/components/fresh/icons";
 import AddRecipeToGroceryModal from "@/components/AddRecipeToGroceryModal";
 import FavoritesModal from "@/components/FavoritesModal";
+import MoveHandle from "@/components/MoveHandle";
 import RecipeArchiveModal from "@/components/RecipeArchiveModal";
 import RecipeModal, { type RecipeFields } from "@/components/RecipeModal";
 import { cookCounts } from "@/lib/cookCounts";
@@ -20,6 +27,15 @@ import {
 import { useHouseholdToday } from "@/lib/useHouseholdToday";
 import type { FavoriteRecipe, Recipe, RecipeIngredient } from "@/lib/types";
 import { useRecipeWeeks } from "@/lib/useRecipeWeeks";
+import {
+  dishLabel,
+  moveCollisionDetection,
+  slotDropId,
+  stripDropId,
+  useMoveSensors,
+  useRecipeMoves,
+  type MoveTarget,
+} from "@/lib/useRecipeMoves";
 import type { HouseholdData } from "@/lib/useHouseholdData";
 
 type Props = {
@@ -83,6 +99,105 @@ function dateNumber(weekStart: string, day: number): number {
   return addDays(parseYmd(weekStart), day).getDate();
 }
 
+/** What a day is to a move in progress: nothing, the card being moved, or a landing place. */
+type MoveState = "idle" | "moving" | "target";
+
+/**
+ * One day of the list, wrapped so a move can land on it. While another card
+ * is in the air the whole day is covered by a single button, which is what
+ * makes it one tap target for a finger and one stop for the keyboard.
+ */
+function DaySlot({
+  weekStart,
+  day,
+  state,
+  onDrop,
+  children,
+}: {
+  weekStart: string;
+  day: number;
+  state: MoveState;
+  onDrop: () => void;
+  children: ReactNode;
+}) {
+  // Registered whether or not a move is in progress: dnd-kit measures the
+  // droppables when the drag starts, and one that was disabled at that
+  // moment never gets a rect, so nothing could be dropped on it.
+  const { setNodeRef, isOver } = useDroppable({
+    id: slotDropId(weekStart, day),
+    data: { weekStart, day },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      data-week={weekStart}
+      data-day={day}
+      className={`fresh-day-slot${state === "moving" ? " is-moving" : ""}${
+        state === "target" ? " is-target" : ""
+      }${isOver ? " is-over" : ""}`}
+    >
+      {children}
+      {state === "target" ? (
+        <button
+          type="button"
+          className="fresh-move-target"
+          onClick={onDrop}
+          aria-label={`Move to ${shortDayLabel(weekStart, day)}`}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** One cell of the 7-day strip, and a drop target while a card is in the air. */
+function StripDay({
+  variant,
+  weekStart,
+  day,
+  isToday,
+  planned,
+  noMeal,
+  target,
+  onSelect,
+}: {
+  variant: "phone" | "column";
+  weekStart: string;
+  day: number;
+  isToday: boolean;
+  planned: Recipe | null;
+  noMeal: boolean;
+  target: boolean;
+  onSelect: () => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: stripDropId(variant, weekStart, day),
+    data: { weekStart, day },
+  });
+  const label = `${DAY_LONG[day]} ${dateNumber(weekStart, day)}`;
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      data-week={weekStart}
+      data-day={day}
+      className={`fresh-strip-day${isToday ? " today" : ""}${
+        target ? " is-target" : ""
+      }${isOver ? " is-over" : ""}`}
+      onClick={onSelect}
+      aria-label={target ? `Move to ${label}` : label}
+    >
+      <span className="fresh-strip-letter">{DAY_LETTERS[day]}</span>
+      <span className="fresh-strip-num">{dateNumber(weekStart, day)}</span>
+      <span
+        className={`fresh-strip-dot${planned ? " filled" : noMeal ? " hollow" : ""}`}
+        style={
+          planned ? { background: personColor(planned.assignedTo) } : undefined
+        }
+      />
+    </button>
+  );
+}
+
 export default function FreshRecipes({
   data,
   mealGroup,
@@ -115,6 +230,21 @@ export default function FreshRecipes({
     onRecipesChange: data.setRecipes,
     onToast: data.showToast,
   });
+
+  const moves = useRecipeMoves({
+    recipes: data.recipes,
+    onRecipesChange: data.setRecipes,
+    onToast: data.showToast,
+  });
+  const sensors = useMoveSensors();
+
+  /** How a day reads while a card is in the air. */
+  function moveState(weekStart: string, day: number): MoveState {
+    if (!moves.moving) return "idle";
+    return moves.moving.weekStart === weekStart && moves.moving.day === day
+      ? "moving"
+      : "target";
+  }
 
   // Home hands over "plan tonight" by naming the slot; open it once and
   // let the parent clear the request so a later re-render doesn't reopen it.
@@ -196,28 +326,23 @@ export default function FreshRecipes({
         {COOKING_DAYS.map((d) => {
           const recipe = recipesByWeek.get(weekStart)?.get(d) ?? null;
           const planned = recipe && !recipe.noMeal ? recipe : null;
-          const noMeal = Boolean(recipe && recipe.noMeal);
+          const target = moveState(weekStart, d) === "target";
           return (
-            <button
+            <StripDay
               key={d}
-              type="button"
-              className={`fresh-strip-day${d === todayIdx ? " today" : ""}`}
-              onClick={() => openSlotEditor(weekStart, d)}
-              aria-label={`${DAY_LONG[d]} ${dateNumber(weekStart, d)}`}
-            >
-              <span className="fresh-strip-letter">{DAY_LETTERS[d]}</span>
-              <span className="fresh-strip-num">
-                {dateNumber(weekStart, d)}
-              </span>
-              <span
-                className={`fresh-strip-dot${planned ? " filled" : noMeal ? " hollow" : ""}`}
-                style={
-                  planned
-                    ? { background: personColor(planned.assignedTo) }
-                    : undefined
-                }
-              />
-            </button>
+              variant={variant}
+              weekStart={weekStart}
+              day={d}
+              isToday={d === todayIdx}
+              planned={planned}
+              noMeal={Boolean(recipe && recipe.noMeal)}
+              target={target}
+              onSelect={() =>
+                target
+                  ? moves.dropOn({ weekStart, day: d })
+                  : openSlotEditor(weekStart, d)
+              }
+            />
           );
         })}
       </div>
@@ -225,7 +350,17 @@ export default function FreshRecipes({
   }
 
   return (
-    <>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={moveCollisionDetection}
+      onDragStart={(e) => moves.startDrag(String(e.active.id))}
+      onDragCancel={moves.cancel}
+      onDragEnd={(e) => {
+        const target = e.over?.data.current as MoveTarget | undefined;
+        if (target) moves.moveTo(String(e.active.id), target);
+        else moves.cancel();
+      }}
+    >
       <div className="fresh-seg fresh-seg-weeks" role="tablist" aria-label="Week">
         {weeks.map((w, i) => (
           <button
@@ -257,6 +392,21 @@ export default function FreshRecipes({
           Archive
         </button>
       </div>
+
+      {moves.moving && !moves.dragging ? (
+        <div className="fresh-move-bar">
+          <span className="fresh-move-bar-text">
+            Moving {dishLabel(moves.moving)}, tap a day
+          </span>
+          <button
+            type="button"
+            className="fresh-move-cancel"
+            onClick={moves.cancel}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
 
       {data.recipesLoading ? (
         <div>
@@ -306,15 +456,38 @@ export default function FreshRecipes({
                     const [abbr, date] = shortDayLabel(weekStart, d).split(", ");
                     const key = `${weekStart}-${d}`;
 
+                    const state = moveState(weekStart, d);
+                    const slot = (content: ReactNode) => (
+                      <DaySlot
+                        key={key}
+                        weekStart={weekStart}
+                        day={d}
+                        state={state}
+                        onDrop={() => moves.dropOn({ weekStart, day: d })}
+                      >
+                        {content}
+                      </DaySlot>
+                    );
+
                     if (recipe && recipe.noMeal) {
-                      return (
-                        <div className="fresh-day-off" key={key}>
+                      return slot(
+                        <div className="fresh-day-off">
                           <span className="fresh-day-when">
                             {abbr} {date}
                           </span>
                           <span className="fresh-day-off-text">
-                            No shared dinner
+                            No dinner
                           </span>
+                          <MoveHandle
+                            id={recipe.id}
+                            slot={{ weekStart, day: d }}
+                            label="Move"
+                            className="fresh-move-handle"
+                            disabled={moves.busy}
+                            onPick={() => moves.pickUp(recipe.id)}
+                          >
+                            <IconMove size={18} />
+                          </MoveHandle>
                           <button
                             type="button"
                             className="fresh-text-btn"
@@ -335,8 +508,8 @@ export default function FreshRecipes({
                     }
 
                     if (!recipe) {
-                      return (
-                        <div className="fresh-day-empty" key={key}>
+                      return slot(
+                        <div className="fresh-day-empty">
                           <button
                             type="button"
                             className="fresh-day-add"
@@ -361,10 +534,9 @@ export default function FreshRecipes({
                       );
                     }
 
-                    return (
+                    return slot(
                       <article
                         className="fresh-day-card"
-                        key={key}
                         style={{
                           ["--cook" as string]: personColor(recipe.assignedTo),
                         }}
@@ -408,6 +580,16 @@ export default function FreshRecipes({
                             ) : null}
                           </span>
                         </button>
+                        <MoveHandle
+                          id={recipe.id}
+                          slot={{ weekStart, day: d }}
+                          label={`Move ${recipe.name}`}
+                          className="fresh-move-handle"
+                          disabled={moves.busy}
+                          onPick={() => moves.pickUp(recipe.id)}
+                        >
+                          <IconMove size={18} />
+                        </MoveHandle>
                         {recipe.link ? (
                           <div className="fresh-day-card-actions">
                             <a
@@ -454,6 +636,9 @@ export default function FreshRecipes({
           }}
           onError={(msg) => data.showToast("Error: " + msg)}
           onOpenAddToGrocery={setAddingToGrocery}
+          occupantAt={(weekStart, day) =>
+            recipesByWeek.get(weekStart)?.get(day) ?? null
+          }
         />
       ) : null}
 
@@ -493,6 +678,14 @@ export default function FreshRecipes({
           onError={(msg) => data.showToast("Error: " + msg)}
         />
       ) : null}
-    </>
+
+      {/* Nothing here may depend on a transition: the overlay is a plain
+          absolutely positioned copy that dnd-kit repositions per frame. */}
+      <DragOverlay dropAnimation={null}>
+        {moves.moving ? (
+          <div className="fresh-move-ghost">{dishLabel(moves.moving)}</div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }

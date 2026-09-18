@@ -252,3 +252,14 @@ export function IconSearch(p: IconProps) {
     p
   );
 }
+
+/** Four arrows from a centre: the grab handle that moves a dinner. */
+export function IconMove(p: IconProps) {
+  return svg(
+    <>
+      <path d="M12 3v18M3 12h18" />
+      <path d="m9 6 3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />
+    </>,
+    p
+  );
+}

@@ -8,6 +8,7 @@ import {
   addRecipe,
   deleteFavorite,
   deleteRecipe,
+  moveRecipe,
   parseIngredientsFromText,
   ROW_GONE_MESSAGE,
   scrapeRecipeFromUrl,
@@ -22,6 +23,19 @@ import {
 import { COOKING_DAYS, DAY_LONG, shortDayLabel } from "@/lib/dates";
 import { findFavoriteMatch, isFavoriteMatch } from "@/lib/favoriteMatch";
 import IngredientList from "./IngredientList";
+
+/**
+ * How the server turns down a day that is already planned. A save that hits
+ * this is offered as a swap instead of dead-ending on the error.
+ */
+const SLOT_TAKEN = /already has a recipe/i;
+
+/** How the dinner in the way is named in the confirm and the toast. */
+function occupantLabel(occupant: Recipe | null): string {
+  if (!occupant) return "the dinner already on that day";
+  if (occupant.noMeal) return "the no-meal day";
+  return `"${occupant.name}"`;
+}
 
 /** Reads a small count field. Blank or junk means "not set" (0). */
 function countOf(text: string): number {
@@ -66,6 +80,11 @@ type Props = {
    */
   onResult: (recipes: Recipe[] | null, toast: string) => void;
   onError: (msg: string) => void;
+  /**
+   * What is already planned on a (week, day), so a refused day change can
+   * name the dinner it collided with and offer to swap with it.
+   */
+  occupantAt?: (weekStart: string, day: number) => Recipe | null;
   // Hands the in-memory ingredient state to the picker so it works for both
   // saved and draft recipes.
   onOpenAddToGrocery: (data: {
@@ -91,6 +110,7 @@ export default function RecipeModal({
   onClose,
   onResult,
   onError,
+  occupantAt,
   onOpenAddToGrocery,
 }: Props) {
   const editing = mode === "edit";
@@ -226,18 +246,70 @@ export default function RecipeModal({
     setBusy(true);
     try {
       if (editing && recipeId) {
-        const res = await updateRecipe(recipeId, {
+        const id = recipeId;
+        const fields = {
           name: trimmed,
           assignedTo,
           link,
           description,
           ingredients,
-          day,
-          weekStart,
           servings: servingsNum,
           portions: portionsNum,
-        });
-        onResult(res.recipes, res.gone ? ROW_GONE_MESSAGE : "Saved");
+        };
+
+        // The typed edits go first, on the day the recipe still occupies: if
+        // the swap then fails, what the user wrote is already saved and only
+        // the day is left to retry. The other order would throw those edits
+        // away if the save after a successful swap failed.
+        const swapInto = async (occupant: Recipe | null) => {
+          const saved = await updateRecipe(id, fields);
+          if (saved.gone) {
+            onResult(saved.recipes, ROW_GONE_MESSAGE);
+            return;
+          }
+          const swapped = await moveRecipe(id, { weekStart, day });
+          onResult(swapped.recipes, `Swapped with ${occupantLabel(occupant)}`);
+        };
+
+        const slotChanged =
+          day !== initial.day || weekStart !== initial.weekStart;
+        // What is already on the landing day decides how the day change is
+        // written, and the client decides it because the server cannot: a
+        // plain PATCH carrying the new day replaces whatever sits there, and
+        // for a no-meal marker "replaces" means the marker is gone, with no
+        // swap offered and nothing to undo. Only a free day may be saved that
+        // way. A row that has drifted onto the landing day since the modal
+        // opened but is this same recipe is not in anybody's way.
+        const occupant = slotChanged
+          ? (occupantAt?.(weekStart, day) ?? null)
+          : null;
+        const inTheWay = occupant && occupant.id !== id ? occupant : null;
+
+        if (inTheWay) {
+          // A planned dinner is a trade the user has to agree to. A marker is
+          // not: it is not destroyed, it takes the day being vacated.
+          if (
+            !inTheWay.noMeal &&
+            !confirm(`Swap with ${occupantLabel(inTheWay)}?`)
+          ) {
+            return;
+          }
+          await swapInto(inTheWay);
+        } else {
+          try {
+            const res = await updateRecipe(id, { ...fields, day, weekStart });
+            onResult(res.recipes, res.gone ? ROW_GONE_MESSAGE : "Saved");
+          } catch (err) {
+            // Safety net for a race: the day was free when this modal last
+            // looked at the list and somebody planned it in the meantime.
+            // The save was refused whole, so nothing has been written yet.
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!slotChanged || !SLOT_TAKEN.test(msg)) throw err;
+            const raced = occupantAt?.(weekStart, day) ?? null;
+            if (!confirm(`Swap with ${occupantLabel(raced)}?`)) return;
+            await swapInto(raced);
+          }
+        }
       } else {
         const res = await addRecipe({
           weekStart,
