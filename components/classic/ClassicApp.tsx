@@ -67,6 +67,7 @@ export default function ClassicApp({ data, onSwitchUi }: Props) {
     setMealGroup,
     refresh,
     toast,
+    toastAction,
     showToast,
   } = data;
 
@@ -196,7 +197,7 @@ export default function ClassicApp({ data, onSwitchUi }: Props) {
         />
       ) : null}
 
-      <Toast message={toast} />
+      <Toast message={toast} action={toastAction ?? undefined} />
     </div>
   );
 }

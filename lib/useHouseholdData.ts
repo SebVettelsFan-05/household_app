@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ToastMessage } from "@/components/Toast";
+import type { ToastAction, ToastMessage } from "@/components/Toast";
 import {
   getMealGroup,
   listCategories,
@@ -65,9 +65,16 @@ export function useHouseholdData() {
     null
   );
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [toastAction, setToastAction] = useState<ToastAction | null>(null);
 
-  function showToast(text: string) {
+  /**
+   * The one toast slot for the whole shell. An `action` turns it into the
+   * button-carrying toast (and the longer hold that goes with it); the next
+   * plain toast replaces it, which is why nothing may render a second one.
+   */
+  function showToast(text: string, action?: ToastAction) {
     setToast({ id: Date.now(), text });
+    setToastAction(action ?? null);
   }
 
   // Reusable fetcher — used both at mount and by the header refresh button.
@@ -239,6 +246,7 @@ export function useHouseholdData() {
     loadAll,
     refresh,
     toast,
+    toastAction,
     showToast,
   };
 }

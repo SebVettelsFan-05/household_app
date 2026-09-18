@@ -476,6 +476,30 @@ export async function deleteRecipe(id: string) {
   return unwrap(await parse<RecipeMutateResponse>(res));
 }
 
+/** A (week, day) slot a recipe can sit in. */
+export type MoveTarget = { weekStart: string; day: number };
+
+export type MoveRecipeResponse = RecipeMutateResponse & {
+  /**
+   * The slot the moved row came from. Posting it straight back reverses the
+   * move, and a swap too: the old day now holds whatever the row traded with.
+   */
+  undo: { id: string; weekStart: string; day: number };
+};
+
+/**
+ * Moves a dinner (or a no-meal marker) to another day. An empty target is a
+ * plain move; a taken one swaps the two rows, cooks and all.
+ */
+export async function moveRecipe(id: string, target: MoveTarget) {
+  const res = await fetch("/api/recipes/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, weekStart: target.weekStart, day: target.day }),
+  });
+  return unwrap(await parse<MoveRecipeResponse>(res));
+}
+
 /* ----- favorites ----- */
 
 export async function listFavorites(): Promise<FavoriteRecipe[]> {

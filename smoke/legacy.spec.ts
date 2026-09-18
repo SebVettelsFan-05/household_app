@@ -1,4 +1,10 @@
-import { expect, test, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Browser,
+  type Dialog,
+  type Page,
+} from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -30,6 +36,7 @@ const ITEM_NAME = "Smokeyogurt";
 const INGREDIENT_NAME = "Coconut milk";
 
 let page: Page;
+let browserRef: Browser;
 
 /** Sunday anchor of the cooking week today falls in (mirrors lib/dates.ts). */
 function activeWeekStart(): string {
@@ -125,14 +132,18 @@ async function typePassword(p: Page, password: string) {
   await expect(button).toBeEnabled();
 }
 
-async function login() {
-  await page.goto("/");
-  if (page.url().includes("/login")) {
-    await typePassword(page, PASSWORD);
-    await page.getByRole("button", { name: /sign in|enter|continue/i }).click();
-    await page.waitForURL((url) => !url.pathname.startsWith("/login"));
+async function loginOn(p: Page) {
+  await p.goto("/");
+  if (p.url().includes("/login")) {
+    await typePassword(p, PASSWORD);
+    await p.getByRole("button", { name: /sign in|enter|continue/i }).click();
+    await p.waitForURL((url) => !url.pathname.startsWith("/login"));
   }
-  await expect(page.getByRole("heading", { name: "Household" })).toBeVisible();
+  await expect(p.getByRole("heading", { name: "Household" })).toBeVisible();
+}
+
+async function login() {
+  await loginOn(page);
 }
 
 /**
@@ -185,6 +196,7 @@ async function resetFixtures() {
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ browser }) => {
+  browserRef = browser;
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(RECEIPT_PATH, TINY_PNG);
   page = await browser.newPage({ viewport: DESKTOP });
@@ -759,4 +771,453 @@ test("the household settings modal is captured in both themes", async () => {
   await expect(page.locator(".modal-bg")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Switch to light mode" }).click();
+});
+
+/* ---------- moving dinners ---------- */
+
+type SmokeRecipe = {
+  id: string;
+  weekStart: string;
+  day: number;
+  assignedTo: string;
+  name: string;
+  description: string;
+  noMeal: boolean;
+};
+
+const MOVE_A = "Smoke Bun cha";
+const MOVE_B = "Smoke Congee";
+const NEXT_WEEK_START = (() => {
+  const [y, m, d] = WEEK_START.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 7)).toISOString().slice(0, 10);
+})();
+
+async function recipeRows(p: Page): Promise<SmokeRecipe[]> {
+  const body = await (await p.request.get("/api/recipes")).json();
+  return body.recipes ?? [];
+}
+
+/**
+ * Clears both visible weeks and plants exactly these rows. A row with no
+ * name is a no-meal marker. The days are fixed numbers, never "today", so a
+ * move test reads the same whichever day of the week it runs on.
+ */
+async function planWeeks(
+  p: Page,
+  rows: { weekStart?: string; day: number; name?: string; cook?: string }[]
+) {
+  for (const r of await recipeRows(p)) {
+    await p.request.delete(`/api/recipes/${encodeURIComponent(r.id)}`);
+  }
+  for (const row of rows) {
+    await p.request.post("/api/recipes", {
+      data: {
+        weekStart: row.weekStart ?? WEEK_START,
+        day: row.day,
+        assignedTo: row.cook ?? "",
+        name: row.name ?? "",
+        ingredients: [],
+        noMeal: row.name ? undefined : true,
+      },
+    });
+  }
+}
+
+/** "<week>/<day>" for a named dinner, straight from the API. */
+async function slotOf(p: Page, name: string): Promise<string> {
+  const row = (await recipeRows(p)).find((r) => r.name === name);
+  return row ? `${row.weekStart}/${row.day}` : "gone";
+}
+
+/** The same, for the week's no-meal marker. */
+async function markerSlot(p: Page): Promise<string> {
+  const row = (await recipeRows(p)).find((r) => r.noMeal);
+  return row ? `${row.weekStart}/${row.day}` : "gone";
+}
+
+/** The slot for one day of one week, whatever is (or is not) planned in it. */
+function slot(weekStart: string, day: number) {
+  return page.locator(
+    `.recipe-move-host[data-week="${weekStart}"][data-day="${day}"]`
+  );
+}
+
+test("a dinner moves to an empty day, and Undo puts it back", async () => {
+  await planWeeks(page, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  await slot(WEEK_START, 0)
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await expect(page.locator(".recipe-move-bar")).toContainText(
+    `Moving ${MOVE_A}`
+  );
+  await shot("14-move-pending");
+
+  await slot(WEEK_START, 3)
+    .getByRole("button", { name: /^Move to / })
+    .click();
+  await expect(slot(WEEK_START, 3).locator(".recipe-name")).toHaveText(MOVE_A);
+  await expect(page.locator(".recipe-move-bar")).toHaveCount(0);
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/3`);
+
+  await page.locator(".toast.toast-action .toast-action-btn").click();
+  await expect(slot(WEEK_START, 0).locator(".recipe-name")).toHaveText(MOVE_A);
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/0`);
+});
+
+test("dropping a dinner on another day swaps them, cooks and all", async () => {
+  await planWeeks(page, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 2, name: MOVE_B, cook: "Minh" },
+  ]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  await slot(WEEK_START, 0)
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await slot(WEEK_START, 2)
+    .getByRole("button", { name: /^Move to / })
+    .click();
+
+  // The cook travels with the dinner.
+  await expect(slot(WEEK_START, 2).locator(".recipe-name")).toHaveText(MOVE_A);
+  await expect(slot(WEEK_START, 2).locator(".recipe-cook")).toHaveText("Eli");
+  await expect(slot(WEEK_START, 0).locator(".recipe-name")).toHaveText(MOVE_B);
+  await expect(slot(WEEK_START, 0).locator(".recipe-cook")).toHaveText("Minh");
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/2`);
+  await expect.poll(() => slotOf(page, MOVE_B)).toBe(`${WEEK_START}/0`);
+});
+
+test("a dinner dropped on a no-meal day sends the marker to the day it left", async () => {
+  await planWeeks(page, [{ day: 0, name: MOVE_A, cook: "Eli" }, { day: 4 }]);
+  await page.reload();
+  await gotoTab("Recipes");
+  await expect(slot(WEEK_START, 4).locator(".no-meal-card")).toBeVisible();
+
+  await slot(WEEK_START, 0)
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await slot(WEEK_START, 4)
+    .getByRole("button", { name: /^Move to / })
+    .click();
+
+  await expect(slot(WEEK_START, 4).locator(".recipe-name")).toHaveText(MOVE_A);
+  await expect(slot(WEEK_START, 0).locator(".no-meal-card")).toBeVisible();
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/4`);
+  await expect.poll(() => markerSlot(page)).toBe(`${WEEK_START}/0`);
+});
+
+test("a dinner moves into next week, and Escape drops a pending move", async () => {
+  await planWeeks(page, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  // Escape first: the move is armed and then thrown away, and nothing has
+  // been written when it is.
+  await slot(WEEK_START, 0)
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".recipe-move-bar")).toHaveCount(0);
+  await expect(page.locator(".recipe-move-target")).toHaveCount(0);
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/0`);
+
+  // Both weeks are on screen here, so next week is one tap away.
+  await slot(WEEK_START, 0)
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await slot(NEXT_WEEK_START, 5)
+    .getByRole("button", { name: /^Move to / })
+    .click();
+  await expect(slot(NEXT_WEEK_START, 5).locator(".recipe-name")).toHaveText(
+    MOVE_A
+  );
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${NEXT_WEEK_START}/5`);
+});
+
+test("a mouse drag swaps two dinners", async () => {
+  await planWeeks(page, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 2, name: MOVE_B, cook: "Minh" },
+  ]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  const handle = slot(WEEK_START, 0).getByRole("button", {
+    name: `Move ${MOVE_A}`,
+  });
+  const from = await handle.boundingBox();
+  if (!from) throw new Error("no grab handle");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  // Past the 6px the mouse sensor waits for: this is a drag, not a tap.
+  await page.mouse.move(
+    from.x + from.width / 2 + 12,
+    from.y + from.height / 2 + 12,
+    { steps: 4 }
+  );
+  await expect(page.locator(".recipe-move-ghost")).toHaveText(MOVE_A);
+
+  const target = await slot(WEEK_START, 2).boundingBox();
+  if (!target) throw new Error("no target day");
+  await page.mouse.move(
+    target.x + target.width / 2,
+    target.y + target.height / 2,
+    { steps: 8 }
+  );
+  await expect(slot(WEEK_START, 2)).toHaveClass(/is-over/);
+  // Viewport only, deliberately: a full-page shot resizes the page, and a
+  // resize is exactly what dnd-kit cancels a drag on.
+  await page.screenshot({ path: path.join(OUT, "14b-dragging-1920.png") });
+  await page.mouse.up();
+
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/2`);
+  await expect.poll(() => slotOf(page, MOVE_B)).toBe(`${WEEK_START}/0`);
+});
+
+test("the arrow keys walk a dinner across the grid and Space drops it", async () => {
+  await planWeeks(page, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await slot(WEEK_START, 0)
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .focus();
+  await page.keyboard.press("Space");
+  await expect(page.locator(".recipe-move-ghost")).toHaveText(MOVE_A);
+  // dnd-kit measures the days it can land on a frame or two after the drag
+  // starts, and an arrow key pressed before that has nothing to step to.
+  await page.waitForTimeout(200);
+  // The classic grid is two columns wide, so right is Monday and down is
+  // Tuesday, the card under Sunday.
+  await page.keyboard.press("ArrowRight");
+  await expect(slot(WEEK_START, 1)).toHaveClass(/is-over/);
+  await page.keyboard.press("ArrowDown");
+  await expect(slot(WEEK_START, 3)).toHaveClass(/is-over/);
+  await page.keyboard.press("Space");
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/3`);
+});
+
+test("the editor offers a swap when the day it is moved to is taken", async () => {
+  await planWeeks(page, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 2, name: MOVE_B, cook: "Minh" },
+  ]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  await slot(WEEK_START, 0).locator(".recipe-card").click();
+  await expect(page.getByRole("heading", { name: "Edit recipe" })).toBeVisible();
+  // A field edit rides along with the day change: it must survive the swap.
+  await page.locator("#r-desc").fill("Swapped in the editor");
+  await page.locator("#r-day").selectOption("2");
+
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.accept();
+  });
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  expect(asked).toBe(`Swap with "${MOVE_B}"?`);
+
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/2`);
+  await expect.poll(() => slotOf(page, MOVE_B)).toBe(`${WEEK_START}/0`);
+  await expect
+    .poll(async () =>
+      (await recipeRows(page)).find((r) => r.name === MOVE_A)?.description
+    )
+    .toBe("Swapped in the editor");
+});
+
+test("the editor moves a dinner onto a marker day rather than deleting it", async () => {
+  await planWeeks(page, [{ day: 0, name: MOVE_A, cook: "Eli" }, { day: 1 }]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  // Nothing may be asked: a marker is not a dinner the user has to agree to
+  // trade with, and it is not destroyed either — it takes the vacated day.
+  let asked = "";
+  const onDialog = (d: Dialog) => {
+    asked = d.message();
+    void d.accept();
+  };
+  page.on("dialog", onDialog);
+
+  await slot(WEEK_START, 0).locator(".recipe-card").click();
+  await expect(page.getByRole("heading", { name: "Edit recipe" })).toBeVisible();
+  // A field edit rides along with the day change: it must survive the move.
+  await page.locator("#r-desc").fill("Moved onto the marker");
+  await page.locator("#r-day").selectOption("1");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.locator(".modal-bg")).toHaveCount(0);
+  page.off("dialog", onDialog);
+  expect(asked).toBe("");
+
+  await expect(slot(WEEK_START, 1).locator(".recipe-name")).toHaveText(MOVE_A);
+  await expect(slot(WEEK_START, 0).locator(".no-meal-card")).toBeVisible();
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/1`);
+  await expect.poll(() => markerSlot(page)).toBe(`${WEEK_START}/0`);
+  await expect
+    .poll(async () =>
+      (await recipeRows(page)).find((r) => r.name === MOVE_A)?.description
+    )
+    .toBe("Moved onto the marker");
+});
+
+test("the moving hint floats over the grid instead of pushing it down", async () => {
+  await planWeeks(page, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  const row = slot(WEEK_START, 3);
+  const rowTop = () => row.evaluate((el) => el.getBoundingClientRect().top);
+  const before = await rowTop();
+
+  await slot(WEEK_START, 0)
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await expect(page.locator(".recipe-move-bar")).toBeVisible();
+  // The day the pointer was already aimed at has not moved under it.
+  expect(await rowTop()).toBe(before);
+
+  // An overlay covers whatever it is over, so the grid is scrolled past it;
+  // what may never be covered is the first card, which is the one under the
+  // hand that just picked a dinner up.
+  const clear = await page.evaluate(() => {
+    const bar = document
+      .querySelector(".recipe-move-bar")!
+      .getBoundingClientRect();
+    const first = document
+      .querySelector(".recipe-move-host")!
+      .getBoundingClientRect();
+    return first.bottom <= bar.top || first.top >= bar.bottom;
+  });
+  expect(clear).toBe(true);
+
+  await page
+    .locator(".recipe-move-bar")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  expect(await rowTop()).toBe(before);
+});
+
+test("a move and the action after it share the one toast", async () => {
+  await planWeeks(page, [{ day: 0, name: MOVE_A, cook: "Eli" }]);
+  await page.reload();
+  await gotoTab("Recipes");
+
+  await slot(WEEK_START, 0)
+    .getByRole("button", { name: `Move ${MOVE_A}` })
+    .click();
+  await slot(WEEK_START, 3)
+    .getByRole("button", { name: /^Move to / })
+    .click();
+  await expect(page.locator(".toast.toast-action")).toContainText("Undo");
+  expect(await page.locator(".toast").count()).toBe(1);
+
+  // The next plain toast takes that same slot over; it never stacks on it.
+  await slot(WEEK_START, 5)
+    .getByRole("button", { name: "No meal" })
+    .click();
+  await expect(page.locator(".toast")).toContainText("Marked as no shared meal");
+  expect(await page.locator(".toast").count()).toBe(1);
+  await expect(page.locator(".toast-action-btn")).toHaveCount(0);
+});
+
+test("on a phone a swipe from a grab handle scrolls, and a hold drags", async () => {
+  await planWeeks(page, [
+    { day: 0, name: MOVE_A, cook: "Eli" },
+    { day: 2, name: MOVE_B, cook: "Minh" },
+    { day: 4, name: "Smoke Filler", cook: "Arthur" },
+    { day: 5, name: "Smoke Filler Two", cook: "Arthur" },
+  ]);
+  const context = await browserRef.newContext({
+    viewport: MOBILE,
+    hasTouch: true,
+  });
+  await context.addInitScript(() => {
+    try {
+      window.localStorage.setItem("hh_ui", "classic");
+    } catch {
+      /* ignore */
+    }
+  });
+  const phone = await context.newPage();
+  await loginOn(phone);
+  await phone.locator(".tab-bar button").filter({ hasText: "Recipes" }).click();
+  const cdp = await context.newCDPSession(phone);
+
+  const phoneSlot = (day: number) =>
+    phone.locator(
+      `.recipe-move-host[data-week="${WEEK_START}"][data-day="${day}"]`
+    );
+  const handle = phoneSlot(0).getByRole("button", { name: `Move ${MOVE_A}` });
+  const box = await handle.boundingBox();
+  if (!box) throw new Error("no grab handle");
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+
+  // A flick up from the handle is a scroll, not a drag.
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y }],
+  });
+  for (const dy of [12, 40, 90, 150]) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: y - dy }],
+    });
+  }
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await expect(phone.locator(".recipe-move-ghost")).toHaveCount(0);
+  await expect(phone.locator(".recipe-move-bar")).toHaveCount(0);
+  expect(await phone.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+  // Holding still for the delay, and only then moving, is a drag.
+  await phone.evaluate(() => window.scrollTo(0, 0));
+  await phone.waitForTimeout(200);
+  const held = await handle.boundingBox();
+  if (!held) throw new Error("no grab handle");
+  const hx = held.x + held.width / 2;
+  const hy = held.y + held.height / 2;
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: hx, y: hy }],
+  });
+  await phone.waitForTimeout(320);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ x: hx, y: hy + 4 }],
+  });
+  await expect(phone.locator(".recipe-move-ghost")).toHaveText(MOVE_A);
+  const target = await phoneSlot(2).boundingBox();
+  if (!target) throw new Error("no target day");
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [
+      { x: target.x + target.width / 2, y: target.y + target.height / 2 },
+    ],
+  });
+  await expect(phoneSlot(2)).toHaveClass(/is-over/);
+  await phone.screenshot({ path: path.join(OUT, "14c-dragging-390.png") });
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+
+  await expect.poll(() => slotOf(page, MOVE_A)).toBe(`${WEEK_START}/2`);
+  await expect.poll(() => slotOf(page, MOVE_B)).toBe(`${WEEK_START}/0`);
+  await context.close();
+
+  // Leave the week as this suite found it.
+  await planWeeks(page, []);
+  await page.reload();
 });

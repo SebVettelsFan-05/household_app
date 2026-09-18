@@ -1,14 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { DndContext, DragOverlay, useDroppable } from "@dnd-kit/core";
 import AddRecipeToGroceryModal from "@/components/AddRecipeToGroceryModal";
 import FavoritesModal from "@/components/FavoritesModal";
+import MoveHandle from "@/components/MoveHandle";
 import RecipeArchiveModal from "@/components/RecipeArchiveModal";
-import RecipeCard from "@/components/RecipeCard";
+import RecipeCard, { type Props as RecipeCardProps } from "@/components/RecipeCard";
 import RecipeModal, { type RecipeFields } from "@/components/RecipeModal";
+import type { ToastAction } from "@/components/Toast";
 import { COOKING_DAYS } from "@/lib/dates";
 import { isFavoriteMatch } from "@/lib/favoriteMatch";
 import { useRecipeWeeks } from "@/lib/useRecipeWeeks";
+import {
+  dishLabel,
+  moveCollisionDetection,
+  slotDropId,
+  useMoveSensors,
+  useRecipeMoves,
+  type MoveTarget,
+} from "@/lib/useRecipeMoves";
 import type {
   CategoryDef,
   FavoriteRecipe,
@@ -28,7 +39,8 @@ type Props = {
   loadError: string | null;
   onRecipesChange: (next: Recipe[]) => void;
   onGroceryChange: (next: GroceryItem[]) => void;
-  onToast: (msg: string) => void;
+  /** The shell's one toast slot; an action turns it into the Undo toast. */
+  onToast: (msg: string, action?: ToastAction) => void;
 };
 
 type EditingState =
@@ -53,6 +65,45 @@ function blankFields(
     // New recipes assume the whole meal group is eating.
     portions,
   };
+}
+
+/** What a day is to a move in progress: nothing, the card being moved, or a landing place. */
+type MoveState = "idle" | "moving" | "target";
+
+/**
+ * A card that can also be dropped on. The droppable hook has to live in its
+ * own component: there is one per day, and hooks cannot be called in a loop.
+ */
+function SlotCard({
+  state,
+  onDrop,
+  handle,
+  ...card
+}: RecipeCardProps & {
+  state: MoveState;
+  onDrop: () => void;
+  handle: ReactNode;
+}) {
+  // Registered whether or not a move is in progress: dnd-kit measures the
+  // droppables when the drag starts, and one that was disabled at that
+  // moment never gets a rect, so nothing could be dropped on it.
+  const { setNodeRef, isOver } = useDroppable({
+    id: slotDropId(card.weekStart, card.day),
+    data: { weekStart: card.weekStart, day: card.day },
+  });
+  return (
+    <RecipeCard
+      {...card}
+      move={{
+        dropRef: setNodeRef,
+        isOver,
+        isMoving: state === "moving",
+        isTarget: state === "target",
+        onDrop,
+        handle,
+      }}
+    />
+  );
 }
 
 function recipeToFields(r: Recipe): RecipeFields {
@@ -108,6 +159,17 @@ export default function RecipesView({
     weekCooks,
   } = useRecipeWeeks({ recipes, onRecipesChange, onToast });
 
+  const moves = useRecipeMoves({ recipes, onRecipesChange, onToast });
+  const sensors = useMoveSensors();
+
+  /** How a day reads while a card is in the air. */
+  function moveState(weekStart: string, day: number): MoveState {
+    if (!moves.moving) return "idle";
+    return moves.moving.weekStart === weekStart && moves.moving.day === day
+      ? "moving"
+      : "target";
+  }
+
   async function openFavorites() {
     setFavoritesOpen(true);
     await ensureFavorites();
@@ -136,7 +198,17 @@ export default function RecipesView({
   }
 
   return (
-    <>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={moveCollisionDetection}
+      onDragStart={(e) => moves.startDrag(String(e.active.id))}
+      onDragCancel={moves.cancel}
+      onDragEnd={(e) => {
+        const target = e.over?.data.current as MoveTarget | undefined;
+        if (target) moves.moveTo(String(e.active.id), target);
+        else moves.cancel();
+      }}
+    >
       <div className="recipes-toolbar">
         <button type="button" className="btn-secondary" onClick={openFavorites}>
           ★ Favorites
@@ -149,6 +221,19 @@ export default function RecipesView({
           ⌛ Archive
         </button>
       </div>
+
+      {moves.moving && !moves.dragging ? (
+        <div className="recipe-move-bar">
+          <span>Moving {dishLabel(moves.moving)}, tap a day</span>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={moves.cancel}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="loading">
@@ -177,8 +262,24 @@ export default function RecipesView({
                 {COOKING_DAYS.map((d) => {
                   const recipe = recipesByWeek.get(weekStart)?.get(d) ?? null;
                   return (
-                    <RecipeCard
+                    <SlotCard
                       key={`${weekStart}-${d}`}
+                      state={moveState(weekStart, d)}
+                      onDrop={() => moves.dropOn({ weekStart, day: d })}
+                      handle={
+                        recipe ? (
+                          <MoveHandle
+                            id={recipe.id}
+                            slot={{ weekStart, day: d }}
+                            label={recipe.noMeal ? "Move" : `Move ${recipe.name}`}
+                            className="recipe-move-handle"
+                            disabled={moves.busy}
+                            onPick={() => moves.pickUp(recipe.id)}
+                          >
+                            <span aria-hidden="true">⠿</span>
+                          </MoveHandle>
+                        ) : null
+                      }
                       weekStart={weekStart}
                       day={d}
                       recipe={recipe}
@@ -264,6 +365,9 @@ export default function RecipesView({
           }}
           onError={(msg) => onToast("Error: " + msg)}
           onOpenAddToGrocery={setAddingToGrocery}
+          occupantAt={(weekStart, day) =>
+            recipesByWeek.get(weekStart)?.get(day) ?? null
+          }
         />
       ) : null}
 
@@ -303,6 +407,12 @@ export default function RecipesView({
           onError={(msg) => onToast("Error: " + msg)}
         />
       ) : null}
-    </>
+
+      <DragOverlay dropAnimation={null}>
+        {moves.moving ? (
+          <div className="recipe-move-ghost">{dishLabel(moves.moving)}</div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }
