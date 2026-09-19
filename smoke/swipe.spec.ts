@@ -191,7 +191,18 @@ async function bringIntoView(p: Page, row: Locator) {
 
 /** Where a swipe on this row starts: left of centre, clear of the button. */
 async function grabPoint(row: Locator): Promise<{ x: number; y: number }> {
-  const box = await row.boundingBox();
+  // The list is still settling for a moment after it first paints (web fonts
+  // swap in, the rest of the shell's data lands), and a point measured before
+  // a shift presses on whatever row has slid under it. Wait until the row has
+  // stopped moving.
+  await row.page().evaluate(() => document.fonts.ready.then(() => undefined));
+  let box = await row.boundingBox();
+  for (let still = 0, tries = 0; still < 3 && tries < 40; tries += 1) {
+    await row.page().waitForTimeout(80);
+    const next = await row.boundingBox();
+    still = box && next && box.x === next.x && box.y === next.y ? still + 1 : 0;
+    box = next;
+  }
   if (!box) throw new Error("row has no box");
   return { x: box.x + Math.min(120, box.width / 3), y: box.y + box.height / 2 };
 }
