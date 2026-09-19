@@ -253,6 +253,19 @@ export function IconSearch(p: IconProps) {
   );
 }
 
+/** The bin behind a swiped row. Shared with the classic look. */
+export function IconTrash(p: IconProps) {
+  return svg(
+    <>
+      <path d="M4 6.5h16" />
+      <path d="M9.5 6.5V4h5v2.5" />
+      <path d="M6.5 6.5V19a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V6.5" />
+      <path d="M10 10.5v6M14 10.5v6" />
+    </>,
+    p
+  );
+}
+
 /** Four arrows from a centre: the grab handle that moves a dinner. */
 export function IconMove(p: IconProps) {
   return svg(

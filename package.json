@@ -9,7 +9,7 @@
     "backup:prod": "node scripts/local/backup-prod.mjs",
     "build": "next build",
     "start": "next start",
-    "test": "tsx --test lib/errors.test.ts lib/repo.test.ts lib/format.test.ts lib/guessCategory.test.ts lib/imageResize.test.ts lib/monthlyBills.test.ts lib/normalize.test.ts lib/parseIngredient.test.ts lib/recipeMoves.test.ts lib/recipeScraper.test.ts lib/settingsShape.test.ts lib/settlement.test.ts lib/settlement.invariants.test.ts lib/allocationEditor.test.ts",
+    "test": "tsx --test lib/errors.test.ts lib/repo.test.ts lib/format.test.ts lib/guessCategory.test.ts lib/imageResize.test.ts lib/monthlyBills.test.ts lib/normalize.test.ts lib/parseIngredient.test.ts lib/recipeMoves.test.ts lib/recipeScraper.test.ts lib/settingsShape.test.ts lib/settlement.test.ts lib/swipe.test.ts lib/settlement.invariants.test.ts lib/allocationEditor.test.ts",
     "lint": "next lint",
     "smoke": "playwright test",
     "smoke:legacy": "playwright test smoke/legacy.spec.ts",

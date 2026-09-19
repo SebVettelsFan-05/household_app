@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import AddGroceryForm from "@/components/AddGroceryForm";
 import EditGroceryModal from "@/components/EditGroceryModal";
 import FreshSheet from "@/components/fresh/FreshSheet";
+import SwipeRow from "@/components/SwipeRow";
 import { Avatar } from "@/components/fresh/people";
 import { IconCheck, IconPlus } from "@/components/fresh/icons";
+import { useGroceryDelete } from "@/lib/rowDelete";
 import {
   moveDoneGroceryToInventory,
   ROW_GONE_MESSAGE,
@@ -46,6 +48,14 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
+  // At most one row shows its delete button at a time.
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+
+  const removeRow = useGroceryDelete(
+    data.grocery,
+    data.setGrocery,
+    data.showToast
+  );
 
   const editing = editingId
     ? (data.grocery.find((g) => g.id === editingId) ?? null)
@@ -171,45 +181,54 @@ export default function FreshGrocery({ data, onManageCategories }: Props) {
     const have = conflicts.get(item.id);
     const haveQty = have === undefined ? null : fmtQty(have);
     return (
-      <div className={`fresh-row${item.done ? " done" : ""}`} key={item.id}>
-        <button
-          type="button"
-          className={`fresh-check${item.done ? " checked" : ""}`}
-          onClick={() => toggle(item)}
-          disabled={busy}
-          aria-label={item.done ? "Mark as not done" : "Mark as done"}
-          aria-pressed={item.done}
-        >
-          {item.done ? <IconCheck size={16} /> : null}
-        </button>
-        <button
-          type="button"
-          className="fresh-row-main"
-          onClick={() => setEditingId(item.id)}
-        >
-          <span className="fresh-row-title">{item.name}</span>
-          <span className="fresh-row-meta">
-            {item.store ? (
-              <span className="fresh-row-store">{item.store}</span>
-            ) : null}
-            <span className="fresh-person">
-              <Avatar name={item.addedBy} size={18} />
-              <span className="fresh-person-name">{item.addedBy}</span>
-            </span>
-            {haveQty ? (
-              <span className="fresh-row-warn">
-                have {haveQty.num}
-                {haveQty.unit}
-                <span className="sr-only"> in the inventory already</span>
+      <SwipeRow
+        key={item.id}
+        id={item.id}
+        openId={swipedId}
+        onOpenChange={setSwipedId}
+        label={`Delete ${item.name}`}
+        onDelete={() => void removeRow(item)}
+      >
+        <div className={`fresh-row${item.done ? " done" : ""}`}>
+          <button
+            type="button"
+            className={`fresh-check${item.done ? " checked" : ""}`}
+            onClick={() => toggle(item)}
+            disabled={busy}
+            aria-label={item.done ? "Mark as not done" : "Mark as done"}
+            aria-pressed={item.done}
+          >
+            {item.done ? <IconCheck size={16} /> : null}
+          </button>
+          <button
+            type="button"
+            className="fresh-row-main"
+            onClick={() => setEditingId(item.id)}
+          >
+            <span className="fresh-row-title">{item.name}</span>
+            <span className="fresh-row-meta">
+              {item.store ? (
+                <span className="fresh-row-store">{item.store}</span>
+              ) : null}
+              <span className="fresh-person">
+                <Avatar name={item.addedBy} size={18} />
+                <span className="fresh-person-name">{item.addedBy}</span>
               </span>
-            ) : null}
+              {haveQty ? (
+                <span className="fresh-row-warn">
+                  have {haveQty.num}
+                  {haveQty.unit}
+                  <span className="sr-only"> in the inventory already</span>
+                </span>
+              ) : null}
+            </span>
+          </button>
+          <span className="fresh-row-qty fresh-num">
+            {qty.num}
+            {qty.unit}
           </span>
-        </button>
-        <span className="fresh-row-qty fresh-num">
-          {qty.num}
-          {qty.unit}
-        </span>
-      </div>
+        </div>
+      </SwipeRow>
     );
   }
 
